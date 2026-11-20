@@ -10,4 +10,4 @@
 
 ## UI 任务入口
 
-新建、修改或检查 Figma UI，或搭建功能演示原型时，先阅读 [ui-design/SKILL.md](ui-design/SKILL.md)，按技能流程加载设计规范并执行。
+制作布局预览、新建或修改 Figma UI、检查设计稿或搭建交互原型时，使用 `ui-design` 技能；入口为 [.agents/skills/ui-design/SKILL.md](.agents/skills/ui-design/SKILL.md)。
