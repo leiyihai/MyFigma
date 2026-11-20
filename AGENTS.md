@@ -8,6 +8,10 @@
 - 修改限于任务范围；回退限于本次自动化修改，避免撤销用户同期操作。
 - 安装或更新依赖、插件，变更 MCP 配置前先征得用户同意。
 
+## 规范维护
+
+维护本仓库的技能与规范时，优先修订现有条款、删除重复或失效内容；仅当独立分支确需按需加载时新增参考文件，不为补充规则机械拆文件或扩增问卷。
+
 ## UI 任务入口
 
-制作布局预览、新建或修改 Figma UI、检查设计稿或搭建交互原型时，使用 `ui-design` 技能；入口为 [.agents/skills/ui-design/SKILL.md](.agents/skills/ui-design/SKILL.md)。
+对齐界面方案、制作 HTML 原型、新建或修改 Figma UI、检查设计稿或搭建交互原型时，使用 `ui-design` 技能；入口为 [.agents/skills/ui-design/SKILL.md](.agents/skills/ui-design/SKILL.md)。
