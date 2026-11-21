@@ -11,6 +11,7 @@ const MAX_LAYOUT_DEPTH: u32 = 32;
 const MAX_LAYOUT_FILES: usize = 20_000;
 const MAX_LAYOUT_USAGES: usize = 500_000;
 const MAX_WARNINGS: usize = 50;
+const MAX_WARNING_CHARS: usize = 2000;
 
 /// Image-bearing property names used by the three acceptance projects. Only
 /// these are read as resource references; unknown properties never enter the
@@ -624,8 +625,29 @@ pub fn scan(
             .map(|(reference, count)| json!({"reference":reference,"count":count}))
             .collect();
     }
-    result
-        .warnings
-        .extend(warning_candidates.into_iter().take(MAX_WARNINGS));
+    let total_warnings = warning_candidates.len();
+    let mut kept: Vec<String> = warning_candidates
+        .into_iter()
+        .take(MAX_WARNINGS)
+        .map(|warning| {
+            if warning.chars().count() <= MAX_WARNING_CHARS {
+                warning
+            } else {
+                let mut clipped: String = warning.chars().take(MAX_WARNING_CHARS - 12).collect();
+                clipped.push_str("…（已截断）");
+                clipped
+            }
+        })
+        .collect();
+    // The plugin protocol rejects overlong warnings. Keep the payload bounded
+    // without silently hiding the fact that more warnings exist.
+    if total_warnings > MAX_WARNINGS {
+        kept.push(format!(
+            "另有 {} 条布局警告未显示（已达到 {} 条上限）",
+            total_warnings - MAX_WARNINGS,
+            MAX_WARNINGS
+        ));
+    }
+    result.warnings.extend(kept);
     result
 }

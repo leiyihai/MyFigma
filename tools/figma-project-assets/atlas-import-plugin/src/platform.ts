@@ -471,11 +471,12 @@ function parseCompareBinding(raw: string): CompareBinding | undefined {
       ? {schemaVersion:1,projectId:value.projectId} : undefined;
   } catch { return undefined; }
 }
-function managedComparePage(root: DocumentNode, project: PublicProject): PageNode | undefined {
+async function managedComparePage(root: DocumentNode, project: PublicProject): Promise<PageNode | undefined> {
   // A page is ours only through its binding; display names never grant ownership.
   let corrupt: string | undefined;
   for(const node of root.children) {
     if(node.type !== 'PAGE') continue;
+    await loadPage(node);
     const raw = node.getPluginData(compareKey);
     if(!raw) continue;
     const binding = parseCompareBinding(raw);
@@ -495,10 +496,11 @@ function createComparePage(root: DocumentNode, project: PublicProject, api: Pick
   page.setPluginData(compareKey, JSON.stringify({schemaVersion:1,projectId:project.id}));
   return page;
 }
-function resourcePages(root: DocumentNode, project: PublicProject): PageNode[] {
+async function resourcePages(root: DocumentNode, project: PublicProject): Promise<PageNode[]> {
   const pages: PageNode[] = [];
   for(const node of root.children) {
     if(node.type !== 'PAGE') continue;
+    await loadPage(node);
     const raw = node.getPluginData(bindingKey);
     if(!raw) continue;
     try {
@@ -511,7 +513,7 @@ function resourcePages(root: DocumentNode, project: PublicProject): PageNode[] {
 async function projectComponents(root: DocumentNode, project: PublicProject): Promise<Existing[]> {
   // Sources live on main components; the comparison page itself is never a data source.
   const result = new Map<string, Existing>();
-  for(const page of resourcePages(root, project)) {
+  for(const page of await resourcePages(root, project)) {
     await loadPage(page);
     const parsed = existingComponents(page, project);
     if(parsed.corrupt.length) throw new Error('存在来源记录损坏的组件，已停止生成对照页；请修复或移除后重试：' + parsed.corrupt.join('、'));
@@ -615,7 +617,7 @@ function syncComparePage(page: PageNode, items: Map<string, CompareItem>, api: P
 export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'createPage'|'createFrame'|'createComponent'|'createRectangle'|'createImage'|'base64Decode'>): Platform {
   let busy = false;
   return {
-    async validate(project) {return validate(api.currentPage,project);},
+    async validate(project) {const page = api.currentPage; await loadPage(page); return validate(page,project);},
     async preview(scan) {
       if(busy) throw new Error('导入任务正在执行');
       const page = api.currentPage;
@@ -748,7 +750,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
       try {
         const items = compareItems(await projectComponents(api.root, project));
         if(!items.size) throw new Error('当前文件还没有该项目的主组件，请先导入主组件');
-        let page = managedComparePage(api.root, project);
+        let page = await managedComparePage(api.root, project);
         if(!page) { page = createComparePage(api.root, project, api); createdPage = page; }
         await loadPage(page);
         const counts = syncComparePage(page, items, api, created);
