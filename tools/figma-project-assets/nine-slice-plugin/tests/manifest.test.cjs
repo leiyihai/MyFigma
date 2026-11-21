@@ -10,6 +10,6 @@ test('canonical manifest points at built main and UI files', () => {
     assert.ok(target.startsWith(path.resolve('.') + path.sep), field + ' must stay inside the plugin');
     assert.ok(existsSync(target), field + ' target does not exist; run npm run build first: ' + manifest[field]);
   }
-  assert.equal(manifest.main, 'dist/code.js');
-  assert.equal(manifest.ui, 'dist/ui.html');
+  assert.equal(manifest.main, 'dist/code-v3.js');
+  assert.equal(manifest.ui, 'dist/ui-v3.html');
 });
