@@ -89,7 +89,7 @@ cargo build --release --locked
 
 对象式 `frames`，整数像素坐标；`sourceSize` 和非负偏移恢复透明留白；也支持 `offset:{x,y}`（有 `spriteSourceSize` 时优先使用它）。无裁切元数据的普通帧默认原大小、零偏移；显式 `trimmed:true` 必须同时提供原尺寸与偏移。PNG 不指定时使用 JSON 同名 PNG。
 
-扫描递归遍历全部子目录并导入全部帧，不按布局引用过滤。扫描范围内未被任何图集作为源图引用的 PNG 视为独立图片：`kind:"standalone"`、`crop` 为整图、`offset` 为零，`relativePath` 含扩展名。与 JSON 同名或由 `meta.image` 指向的图集 PNG 不会被当成独立图片；即使该 JSON 解析失败也按同名规则排除，避免把整张图集二次导入。
+扫描递归遍历全部子目录并导入全部帧，不按布局引用过滤。扫描范围内未被任何图集作为源图引用的 PNG 视为独立图片：`kind:"standalone"`、`crop` 为整图、`offset` 为零，`relativePath` 含扩展名。由图集 `meta.image` 指向的 PNG 不会被当成独立图片；JSON 解析失败或不是对象式 frames 时，其同名 PNG 也按图集源图排除，并报告该 JSON 错误。有效图集若 `meta.image` 指向别的文件，同目录同名 PNG 仍可作为独立图片导入。
 
 规模上限仅用于防止失控：单次最多 20 000 项资源、恢复像素总量 10 亿、扫描条目 200 000、单图 4096×4096；JSON 最大 16 MiB、PNG 最大 64 MiB。触达上限时返回已恢复内容并给出明确错误、`truncated:true`、`complete:false`，不静默截断。输出是**各散图独立 PNG 的 base64**，不是整张图集。
 

@@ -10,8 +10,6 @@
 - [共用九宫格核心](packages/nine-slice/README.md)：构建时复用，不运行时调用另一个插件。
 
 在 `local-helper` 执行 `cargo run --release --locked`，或直接运行 `target\release\figma-assets-helper.exe` 启动助手；它驻留通知区域（托盘），右键菜单可查看运行状态、打开数据目录或退出，退出后端口关闭。首次按该目录 README 从本机令牌文件手动配对，勾选记住后下次自动连接。不把令牌贴到聊天或 Issue。
-elease
-igma-assets-helper.exe` 启动助手；它驻留通知区域（托盘），右键菜单可查看运行状态、打开数据目录或退出，退出后端口关闭。首次按该目录 README 从本机令牌文件手动配对，勾选记住后下次自动连接。不把令牌贴到聊天或 Issue。
 
 在两个插件目录分别执行 `npm ci` 和 `npm run build`。两个插件都导入各自根目录的 `manifest.json`；九宫格清单指向 `dist/` 下的构建产物。客户端要求有效开发插件身份时需自行注册。本次已在真实客户端验证两个开发插件加载及 localhost 配对连接。
 
