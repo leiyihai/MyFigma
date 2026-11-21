@@ -247,6 +247,30 @@ function ensureCategoryFrame(page: PageNode, api: Pick<PluginAPI,'createFrame'>,
   created.push(frame);
   return frame;
 }
+type CategoryLayout = {
+  frame: FrameNode; mode: FrameNode['layoutMode']; wrap: FrameNode['layoutWrap'];
+  primary: FrameNode['primaryAxisSizingMode']; counter: FrameNode['counterAxisSizingMode'];
+};
+function pauseCategoryLayouts(frames: Iterable<FrameNode>): CategoryLayout[] {
+  const snapshots: CategoryLayout[] = [];
+  for(const frame of frames) {
+    if(frame.layoutMode === 'NONE') continue;
+    snapshots.push({frame,mode:frame.layoutMode,wrap:frame.layoutWrap,
+      primary:frame.primaryAxisSizingMode,counter:frame.counterAxisSizingMode});
+    try { frame.layoutMode = 'NONE'; } catch { /* keep importing even if a frame rejects layout changes */ }
+  }
+  return snapshots;
+}
+function restoreCategoryLayouts(snapshots: CategoryLayout[]): void {
+  for(const snapshot of snapshots) {
+    try {
+      snapshot.frame.layoutMode = snapshot.mode;
+      if(snapshot.mode === 'HORIZONTAL') snapshot.frame.layoutWrap = snapshot.wrap;
+      snapshot.frame.primaryAxisSizingMode = snapshot.primary;
+      snapshot.frame.counterAxisSizingMode = snapshot.counter;
+    } catch { /* best effort; never hide the import result for a layout restore */ }
+  }
+}
 function plannedCategory(item: Candidate): CategoryName {
   return classify({frameName:item.source.frameName,width:item.resource.width,height:item.resource.height,
     nineSlice:item.planned.shape === 'slices'});
@@ -757,6 +781,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
       const oldName = page.name, oldBinding = page.getPluginData(bindingKey);
       const createdFrames: FrameNode[] = [];
       let writtenName = '', writtenBinding = '';
+      let categoryLayouts: CategoryLayout[] = [];
       const created: ComponentNode[] = [];
       let instances: InstanceSize[] = [];
       let updatedIds = new Set<string>();
@@ -788,6 +813,13 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         report.unchanged = plan.unchanged; report.blocked = plan.blocked;
         report.removalSuppressed = plan.removalSuppressed; report.messages = [...plan.messages];
         updatedIds = new Set(state.updates.map(item => item.existing!.component.id));
+        const categories = new Set([...state.adds,...state.updates].map(plannedCategory));
+        const categoryFrames = new Map<CategoryName,FrameNode>();
+        for(const category of categories) categoryFrames.set(category,ensureCategoryFrame(page,api,category,createdFrames));
+        // Bulk append into an active Auto Layout frame reflows the frame for
+        // every component. Pause it until all writes are done, then restore the
+        // original layout properties once.
+        categoryLayouts = pauseCategoryLayouts(categoryFrames.values());
         const total = state.adds.length + state.updates.length + state.removals.length;
         progress({done:0,total});
         instances = await snapshotInstances(page);
@@ -870,6 +902,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         const hadManagedComponents = plan.unchanged + plan.updated + plan.removed + plan.blocked > 0;
         const needsNameRefresh = hadManagedComponents || state.updates.length > 0 ||
           [...nameKeys.values()].some(count=>count > 1);
+        restoreCategoryLayouts(categoryLayouts);
         if(report.applied.added+report.applied.updated > 0 && needsNameRefresh) refreshDisplayNames(page,scan.project,report.messages);
         dropEmptyFrames();
         restoreInstances(instances,updatedIds);
@@ -888,7 +921,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         }
         restoreInstances(instances,updatedIds);
         throw error;
-      } finally {busy=false;}
+      } finally {restoreCategoryLayouts(categoryLayouts); busy=false;}
     },
     async tidy(project) {
       if(!project || typeof project.id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(project.id) ||
