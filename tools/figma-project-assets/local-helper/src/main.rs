@@ -179,9 +179,11 @@ fn serve(mut request: Request, app: &mut App, port: u16) {
     let allowed_origin = origin
         .as_deref()
         .is_none_or(|s| s == "null" || s == "https://www.figma.com");
-    let host = format!("127.0.0.1:{port}");
+    let ip_host = format!("127.0.0.1:{port}");
+    let localhost_host = format!("localhost:{port}");
+    let host = header(&request, "Host");
     let local = request.remote_addr().is_some_and(|a| a.ip().is_loopback())
-        && header(&request, "Host") == Some(host.as_str());
+        && (host == Some(ip_host.as_str()) || host == Some(localhost_host.as_str()));
     let (status, value) = if !allowed_origin || !local {
         (403, json!({"error":"连接来源被拒绝"}))
     } else if request.method() == &Method::Options {

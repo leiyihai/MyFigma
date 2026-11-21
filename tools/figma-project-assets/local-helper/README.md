@@ -11,7 +11,7 @@ cargo build --release --locked
 .\target\release\figma-assets-helper.exe
 ```
 
-默认只监听 `127.0.0.1:38473`。标准输出仅含 `LISTEN <port>`，错误不含路径或凭据。关闭终端或 Ctrl+C 停止。端口被占用时不要向未知进程输入令牌。
+默认只监听 `127.0.0.1:38473`，Figma 插件使用 `http://localhost:38473` 访问，以兼容其 manifest 本地开发域名校验。标准输出仅含 `LISTEN <port>`，错误不含路径或凭据。关闭终端或 Ctrl+C 停止。端口被占用时不要向未知进程输入令牌。
 
 配置保存在当前用户 `%LOCALAPPDATA%\MyFigmaAssets`：
 
@@ -44,7 +44,7 @@ cargo build --release --locked
 
 `Project.id` 为 1–64 个 ASCII 字母、数字、下划线或连字符，是稳定项目身份。编辑编号意味着新项目；UI 编辑时锁定编号。名称非空且最多 200 UTF-8 字节。路径仅在助手登记与受认证 UI 中存在，不进入扫描响应的项目字段。
 
-- 监听 IPv4 loopback；同时检查远端为 loopback、Host 精确为 `127.0.0.1:<实际端口>`，拒绝 DNS rebinding 域名。
+- 监听 IPv4 loopback；同时检查远端为 loopback、Host 精确为 `localhost:<实际端口>` 或 `127.0.0.1:<实际端口>`，拒绝 DNS rebinding 域名。
 - Origin 仅允许 `https://www.figma.com` 和 `null`；允许无 Origin 的本机 CLI。Figma 沙箱 UI 使用 opaque origin，故必须支持 `null`，但它**不是身份凭据**。恶意网页也可拥有 opaque origin，仍必须提供不可猜测的 bearer。
 - OPTIONS 预检不要求 bearer，不返回业务数据；仅对上述 Origin 返回精确 CORS（绝不 `*`），仅放行 Authorization / Content-Type、固定方法及本机网络预检；不返回 Allow-Credentials。
 - 健康和读取接口同样鉴权；错误码为 401 鉴权失败、403 来源/Host 拒绝、413 请求过大、415 类型错误、400 业务错误。错误消息不包含操作系统错误详情或绝对路径。
@@ -100,6 +100,6 @@ npm test
 
 `npm test` 的 pretest 自动构建 Rust，然后运行真实子进程的 HTTP 集成测试（不是 Rust 单元 mock）。`pngjs` 仅用于测试读取恢复 PNG，对照固定样本的 RGBA 字面值；Rust 实际解码、拆图、编码由 `image` 执行。Rust 原生 `cargo test` 当前只有构建检查，没有额外单元用例。
 
-公开边界测试覆盖鉴权、Host/CORS/预检、请求限制、项目增删改和重启持久化、拆图像素与身份、非法/外部资源及缺失恢复信息。记录过的红→绿包括：初始进程退出导致登记用例失败；未实现 `/v1/scan` 返回 400 而非 200；`trimmed:true` 缺元数据仍错误导出，新增回归先失败（多出 green），修复后 6/6 通过。
+公开边界测试覆盖鉴权、Host/CORS/预检、请求限制、项目增删改和重启持久化、拆图像素与身份、非法/外部资源及缺失恢复信息。记录过的红→绿包括：初始进程退出导致登记用例失败；未实现 `/v1/scan` 返回 400 而非 200；`trimmed:true` 缺元数据仍错误导出，新增回归先失败（多出 green），修复后通过。新增 localhost Host 验证后共 7 个 HTTP 测试通过。
 
 依赖：`tiny_http`（HTTP）、`serde/serde_json`（协议与登记）、`rand`（随机令牌）、`image` 仅启用 PNG、`base64`；锁文件固定版本。没有运行时 Node 依赖。尚未执行 RustSec 审计，不把 cargo check 当作依赖安全审计。

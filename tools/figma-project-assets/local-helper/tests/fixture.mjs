@@ -14,7 +14,7 @@ export async function startHelper(dataDir) {
     child.stdout.on('data', chunk => { text += chunk; const m = text.match(/LISTEN (\d+)/); if (m) { clearTimeout(timer); resolve(Number(m[1])); } });
   });
   const token = (await readFile(join(dataDir, 'token'), 'utf8')).trim();
-  const base = 'http://127.0.0.1:'+port;
+  const base = 'http://localhost:'+port;
   return {base, token, child, async stop() { if(child.exitCode !== null || child.signalCode !== null) return; const done = new Promise(r=>child.once('exit',r)); child.kill(); await done; },
     async request(path, method='GET', body, headers={}) {
       return fetch(base+path, {method, headers:{Authorization:'Bearer '+token, ...(body ? {'Content-Type':'application/json'} : {}), ...headers}, body:body ? JSON.stringify(body):undefined});

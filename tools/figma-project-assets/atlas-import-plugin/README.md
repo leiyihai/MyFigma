@@ -12,7 +12,7 @@ npm run typecheck
 npm run build
 ```
 
-构建产物：`dist/code.js`（Figma 主线程）、`dist/ui.html`（内联 UI 脚本）；无需开发服务器。Figma 的开发插件入口选择此目录 `manifest.json`。manifest 只在开发模式放行 `http://127.0.0.1:38473`；不承诺发布模式/远端助手，不要把域名改成 `*`。不同端口的测试只在浏览器沙箱运行，并未改变 manifest。
+构建产物：`dist/code.js`（Figma 主线程）、`dist/ui.html`（内联 UI 脚本）；无需开发服务器。Figma 的开发插件入口选择此目录 `manifest.json`。manifest 只在开发模式放行 `http://localhost:38473`；不承诺发布模式/远端助手，不要把域名改成 `*`。不同端口的测试只在浏览器沙箱运行，并未改变 manifest。
 
 1. 手动启动助手，从本机 `%LOCALAPPDATA%\MyFigmaAssets\token` 读取令牌，粘贴到「配对令牌」，点击「连接助手」。插件关闭后需要重新配对。若连接失败，按提示检查进程、端口及 Figma/浏览器本地网络权限。
 2. 「管理项目」填写游戏名称、项目编号、直接包含 JSON/PNG 的资源目录和长期维护标记，保存。可以先登记助手的 `examples` 目录，编号如 `demo2`，名称如「示例游戏」。目录只保存在助手侧，UI 的编辑表单可读取它。
@@ -22,9 +22,15 @@ npm run build
 
 非空未绑定页、绑定其他项目、绑定版本不符、名称与绑定不符均拒绝。每次扫描/导入都重新校验当前页，不清空用户已有内容。已导入的非空页也明确拒绝重导入，因为 #4 增量不在本期范围。需要再次演示时请使用新的空白文件/页，不删除用户已有设计。
 
+## 本地开发地址兼容
+
+实际手动验收发现 Figma 拒绝 manifest 的数字 IP 开发域名。按 [Figma 官方 manifest 文档](https://developers.figma.com/docs/plugins/manifest/) 中的本地服务器写法，改用 `http://localhost:38473`，同步调整 UI 默认值、客户端白名单和助手精确 Host 校验。
+
+manifest 与构建 UI 地址一致性、localhost 实际配对连接、Host 冒用拦截及浏览器登记导入均已自动验证；这些测试不是 Figma 原生 manifest 校验器。修改后仍需在 Figma 重新加载 manifest、关闭旧助手并启动新构建，再用默认 localhost 地址配对。
+
 ## 边界和安全
 
-- HTTP/配对/登记/源格式及身份决策详见助手 README。所有请求仅由 UI 发往精确的 IPv4 loopback 地址，拒绝 HTTP 重定向；令牌不发往 Figma 主线程、document、clientStorage、URL 或日志。
+- HTTP/配对/登记/源格式及身份决策详见助手 README。默认请求仅由 UI 发往 `http://localhost:38473`（助手只监听 IPv4 loopback；CLI 测试也支持精确数字回环地址），拒绝 HTTP 重定向；令牌不发往 Figma 主线程、document、clientStorage、URL 或日志。
 - UI 任务入口 `Workflow` 统一控制登记、搜索、选择、校验、扫描、导入和互斥状态。任务期间禁用项目切换、管理修改、重复扫描/导入和连接。选择变化或登记修改会使旧扫描失效；清空选择也清空旧目标。
 - 连接检查按操作触发，不轮询。网络错误/401 显示未连接和重新启动/配对提示，不把失败当作扫描为空。请求 30 秒超时；Figma 桥接 60 秒超时。
 - 主线程 `createFigmaPlatform` 只接受版本 1 的小型扫描（最多 64 项），校验身份、尺寸、重复来源并白名单保存来源字段。不会把本机绝对路径或未知字段写进文档。组件名为「未分类/原名 · 图集相对路径」，避免跨图集同名混淆。
@@ -41,7 +47,7 @@ npm run test:all
 npm audit --audit-level=low
 ```
 
-`test:all` 包含类型检查、7 个 Node 任务链路/连接安全测试、1 个 Playwright 浏览器交互测试。可分别运行 `npm test` / `npm run test:browser`。浏览器配置使用本机已有 Chrome（`channel: chrome`）；无 Chrome 时可安装经授权的浏览器或显式调整本目录测试配置。本次尝试下载 Playwright Chromium 超时，未将下载成功计为验收；实际浏览器验证使用系统 Chrome。
+`test:all` 包含类型检查、9 个 Node 任务链路/连接安全测试、1 个 Playwright 浏览器交互测试。可分别运行 `npm test` / `npm run test:browser`。浏览器配置使用本机已有 Chrome（`channel: chrome`）；无 Chrome 时可安装经授权的浏览器或显式调整本目录测试配置。本次尝试下载 Playwright Chromium 超时，未将下载成功计为验收；实际浏览器验证使用系统 Chrome。
 
 ### 已验证（不是 Figma 真实渲染验收）
 
@@ -66,6 +72,6 @@ npm audit --audit-level=low
 
 没有隔离安全的真实 Figma 目标，因此**没有导入任何用户设计，也未验证实际 Figma manifest 导入、桌面/网页 loopback 权限、真实图像渲染、Auto Layout 换行、资源检索/实例交换**。类型检查和平台替身不代替这些验收。后续应在新建的专用文件中用 `examples` 样本核对 2 张主组件、透明像素、组件身份、页面保护与布局。
 
-没有执行三个实际游戏项目的兼容/性能验收（本期只覆盖小型简单图集），也没有独立双轴评审或父分支集成套件；这些留给父代理。所有改动仅位于本目录与 `local-helper`，不修改根 package、gitignore、AGENTS 或共享 schema。
+没有执行三个实际游戏项目的兼容/性能验收（本期只覆盖小型简单图集）。独立双轴审查与主分支集成测试已完成，真实 Figma 验收仍须单独执行。所有改动仅位于本目录与 `local-helper`，不修改根 package、gitignore、AGENTS 或共享 schema。
 
 开发依赖：TypeScript、esbuild、Figma plugin typings、Playwright；运行时无 Node/Web 框架依赖。构建/测试产物均由本目录 `.gitignore` 排除。

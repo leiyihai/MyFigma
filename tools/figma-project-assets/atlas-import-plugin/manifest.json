@@ -13,7 +13,7 @@
       "none"
     ],
     "devAllowedDomains": [
-      "http://127.0.0.1:38473"
+      "http://localhost:38473"
     ],
     "reasoning": "仅开发模式连接本机 Rust 助手；需要手动配对令牌，不访问远端。"
   }

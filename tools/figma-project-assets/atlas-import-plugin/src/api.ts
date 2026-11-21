@@ -20,7 +20,7 @@ export interface Platform {
 class HelperConnectionError extends Error {}
 export class HelperClient {
   constructor(private base: string, private token: string) {
-    if (!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(base)) throw new Error('仅允许本机 127.0.0.1 HTTP 助手');
+    if (!/^http:\/\/(?:localhost|127\.0\.0\.1):\d{1,5}$/.test(base)) throw new Error('仅允许本机 localhost 或 127.0.0.1 HTTP 助手');
     if (!/^[a-f0-9]{64}$/.test(token)) throw new Error('请输入本机 token 文件中的 64 位配对令牌');
   }
   private async request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {

@@ -29,6 +29,21 @@ test('only paired loopback clients and explicit Figma origins can access the API
   }finally{await f.cleanup();}
 });
 
+test('documented localhost host is accepted while lookalikes and wrong ports stay blocked',async()=>{
+  const f=await fixture();
+  try {
+    const port=new URL(f.base).port;
+    const status=host=>new Promise((resolve,reject)=>{
+      const req=request(f.base+'/v1/health',{headers:{Host:host,Authorization:'Bearer '+f.token}},res=>{res.resume();resolve(res.statusCode);});
+      req.on('error',reject);req.end();
+    });
+    assert.equal(await status('localhost:'+port),200);
+    assert.equal(await status('localhost.evil.example:'+port),403);
+    assert.equal(await status('localhost:'+(port==='1'?'2':'1')),403);
+    assert.equal((await fetch(f.base+'/v1/health',{headers:{Host:'localhost:'+port}})).status,401);
+  }finally{await f.cleanup();}
+});
+
 test('project edits, long-term flags and removal are shared through the helper',async()=>{
   const f=await fixture();
   try {

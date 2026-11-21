@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { fixture } from '../../local-helper/tests/fixture.mjs';
 import * as api from '../dist/api.mjs';
@@ -12,6 +13,25 @@ async function ready(f,figma) {
   await workflow.selectProject('g2');
   return workflow;
 }
+
+test('development manifest permits the documented localhost endpoint used by the built UI',async()=>{
+  const manifest=JSON.parse(await readFile(new URL('../manifest.json',import.meta.url),'utf8'));
+  const html=await readFile(new URL('../dist/ui.html',import.meta.url),'utf8');
+  const address=html.match(/id="address" value="([^"]+)"/)?.[1];
+  assert.ok(address,'built UI must declare its default helper endpoint');
+  // Figma documents localhost:port for development; native IP rejection was captured in manual acceptance.
+  assert.equal(new URL(address).hostname,'localhost');
+  assert.deepEqual(manifest.networkAccess.devAllowedDomains,[address]);
+  assert.deepEqual(manifest.networkAccess.allowedDomains,['none']);
+  const f=await fixture();
+  try {
+    const localBase=new URL(f.base);
+    localBase.hostname='localhost';
+    const client=new api.HelperClient(localBase.origin,f.token);
+    await client.health();
+    assert.deepEqual(await client.projects(),[]);
+  }finally{await f.cleanup();}
+});
 
 test('connection refuses HTTP redirects outside the selected helper endpoint',async()=>{
   let redirectedRequests=0;
