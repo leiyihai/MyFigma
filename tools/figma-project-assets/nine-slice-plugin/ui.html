@@ -14,7 +14,7 @@
     .guide-wrapper { position: absolute; background: transparent; pointer-events: all; z-index: 10; display: flex; align-items: center; justify-content: center; }
     .guide-wrapper-h { height: 20px; width: 40000px; left: -20000px; cursor: ns-resize; }
     .guide-wrapper-v { width: 20px; height: 40000px; top: -20000px; cursor: ew-resize; }
-    .guide-visual { background: #00ff00; pointer-events: none; position: absolute; box-shadow: 0 0 4px rgba(0,255,0,0.5); }
+    .guide-visual { background: #00ff00; pointer-events: none; position: absolute; }
     .guide-visual-h { height: 1px; width: 100%; top: 50%; transform: translateY(-50%); }
     .guide-visual-v { width: 1px; height: 100%; left: 50%; transform: translateX(-50%); }
     .interact-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
@@ -78,7 +78,7 @@
   </div>
 
   <div class="card">
-    <div class="row"><span data-t="keepOriginal">保留原图</span><label class="switch"><input id="keepOriginal" type="checkbox" checked><span class="slider"></span></label></div>
+    <div class="row"><span data-t="keepOriginal">保留原图</span><label class="switch"><input id="keepOriginal" type="checkbox"><span class="slider"></span></label></div>
     <div class="row" style="margin-top:10px">
         <span><span data-t="batchMode">批量模式</span> <span class="help-wrap"><span class="help-icon">?</span><span class="tooltip" data-t="batchTip"></span></span></span>
         <label class="switch"><input id="batchMode" type="checkbox"><span class="slider"></span></label>
@@ -181,7 +181,7 @@
         ['top','bottom','left','right','all'].forEach(k => { el(k).value = s[k] !== undefined ? s[k] : 0; });
         el('overlap').checked = s.overlap;
         el('batchMode').checked = s.batchMode;
-        el('keepOriginal').checked = (s.keepOriginal !== undefined) ? s.keepOriginal : true;
+        el('keepOriginal').checked = (s.keepOriginal !== undefined) ? s.keepOriginal : false;
         setLang(s.lang || 'auto');
         updateUIState();
         syncGuidesFromInputs();

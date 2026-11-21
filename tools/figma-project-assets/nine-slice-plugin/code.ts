@@ -5,7 +5,7 @@ type Language = 'zh' | 'en' | 'ja' | 'ko' | 'ru' | 'de' | 'fr';
 type Settings = {
   top: number; bottom: number; left: number; right: number; all: number;
   overlap: boolean; keepOriginal: boolean; batchMode: boolean;
-  lang: Language | 'auto';
+  lang: Language | 'auto'; settingsVersion: number;
 };
 type PluginMessage = Settings & { type: 'save-only' | 'generate' };
 type ImageNode = SceneNode & GeometryMixin;
@@ -14,7 +14,7 @@ figma.showUI(__html__, { width: 360, height: 740, themeColors: true });
 let currentLang: Language = 'en';
 const defaults: Settings = {
   top: 0, bottom: 0, left: 0, right: 0, all: 0,
-  overlap: true, keepOriginal: true, batchMode: false, lang: 'auto'
+  overlap: false, keepOriginal: false, batchMode: false, lang: 'auto', settingsVersion: 2
 };
 const notifications = {
   zh: { no_img: '❌ 请在画布选中图片图层', success: '✅ 九宫格组件已生成' },
@@ -68,6 +68,11 @@ async function initSettings() {
     console.error('读取设置失败', error);
   }
   const settings = { ...defaults, ...saved };
+  if (saved.settingsVersion !== 2) {
+    // One-time migration: earlier releases defaulted these three switches on.
+    settings.overlap = false; settings.keepOriginal = false; settings.batchMode = false;
+    settings.settingsVersion = 2;
+  }
   if (isLanguage(settings.lang)) currentLang = settings.lang;
   figma.ui.postMessage({ type: 'init-settings', settings });
 }
@@ -106,7 +111,7 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
   if (!msg || (msg.type !== 'save-only' && msg.type !== 'generate')) return;
   if (isLanguage(msg.lang)) currentLang = msg.lang;
   try {
-    await figma.clientStorage.setAsync('nineSliceSettings', msg);
+    await figma.clientStorage.setAsync('nineSliceSettings', { ...msg, settingsVersion: 2 });
   } catch (error) {
     console.error('保存设置失败', error);
   }

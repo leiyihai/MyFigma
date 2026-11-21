@@ -88,7 +88,9 @@ test('single mode converts only the first image and restores saved settings', as
   await new Promise(setImmediate);
   const init = env.messages.find(msg => msg.type === 'init-settings');
   assert.equal(init.settings.left, 5);
-  assert.equal(init.settings.keepOriginal, true);
+  assert.equal(init.settings.keepOriginal, false);
+  assert.equal(init.settings.batchMode, false);
+  assert.equal(init.settings.settingsVersion, 2);
   await env.figma.ui.onmessage({ ...env.settings, type: 'save-only', left: 6 });
   assert.equal(env.created.length, 0);
   assert.equal(env.saved.at(-1).value.left, 6);
@@ -96,6 +98,28 @@ test('single mode converts only the first image and restores saved settings', as
   assert.equal(env.created.length, 1);
   assert.ok(env.sources[0].removed);
   assert.equal(env.sources[1].removed, undefined);
+});
+
+test('new and legacy sessions default the three switches off, then persist deliberate changes', async () => {
+  const fresh = setup();
+  await new Promise(setImmediate);
+  const freshInit = fresh.messages.find(msg => msg.type === 'init-settings').settings;
+  assert.deepEqual([freshInit.overlap, freshInit.keepOriginal, freshInit.batchMode], [false, false, false]);
+
+  const legacy = setup([[100, 80]], { saved: { overlap: true, keepOriginal: true, batchMode: true, lang: 'zh', left: 7 } });
+  await new Promise(setImmediate);
+  const legacyInit = legacy.messages.find(msg => msg.type === 'init-settings').settings;
+  assert.deepEqual([legacyInit.overlap, legacyInit.keepOriginal, legacyInit.batchMode], [false, false, false]);
+  assert.equal(legacyInit.left, 7);
+
+  await legacy.figma.ui.onmessage({ ...legacy.settings, type: 'save-only', overlap: true, keepOriginal: true, batchMode: true });
+  const stored = legacy.saved.at(-1).value;
+  assert.equal(stored.settingsVersion, 2);
+
+  const restored = setup([[100, 80]], { saved: stored });
+  await new Promise(setImmediate);
+  const restoredInit = restored.messages.find(msg => msg.type === 'init-settings').settings;
+  assert.deepEqual([restoredInit.overlap, restoredInit.keepOriginal, restoredInit.batchMode], [true, true, true]);
 });
 
 test('a late old image cannot overwrite a newer selection or cleared selection', async () => {

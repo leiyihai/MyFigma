@@ -99,6 +99,10 @@ test('a small selected image keeps the top guide draggable at fit-to-view zoom',
   await page.mouse.up();
   await expect(page.locator('#top')).toHaveValue('2');
   await expect(page.locator('#right')).toHaveValue('0');
+  const guide = page.locator('#g-top .guide-visual');
+  // A scaled glow used to make short guide lines look several pixels thick.
+  await expect(guide).toHaveCSS('box-shadow', 'none');
+  expect((await guide.boundingBox()).height).toBeLessThan(2);
 });
 
 for (const batchMode of [false, true]) {
