@@ -12,10 +12,14 @@ type Settings = {
   overlap: boolean; keepOriginal: boolean; batchMode: boolean;
   lang: Language | 'auto'; settingsVersion: number;
 };
-type PluginMessage = (Settings & { type: 'save-only' | 'generate' }) | { type: 'ui-ready' };
+type PluginMessage = (Settings & { type: 'save-only' | 'generate' }) | { type: 'ui-ready' } | { type: 'restore-project' };
 type ImageNode = SceneNode & GeometryMixin;
 
-type EditableSlice = { component: ComponentNode; margins: Margins; overlap: boolean; fill: ImagePaint; width: number; height: number; target: 'component' | 'instance' };
+type EditableSlice = {
+  component: ComponentNode; margins: Margins; overlap: boolean; fill: ImagePaint;
+  width: number; height: number; target: 'component' | 'instance';
+  record?: NineSliceRecord; legacy: boolean;
+};
 
 figma.showUI(__html__, { width: 360, height: 740, themeColors: true });
 let currentLang: Language = 'en';
@@ -35,11 +39,23 @@ const notifications = {
 function notify(key: 'no_img' | 'success') {
   figma.notify(notifications[currentLang][key]);
 }
+function notifyLocalized(zh: string, en: string, options?: NotificationOptions) {
+  figma.notify(currentLang === 'zh' ? zh : en, options);
+}
+function sameMargins(left: Margins | undefined, right: Margins | undefined): boolean {
+  if (!left || !right) return left === right;
+  return left.left === right.left && left.top === right.top && left.right === right.right && left.bottom === right.bottom;
+}
 function isLanguage(value: string): value is Language {
   return Object.prototype.hasOwnProperty.call(notifications, value);
 }
 function isImageNode(node: SceneNode): node is ImageNode {
   return 'fills' in node && Array.isArray(node.fills) && node.fills.some(fill => fill.type === 'IMAGE');
+}
+// Converting an existing main component or an instance would break the source
+// identity and every linked instance, so only plain layers are convertible.
+function isConvertibleImageNode(node: SceneNode): node is ImageNode {
+  return node.type !== 'INSTANCE' && node.type !== 'COMPONENT' && isImageNode(node);
 }
 function imageFill(node: ImageNode): ImagePaint | undefined {
   return Array.isArray(node.fills) ? node.fills.find((fill): fill is ImagePaint => fill.type === 'IMAGE') : undefined;
@@ -83,23 +99,24 @@ function findEditable(node: SceneNode | undefined): EditableSlice | null {
   } catch {
     return null;
   }
-  return { component, margins, overlap, fill: fills[0], width: component.width, height: component.height, target: 'component' };
+  return { component, margins, overlap, fill: fills[0], width: component.width, height: component.height,
+    target: 'component', record: saved, legacy: !saved };
 }
-function rememberSlice(component: ComponentNode, settings: Settings, overlap: boolean): void {
-  const margins: Margins = { left: settings.left, top: settings.top, right: settings.right, bottom: settings.bottom };
+function rememberSlice(component: ComponentNode, margins: Margins, overlap: boolean, override: boolean): void {
   try {
     const existing = savedMargins(component);
-    // Margins set by a designer are an override; keep the project parameter that
-    // the atlas importer recorded so both plugins read the same state.
+    // Keep the project parameter that the atlas importer recorded so both
+    // plugins read the same state; anything the designer changed is an override.
     const record = createNineSliceRecord(margins, { width: component.width, height: component.height },
-      { project: existing?.project, overlap, override: true });
+      { project: existing?.project, overlap, override });
     component.setPluginData(NINE_SLICE_RECORD_KEY, serializeNineSliceRecord(record));
   } catch (error) {
     console.error('保存九宫格信息失败', error);
   }
 }
 function editPayload(edit: EditableSlice, editable: boolean) {
-  return { margins: edit.margins, overlap: edit.overlap, target: edit.target, name: edit.component.name, editable };
+  return { margins: edit.margins, overlap: edit.overlap, target: edit.target, name: edit.component.name, editable,
+    legacy: edit.legacy, project: edit.record?.project, override: edit.record?.override ?? true };
 }
 
 let previewVersion = 0;
@@ -119,6 +136,8 @@ async function sendSelectionToUI() {
   const instanceEdit = instanceComponent ? findEditable(instanceComponent) : null;
   const view = edit ?? instanceEdit;
   const payload = edit ? editPayload(edit, true) : instanceEdit ? editPayload(instanceEdit, false) : null;
+  const unsupported = payload || !node ? null
+    : node.type === 'INSTANCE' ? 'instance' : node.type === 'COMPONENT' ? 'component' : null;
   const fill = view?.fill ?? (node && isImageNode(node) ? imageFill(node) : undefined);
   const width = view?.width ?? (node && 'width' in node ? node.width : 0);
   const height = view?.height ?? (node && 'height' in node ? node.height : 0);
@@ -128,14 +147,14 @@ async function sendSelectionToUI() {
     if (image) {
       const bytes = await image.getBytesAsync();
       if (version === previewVersion) {
-        figma.ui.postMessage({ type: 'update-preview', bytes, width, height, edit: payload });
+        figma.ui.postMessage({ type: 'update-preview', bytes, width, height, edit: payload, unsupported });
       }
       return;
     }
   } catch (error) {
     console.error('读取图片预览失败', error);
   }
-  if (version === previewVersion) figma.ui.postMessage({ type: 'update-preview', bytes: null, edit: payload });
+  if (version === previewVersion) figma.ui.postMessage({ type: 'update-preview', bytes: null, edit: payload, unsupported });
 }
 
 async function initSettings() {
@@ -177,7 +196,7 @@ function generate(source: ImageNode, msg: Settings): ComponentNode {
     component.name = source.name;
     component.x = msg.keepOriginal ? source.x + source.width + 50 : source.x;
     component.y = source.y;
-    rememberSlice(component, msg, msg.overlap);
+    rememberSlice(component, { left: msg.left, top: msg.top, right: msg.right, bottom: msg.bottom }, msg.overlap, true);
     return component;
   } catch (error) {
     component.remove();
@@ -186,8 +205,48 @@ function generate(source: ImageNode, msg: Settings): ComponentNode {
 }
 
 let generating = false;
+async function restoreProject(): Promise<void> {
+  if (generating) return;
+  const edit = findEditable(figma.currentPage.selection[0]);
+  if (!edit) {
+    notifyUnsupported();
+    return;
+  }
+  const project = edit.record?.project;
+  if (!project) {
+    notifyLocalized('该组件没有记录项目参数，无法恢复；未做修改。',
+      'This component has no recorded project parameter, so it cannot be restored. Nothing changed.', { error: true });
+    return;
+  }
+  try {
+    createNineSlicePlan({ width: edit.width, height: edit.height }, project, edit.record?.overlap);
+  } catch {
+    notifyLocalized('项目参数无法应用到当前组件尺寸，未做修改。',
+      'The project parameter does not fit the current component size. Nothing changed.', { error: true });
+    return;
+  }
+  generating = true;
+  try {
+    applyNineSliceComponent(figma, edit.component, { width: edit.width, height: edit.height, fill: edit.fill },
+      project, { overlap: edit.record?.overlap });
+    rememberSlice(edit.component, project, edit.record?.overlap === true, false);
+    void sendSelectionToUI();
+    notifyLocalized('已恢复项目参数，并清除手动边距。', 'Project parameters restored; manual margins cleared.');
+  } catch (error) {
+    console.error('恢复项目参数失败', error);
+    notifyLocalized('恢复失败，请查看插件控制台。', 'Restore failed. Check the plugin console.', { error: true });
+  } finally {
+    generating = false;
+  }
+}
+function notifyUnsupported(): void {
+  notifyLocalized('无法识别该组件：请选择本工具生成的九宫格主组件或图片图层。未做修改。',
+    'Unrecognized component. Select a 9-slice main component created by this tool or an image layer. Nothing changed.',
+    { error: true });
+}
 figma.ui.onmessage = async (msg: PluginMessage) => {
   if (msg?.type === 'ui-ready') { void sendSelectionToUI(); return; }
+  if (msg?.type === 'restore-project') { await restoreProject(); return; }
   if (!msg || (msg.type !== 'save-only' && msg.type !== 'generate')) return;
   if (isLanguage(msg.lang)) currentLang = msg.lang;
   try {
@@ -208,8 +267,13 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
     }
     generating = true;
     try {
+      const margins: Margins = { left: msg.left, top: msg.top, right: msg.right, bottom: msg.bottom };
+      // Pressing update without changing the effective values must not turn a
+      // project-driven component into a manual override.
+      const unchanged = sameMargins(edit.record?.current ?? edit.margins, margins) && (edit.record?.overlap ?? edit.overlap) === msg.overlap;
+      const override = edit.record && unchanged ? edit.record.override : true;
       applyNineSliceComponent(figma, edit.component, { width: edit.width, height: edit.height, fill: edit.fill }, msg, { overlap: msg.overlap });
-      rememberSlice(edit.component, msg, msg.overlap);
+      rememberSlice(edit.component, margins, msg.overlap, override);
       figma.viewport.scrollAndZoomIntoView([edit.component]);
       notify('success');
     } catch (error) {
@@ -220,8 +284,18 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
     }
     return;
   }
-  const targets = figma.currentPage.selection.filter(isImageNode);
-  if (targets.length === 0) { notify('no_img'); return; }
+  const targets = figma.currentPage.selection.filter(isConvertibleImageNode);
+  if (targets.length === 0) {
+    const first = figma.currentPage.selection[0];
+    if (first?.type === 'INSTANCE') {
+      notifyLocalized('选中的是实例；请定位主组件后编辑，不会自动改造实例。',
+        'An instance is selected. Locate its main component to edit; instances are never converted automatically.',
+        { error: true });
+    } else if (first?.type === 'COMPONENT') {
+      notifyUnsupported();
+    } else notify('no_img');
+    return;
+  }
   const finalTargets = msg.batchMode ? targets : [targets[0]];
   if (!validateMargins(msg, finalTargets)) {
     figma.notify(currentLang === 'zh'

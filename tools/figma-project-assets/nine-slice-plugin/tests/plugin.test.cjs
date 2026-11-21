@@ -257,3 +257,138 @@ test('reads and writes the shared project/current/override record used by the at
   assert.deepEqual(edited.margins, { left: 12, top: 9, right: 7, bottom: 11 });
   assert.equal(edited.override, true);
 });
+
+function setRecord(component, record) {
+  component.setPluginData('myfigma.nineSlice.v1', JSON.stringify(record));
+}
+function atlasRecord(override = false) {
+  return {
+    schemaVersion: 1, margins: { left: 10, top: 10, right: 10, bottom: 10 }, overlap: false,
+    width: 100, height: 80, project: { left: 8, top: 8, right: 8, bottom: 8 },
+    current: { left: 10, top: 10, right: 10, bottom: 10 }, override
+  };
+}
+
+test('submitting unchanged margins keeps the importer project state without a new manual override', async () => {
+  const env = setup();
+  await env.figma.ui.onmessage(env.settings);
+  const component = env.created[0];
+  setRecord(component, atlasRecord(false));
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage(env.settings);
+  let saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.deepEqual(saved.current, { left: 10, right: 10, top: 10, bottom: 10 });
+  assert.deepEqual(saved.project, { left: 8, right: 8, top: 8, bottom: 8 });
+  assert.equal(saved.override, false);
+
+  await env.figma.ui.onmessage({ ...env.settings, left: 12 });
+  saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.deepEqual(saved.current, { left: 12, right: 10, top: 10, bottom: 10 });
+  assert.deepEqual(saved.project, { left: 8, right: 8, top: 8, bottom: 8 });
+  assert.equal(saved.override, true);
+});
+
+test('restoring project parameters clears the manual override in place and keeps instances linked', async () => {
+  const env = setup();
+  await env.figma.ui.onmessage(env.settings);
+  const component = env.created[0];
+  setRecord(component, { ...atlasRecord(true), current: { left: 12, top: 9, right: 7, bottom: 11 },
+    margins: { left: 12, top: 9, right: 7, bottom: 11 } });
+  const instance = {
+    type: 'INSTANCE', name: '底板实例', width: 120, height: 90, fills: [], children: [],
+    async getMainComponentAsync() { return component; },
+    resize(width, height) { this.width = width; this.height = height; }
+  };
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ type: 'restore-project' });
+
+  assert.equal(env.created.length, 1);
+  assert.equal(env.created[0], component);
+  assert.equal(await instance.getMainComponentAsync(), component);
+  assert.deepEqual([instance.width, instance.height], [120, 90]);
+  const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.deepEqual(saved.current, { left: 8, top: 8, right: 8, bottom: 8 });
+  assert.deepEqual(saved.project, { left: 8, top: 8, right: 8, bottom: 8 });
+  assert.equal(saved.override, false);
+  assert.equal(component.children.length, 9);
+  assert.equal(component.children.find(child => child.name === '切片 2-1').width, 8);
+  assert.ok(env.notices.some(text => text.includes('恢复')));
+});
+
+test('restore refuses missing or unappliable project margins and keeps existing slices', async () => {
+  const missing = setup();
+  await missing.figma.ui.onmessage(missing.settings);
+  const generated = missing.created[0];
+  const before = generated.data['myfigma.nineSlice.v1'];
+  missing.figma.currentPage.selection = [generated];
+  await missing.figma.ui.onmessage({ type: 'restore-project' });
+  assert.equal(generated.children.length, 9);
+  assert.equal(generated.data['myfigma.nineSlice.v1'], before);
+  assert.ok(missing.notices.some(text => text.includes('项目参数')));
+
+  const invalid = setup();
+  await invalid.figma.ui.onmessage(invalid.settings);
+  const component = invalid.created[0];
+  setRecord(component, { ...atlasRecord(true), project: { left: 60, top: 60, right: 60, bottom: 60 } });
+  const hash = JSON.stringify(component.data['myfigma.nineSlice.v1']);
+  invalid.figma.currentPage.selection = [component];
+  await invalid.figma.ui.onmessage({ type: 'restore-project' });
+  assert.equal(component.children.length, 9);
+  assert.equal(JSON.stringify(component.data['myfigma.nineSlice.v1']), hash);
+  assert.ok(invalid.notices.some(text => text.includes('无法') || text.includes('边距')));
+});
+
+test('selecting an instance with an image fill never converts or deletes it', async () => {
+  const env = setup();
+  const instance = {
+    type: 'INSTANCE', name: '普通组件实例', width: 100, height: 80, children: [],
+    fills: [{ type: 'IMAGE', imageHash: 'image' }],
+    removed: false,
+    async getMainComponentAsync() { return { type: 'COMPONENT', name: '普通组件', children: [], fills: [] }; },
+    remove() { this.removed = true; }
+  };
+  env.figma.currentPage.selection = [instance];
+  await env.figma.ui.onmessage({ ...env.settings, keepOriginal: false });
+  assert.equal(env.created.length, 0);
+  assert.equal(instance.removed, false);
+  assert.ok(env.notices.some(text => text.includes('主组件')));
+});
+
+test('an unrecognized component gets a clear prompt instead of being rebuilt', async () => {
+  const env = setup();
+  const component = {
+    type: 'COMPONENT', name: '人工复杂组件', width: 100, height: 80, fills: [], data: {},
+    children: [{ type: 'RECTANGLE', name: '图层A', fills: [], children: [] }],
+    getPluginData(key) { return this.data[key] || ''; },
+    setPluginData(key, value) { this.data[key] = value; },
+    remove() { this.removed = true; }
+  };
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage(env.settings);
+  assert.equal(env.created.length, 0);
+  assert.equal(component.removed, undefined);
+  assert.equal(component.children.length, 1);
+  assert.ok(env.notices.some(text => text.includes('无法识别') || text.includes('不是本工具')));
+});
+
+test('selection payloads tell the UI whether margins are manual, project-driven or legacy', async () => {
+  const env = setup();
+  await env.figma.ui.onmessage(env.settings);
+  const component = env.created[0];
+  component.data = {};
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  let preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(preview.edit.legacy, true);
+  assert.equal(preview.edit.project, undefined);
+  assert.equal(preview.edit.override, true);
+
+  setRecord(component, atlasRecord(false));
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(preview.edit.legacy, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(preview.edit.project)), { left: 8, right: 8, top: 8, bottom: 8 });
+  assert.equal(preview.edit.override, false);
+});

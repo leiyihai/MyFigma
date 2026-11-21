@@ -2,6 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 import {
   projectFixture, writePng, solid, writeAtlas, writeLayout, layoutImageNode
 } from '../../local-helper/tests/atlas-fixture.mjs';
@@ -10,6 +14,34 @@ import * as api from '../dist/api.mjs';
 
 const imageset = project => join(project, 'res', 'imageset', 'Static');
 const layoutPath = project => join(project, 'res', 'layout', 'ui.json');
+const nineSliceDir = fileURLToPath(new URL('../../nine-slice-plugin/', import.meta.url));
+let pluginCode;
+function nineSlicePluginCode() {
+  if(pluginCode) return pluginCode;
+  const built = join(nineSliceDir, 'dist', 'code.js');
+  // A combined suite may run this package first; build the sibling plugin from
+  // its own installed toolchain instead of requiring a previous manual build.
+  if(!existsSync(built)) execFileSync(process.execPath, ['build.mjs'], { cwd: nineSliceDir, stdio: 'ignore' });
+  return pluginCode = readFileSync(built, 'utf8');
+}
+// Drive the real nine-slice plugin entry so the recovery is not a hand-written
+// record fixture: the plugin must rebuild the slices in place for the retry.
+async function restoreWithNineSlicePlugin(figma, component) {
+  const notices = [];
+  const host = {
+    showUI() {}, on() {},
+    ui: { postMessage() {} },
+    clientStorage: { async getAsync() { return { lang: 'zh', settingsVersion: 2 }; }, async setAsync() {} },
+    currentPage: { selection: [component] },
+    getImageByHash() { return { async getBytesAsync() { return new Uint8Array([1]); } }; },
+    notify(text) { notices.push(text); },
+    viewport: { scrollAndZoomIntoView() {} },
+    createRectangle: figma.createRectangle
+  };
+  vm.runInNewContext(nineSlicePluginCode(), { figma: host, __html__: '', console });
+  await host.ui.onmessage({ type: 'restore-project' });
+  return notices;
+}
 
 async function setup() {
   const f = await projectFixture();
@@ -129,7 +161,7 @@ test('upgrades a plain main component in place when a grid usage appears and nev
 });
 
 test('keeps a valid manual margin on image updates, reports unappliable margins and never writes bad slices', async () => {
-  const { f, workflow, page } = await setup();
+  const { f, workflow, page, api: figma } = await setup();
   try {
     await writeLayout(layoutPath(f.project), [
       layoutImageNode('小图九宫格', 'set:buttons.json image:plain', '6 6 6 6')
@@ -168,10 +200,28 @@ test('keeps a valid manual margin on image updates, reports unappliable margins 
     await workflow.scan();
     assert.deepEqual(pick(workflow.state.plan), { added: 0, updated: 1, removed: 0, unchanged: 0, blocked: 1 });
     assert.match(workflow.state.plan.messages.join(String.fromCharCode(10)), /边距/);
+    // The message must tell the designer how to recover instead of silently clamping.
+    assert.match(workflow.state.plan.messages.join(String.fromCharCode(10)), /恢复项目参数/);
     await workflow.import();
     assert.equal(plain.children[0].fills[0].imageHash, hashBeforeFailure);
     assert.deepEqual(record(plain).current, { left: 6, top: 6, right: 6, bottom: 6 });
     assert.deepEqual([plain.width, plain.height], [20, 20]);
+
+    // Cross-plugin recovery: the real nine-slice plugin clears the override and
+    // rebuilds the slices in place from the importer's project parameter.
+    const notices = await restoreWithNineSlicePlugin(figma, plain);
+    assert.ok(notices.some(text => /恢复|restored/i.test(text)));
+    assert.equal(record(plain).override, false);
+    assert.deepEqual(record(plain).current, { left: 4, top: 4, right: 4, bottom: 4 });
+    await workflow.scan();
+    assert.deepEqual(pick(workflow.state.plan), { added: 0, updated: 1, removed: 0, unchanged: 1, blocked: 0 });
+    await workflow.import();
+    assert.equal(component(page, 'plain'), plain);
+    assert.deepEqual([plain.width, plain.height], [10, 10]);
+    assert.equal(plain.children.length, 9);
+    assert.deepEqual(record(plain).current, { left: 4, top: 4, right: 4, bottom: 4 });
+    assert.deepEqual(record(plain).project, { left: 4, top: 4, right: 4, bottom: 4 });
+    assert.equal(record(plain).override, false);
   } finally { await f.cleanup(); }
 });
 

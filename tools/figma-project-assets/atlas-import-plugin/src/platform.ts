@@ -210,10 +210,14 @@ function planState(existing: Existing | undefined, item: Candidate): Planned {
   const record = existing?.record;
   const width = item.resource.width, height = item.resource.height;
   if(record?.override) {
-    if(!validFor(record.current,width,height)) return {
-      shape:'slices', override:true, overlap:record.overlap,
-      blocked:`人工九宫格边距无法应用到新尺寸 ${width}×${height}，已跳过`
-    };
+    if(!validFor(record.current,width,height)) {
+      // Never clamp a designer's margins; explain how to recover and retry instead.
+      const hint = project || record.project ? '；可在九宫格插件恢复项目参数后重试' : '';
+      return {
+        shape:'slices', override:true, overlap:record.overlap,
+        blocked:`人工九宫格边距无法应用到新尺寸 ${width}×${height}，已跳过${hint}`
+      };
+    }
     const effectiveProject = project || record.project;
     return {shape:'slices', margins:record.current, project:effectiveProject, override:true, overlap:record.overlap,
       record:createNineSliceRecord(record.current,{width,height},{project:effectiveProject,overlap:record.overlap,override:true})};

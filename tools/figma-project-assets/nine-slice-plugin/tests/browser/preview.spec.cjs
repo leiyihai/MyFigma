@@ -157,3 +157,51 @@ for (const batchMode of [false, true]) {
     }
   });
 }
+
+test('manual project margins expose a restore action that explains manual priority', async ({ page }) => {
+  await openPreview(page);
+  await page.evaluate(() => {
+    window.restoreMessages = [];
+    window.addEventListener('message', e => {
+      if (e.data?.pluginMessage?.type === 'restore-project') window.restoreMessages.push(e.data.pluginMessage);
+    });
+    window.postMessage({ pluginMessage: {
+      type: 'update-preview', bytes: null,
+      edit: {
+        margins: { left: 20, right: 8, top: 10, bottom: 12 }, overlap: false,
+        target: 'component', name: '已有底板', editable: true, legacy: false, override: true,
+        project: { left: 6, right: 6, top: 6, bottom: 6 }
+      }
+    } }, '*');
+  });
+  await expect(page.locator('#main-btn')).toHaveText('更新九宫格组件');
+  await expect(page.locator('#main-btn')).toHaveAttribute('title', /人工.*优先|恢复项目参数/);
+  const restore = page.locator('#restore-btn');
+  await expect(restore).toBeVisible();
+  await expect(restore).toHaveAttribute('title', /恢复项目参数|清除手动/);
+  await restore.click();
+  await expect.poll(() => page.evaluate(() => window.restoreMessages)).toEqual([{ type: 'restore-project' }]);
+
+  // Project-driven margins have no manual state to clear.
+  await page.evaluate(() => window.postMessage({ pluginMessage: {
+    type: 'update-preview', bytes: null,
+    edit: {
+      margins: { left: 6, right: 6, top: 6, bottom: 6 }, overlap: false,
+      target: 'component', name: '项目底板', editable: true, legacy: false, override: false,
+      project: { left: 6, right: 6, top: 6, bottom: 6 }
+    }
+  } }, '*'));
+  await expect(page.locator('#restore-btn')).toBeHidden();
+  await expect(page.locator('#edit-status')).toContainText('项目参数');
+});
+
+test('an unrecognized component is explained and never offered an update action', async ({ page }) => {
+  await openPreview(page);
+  await page.evaluate(() => window.postMessage({ pluginMessage: {
+    type: 'update-preview', bytes: null, edit: null, unsupported: 'component'
+  } }, '*'));
+  await expect(page.locator('#edit-status')).toBeVisible();
+  await expect(page.locator('#edit-status')).toContainText('无法识别');
+  await expect(page.locator('#main-btn')).toBeDisabled();
+  await expect(page.locator('#restore-btn')).toBeHidden();
+});
