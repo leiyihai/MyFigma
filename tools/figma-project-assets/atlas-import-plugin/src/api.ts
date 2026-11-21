@@ -1,3 +1,4 @@
+import type { CategoryName } from './category';
 export interface Project { id: string; name: string; path: string; maintained: boolean }
 export interface PublicProject { id: string; name: string }
 export interface Source {
@@ -36,6 +37,15 @@ export interface TidyResult {
   schemaVersion: 1; frames: number; moved: number; messages: string[];
 }
 export interface ItemFailure { name: string; reason: string }
+export interface SelectionMember {
+  id: string; name: string; category: CategoryName; manual: boolean; viaInstance: boolean;
+}
+export interface SelectionState {
+  schemaVersion: 1; members: SelectionMember[]; ignored: number; mixed: boolean;
+}
+export interface CategoryResult {
+  schemaVersion: 1; action: 'manual' | 'auto'; updated: number; moved: number; messages: string[];
+}
 // Import is not one atomic transaction: every item commits or is isolated and
 // reported, so a later incremental run can fill only what is still missing.
 export interface ImportReport extends ImportPlan {
@@ -69,6 +79,8 @@ export interface Platform {
   importResources(scan: Scan, progress: (value: Progress) => void, cancellation?: Cancellation): Promise<ImportReport>;
   compare(project: PublicProject): Promise<CompareResult>;
   tidy(project: PublicProject): Promise<TidyResult>;
+  selection(project: PublicProject): Promise<SelectionState>;
+  setCategory(project: PublicProject, ids: string[], category: CategoryName | 'auto'): Promise<CategoryResult>;
 }
 
 class HelperConnectionError extends Error {}

@@ -1,5 +1,7 @@
 import {HelperAuthError,HelperClient,Workflow} from './api';
-import type {Platform,Progress,Project} from './api';
+import type {CategoryResult,Platform,Progress,Project,SelectionState} from './api';
+import {categories} from './category';
+import type {CategoryName} from './category';
 type Pairing={schemaVersion:1;address:string;token:string};
 function el<T extends HTMLElement>(id:string):T {const node=document.getElementById(id);if(!node)throw new Error('界面元素缺失');return node as T;}
 function input(id:string) {return el<HTMLInputElement>(id);}
@@ -26,13 +28,17 @@ const platform:Platform={
     finally{reportProgress=undefined;stop();}
   },
   compare:project=>rpc('compare',{project}),
-  tidy:project=>rpc('tidy',{project})
+  tidy:project=>rpc('tidy',{project}),
+  selection:project=>rpc('selection',{project}),
+  setCategory:(project,ids,category)=>rpc('set-category',{project,ids,category})
 };
 let workflow:Workflow|undefined;
 let uiError='';
 let pageValidationPending=false;
 let remembered=false;
 let editingId:string|undefined;
+let categorySelection:SelectionState|undefined;
+let selectionRequest=0;
 const dialog=el<HTMLDialogElement>('management');
 function placeTooltip(wrap:HTMLElement) {
   const tip=wrap.querySelector<HTMLElement>('.tooltip');if(!tip)return;
@@ -104,6 +110,26 @@ function render() {
     ? `已整理 ${tidy.frames} 个分类 Frame · 移动 ${tidy.moved} 个`
     : tidy.messages[0]||'当前页没有可整理的分类 Frame')
     :'只调整分类 Frame 位置，不重建主组件、不改九宫格约束。';
+  const categorySelect=el<HTMLSelectElement>('category-select');
+  const previousCategory=categorySelect.value;
+  categorySelect.replaceChildren(new Option('选择目标分类',''),...categories.map(category=>new Option(category,category)),new Option('恢复自动分类','auto'));
+  if(previousCategory) categorySelect.value=previousCategory;
+  const selectedMembers=categorySelection?.members||[];
+  const categoriesInSelection=[...new Set(selectedMembers.map(member=>member.category))];
+  const selectionStatus=!s?.selected?'先选择游戏'
+    :!categorySelection?'正在读取画布选择…'
+    :!selectedMembers.length?'未选中本工具主组件'
+    :categorySelection.mixed?`混合分类：${categoriesInSelection.join(' / ')}`
+    :`当前分类：${categoriesInSelection[0]}${selectedMembers.some(member=>member.manual)?' · 人工':''}`;
+  el('selection-status').textContent=selectionStatus;
+  const viaInstances=selectedMembers.filter(member=>member.viaInstance).length;
+  const selectionNotes=[];
+  if(viaInstances)selectionNotes.push(`已从 ${viaInstances} 个实例定位主组件`);
+  if(categorySelection?.ignored)selectionNotes.push(`已忽略 ${categorySelection.ignored} 个非本工具对象`);
+  el('selection-note').textContent=(selectionNotes.length?selectionNotes.join('；')+'。':'')+
+    (selectedMembers.length?'选择「恢复自动分类」会清除人工覆盖，并按当前规则重新归类。':'按 Figma 当前选择处理；实例会定位主组件，无关对象不改动。');
+  categorySelect.disabled=busy||!selectedMembers.length;
+  el<HTMLButtonElement>('apply-category').disabled=busy||!selectedMembers.length||!categorySelect.value;
   el('compare-status').textContent=compare?(compare.created
     ? `已创建「${compare.pageName}」：${compare.groups} 个分组 · ${compare.added} 个实例`
     : `已更新「${compare.pageName}」：新增 ${compare.added} · 保留 ${compare.kept} · 移除 ${compare.removed}`)
@@ -150,6 +176,13 @@ function render() {
 }
 function resetForm() {el<HTMLFormElement>('registration').reset();editingId=undefined;render();}
 async function clearPairing() {try{await rpc('pairing-clear',{});}catch{}remembered=false;}
+async function refreshSelection() {
+  const request=++selectionRequest;
+  if(!workflow?.state.selected||workflow.state.busy){categorySelection=undefined;render();return;}
+  try{const value=await rpc<SelectionState>('selection',{project:workflow.state.selected});if(request!==selectionRequest)return;categorySelection=value;}
+  catch{categorySelection=undefined;}
+  render();
+}
 async function connectHelper(address:string,token:string) {
   if(workflow?.state.busy)return;
   try {
@@ -159,6 +192,7 @@ async function connectHelper(address:string,token:string) {
     if(error instanceof HelperAuthError) await clearPairing();
     throw error;
   }
+  void refreshSelection();
   input('token').value='';
   if(input('remember').checked) {
     await rpc('pairing-save',{pairing:{schemaVersion:1,address,token}});
@@ -179,6 +213,7 @@ async function run(action:()=>Promise<void>) {
     render();
     return;
   }
+  if(workflow&&!workflow.state.busy&&workflow.state.selected) await refreshSelection();
   render();
 }
 el('connect').onclick=()=>void run(()=>connectHelper(input('address').value.trim(),input('token').value.trim()));
@@ -189,13 +224,22 @@ el('close').onclick=()=>{if(!workflow?.state.busy)dialog.close();};
 dialog.addEventListener('cancel',event=>{if(workflow?.state.busy)event.preventDefault();});
 el('new').onclick=()=>resetForm();
 el('search').oninput=render;
-el('project').onchange=()=>{const id=el<HTMLSelectElement>('project').value;if(workflow?.state.busy||workflow?.state.selected?.id===id)return;void run(()=>workflow!.selectProject(id));};
+el('project').onchange=()=>{const id=el<HTMLSelectElement>('project').value;if(workflow?.state.busy||workflow?.state.selected?.id===id)return;void run(async()=>{await workflow!.selectProject(id);await refreshSelection();});};
 el('validate').onclick=()=>void run(()=>workflow!.validatePage());
 el('scan').onclick=()=>void run(()=>workflow!.scan());
 el('import').onclick=()=>void run(()=>workflow!.import());
 el('cancel').onclick=()=>{workflow?.cancel();};
 el('compare').onclick=()=>void run(()=>workflow!.comparePage());
 el('tidy').onclick=()=>void run(()=>workflow!.tidy());
+el('category-select').onchange=render;
+el('apply-category').onclick=()=>void run(async()=>{
+  const project=workflow!.state.selected;
+  const choice=el<HTMLSelectElement>('category-select').value as CategoryName|'auto'|'';
+  if(!project||!categorySelection?.members.length||!choice)return;
+  await rpc<CategoryResult>('set-category',{project,ids:categorySelection.members.map(member=>member.id),category:choice});
+  workflow!.invalidateScan();
+  categorySelection=await rpc<SelectionState>('selection',{project});
+});
 el('registration').onsubmit=event=>event.preventDefault();
 el('save').onclick=()=>{if(!el<HTMLFormElement>('registration').reportValidity())return;void run(async()=>{
   const project:Project={id:input('game-id').value.trim(),name:input('game-name').value.trim(),path:input('game-path').value.trim(),maintained:input('maintained').checked};
@@ -208,9 +252,10 @@ window.addEventListener('message',event=>{
   if(message.type==='progress') {reportProgress?.(message.progress);return;}
   if(message.type==='page-changed'){
     if(workflow?.state.busy){pageValidationPending=true;render();}
-    else if(workflow){workflow.invalidateScan();void run(()=>workflow!.validatePage());}
+    else if(workflow){workflow.invalidateScan();void run(()=>workflow!.validatePage());void refreshSelection();}
     return;
   }
+  if(message.type==='selection-changed'){void refreshSelection();return;}
   const task=pending.get(message.requestId);if(!task)return;
   clearTimeout(task.timer);pending.delete(message.requestId);
   if(message.error)task.reject(new Error(message.error));else task.resolve(message.result);

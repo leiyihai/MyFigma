@@ -80,6 +80,8 @@ dialog::backdrop{background:#0006}
 .form-head h3{font-size:12px}
 .form-actions{display:flex;gap:7px;margin-top:auto;padding-top:4px}
 .form-actions .primary{flex:1}
+.category-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;margin-top:6px}
+.category-row button{margin-bottom:0}
 </style></head><body>
 <header class="app-header">
   <div><p class="kicker">LOCAL ATLAS TOOL</p><h1>项目图集导入</h1></div>
@@ -121,6 +123,15 @@ dialog::backdrop{background:#0006}
     <button id="tidy" class="quiet" title="仅把本工具创建的分类 Frame 按「按钮 → 九宫格底板 → 图标 → 背景 → 艺术字 → 未分类」从上到下重新摆放，消除重叠；只改变分类 Frame 的位置，不移动或重建主组件，不改变九宫格切片及内部约束。">重新整理</button>
     <span id="tidy-status" data-testid="tidy-status" class="muted small" style="flex:1;min-width:0">只调整分类 Frame 位置，不重建主组件、不改九宫格约束。</span>
   </div>
+</section>
+
+<section class="card" aria-label="选中主组件分类">
+  <div class="card-head"><h2>选中主组件分类 <span class="help-wrap"><span class="help" tabindex="0" role="note" aria-label="分类更正说明" title="按 Figma 当前选择处理主组件或实例；实例会定位主组件，无关对象不会被改造。人工分类优先于自动规则；恢复自动分类会清除人工覆盖。">?</span><span class="tooltip" role="tooltip">按 Figma 当前选择处理主组件或实例；实例会定位主组件，无关对象不会被改造。人工分类优先于自动规则；恢复自动分类会清除人工覆盖。</span></span></h2><span id="selection-status" data-testid="selection-status" class="chip">先选择游戏</span></div>
+  <div class="category-row">
+    <label><span>目标分类</span><select id="category-select" aria-label="选中主组件分类" title="选择人工分类后立即移动主组件到对应分类 Frame，并保留来源和实例关系；选择恢复自动分类会按当前名称、尺寸和九宫格规则重新归类。"><option value="">选择目标分类</option></select></label>
+    <button id="apply-category" class="quiet" title="只修改带本工具来源记录的主组件；实例会先定位主组件。混合选择中无关对象不会被改造，并在状态中说明。" disabled>应用分类</button>
+  </div>
+  <p id="selection-note" class="muted small" style="margin-top:4px">按 Figma 当前选择处理；实例会定位主组件，无关对象不改动。</p>
 </section>
 
 <section class="card" aria-label="任务状态">

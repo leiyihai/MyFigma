@@ -22,11 +22,12 @@ async function sprite(f, atlas, frameName, width, height) {
 async function setup() {
   const f = await projectFixture();
   const fixture = figmaFixture();
-  const workflow = new api.Workflow(new api.HelperClient(f.base, f.token), api.createFigmaPlatform(fixture.api));
+  const platform = api.createFigmaPlatform(fixture.api);
+  const workflow = new api.Workflow(new api.HelperClient(f.base, f.token), platform);
   await workflow.connect();
   await workflow.saveProject({ id: 'g8', name: '分类测试', path: f.project, maintained: true });
   await workflow.selectProject('g8');
-  return { f, workflow, ...fixture };
+  return { f, workflow, platform, ...fixture };
 }
 
 function categoryFrame(page, category) {
@@ -313,5 +314,101 @@ test('工具记录被整体清除时仍按分类显示名拦截重复创建', as
     // The derived display name still identifies a previously managed component.
     await assert.rejects(workflow.scan(), /来源记录损坏/);
     assert.equal(page.findAll(node => node.type === 'COMPONENT').length, 1);
+  } finally { await f.cleanup(); }
+});
+
+
+test('批量人工分类保留身份和实例，源更新后仍保留，恢复自动分类按当前规则重算', async () => {
+  const { f, workflow, platform, page, api: figma } = await setup();
+  const project = { id: 'g8', name: '分类测试' };
+  try {
+    await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    await workflow.scan();
+    await workflow.import();
+    const button = page.findAll(node => node.type === 'COMPONENT' && node.name === '按钮/btn_ok')[0];
+    const icon = page.findAll(node => node.type === 'COMPONENT' && node.name === '图标/icon_coin')[0];
+    assert.ok(button && icon);
+    const sourceBefore = button.getPluginData('atlas.source');
+    const identity = JSON.parse(sourceBefore).identity;
+    const instance = button.createInstance();
+    page.appendChild(instance);
+    const plain = figma.createComponent();
+    page.appendChild(plain);
+    plain.name = '用户自己的组件';
+    page.selection = [button, instance, icon, plain];
+
+    const selected = await platform.selection(project);
+    assert.equal(selected.mixed, true);
+    assert.equal(selected.ignored, 1);
+    assert.deepEqual(selected.members.map(member => member.category).sort(), ['按钮', '图标'].sort());
+    assert.equal(selected.members.find(member => member.id === button.id).viaInstance, true);
+
+    const applied = await platform.setCategory(project, selected.members.map(member => member.id), '艺术字');
+    assert.deepEqual([applied.action, applied.updated], ['manual', 2]);
+    assert.equal(applied.moved, 2);
+    assert.equal(button.parent.name, '艺术字');
+    assert.equal(icon.parent.name, '艺术字');
+    assert.equal(button.name, '艺术字/btn_ok');
+    assert.equal(icon.name, '艺术字/icon_coin');
+    assert.equal(button.getPluginData('atlas.category.manual'), '艺术字');
+    assert.equal(JSON.parse(button.getPluginData('atlas.source')).identity, identity);
+    assert.equal(JSON.parse(button.getPluginData('atlas.source')).sync.identity, identity);
+    assert.ok(page.findAll(node => node.type === 'INSTANCE' && node !== instance));
+    assert.equal(plain.name, '用户自己的组件');
+    assert.equal(plain.parent, page);
+    assert.equal(plain.getPluginData('atlas.category.manual'), '');
+
+    // A normal source update and import must not overwrite the manual choice.
+    await writePng(join(imageset(f.project), 'btn_ok.png'), 64, 24, solid(64, 24, [200, 10, 10, 255]));
+    await workflow.scan();
+    await workflow.import();
+    assert.equal(button.parent.name, '艺术字');
+    assert.equal(button.name, '艺术字/btn_ok');
+    assert.equal(button.getPluginData('atlas.category.manual'), '艺术字');
+    assert.equal(JSON.parse(button.getPluginData('atlas.source')).identity, identity);
+    assert.equal(instance.getMainComponentAsync && (await instance.getMainComponentAsync()), button);
+
+    // Restore auto classification uses the current rules and removes the override.
+    const restored = await platform.setCategory(project, [button.id, icon.id], 'auto');
+    assert.deepEqual([restored.action, restored.updated], ['auto', 2]);
+    assert.equal(button.getPluginData('atlas.category.manual'), '');
+    assert.equal(icon.getPluginData('atlas.category.manual'), '');
+    assert.equal(button.parent.name, '按钮');
+    assert.equal(icon.parent.name, '图标');
+    assert.equal(button.name, '按钮/btn_ok');
+    assert.equal(icon.name, '图标/icon_coin');
+  } finally { await f.cleanup(); }
+});
+
+test('批量分类同类重名补充来源，混合无关对象只跳过不改造', async () => {
+  const { f, workflow, platform, page, api: figma } = await setup();
+  const project = { id: 'g8', name: '分类测试' };
+  try {
+    await sprite(f, 'icons_a.json', 'icon_home', 32, 32);
+    await sprite(f, 'icons_b.json', 'icon_home', 32, 32);
+    await workflow.scan();
+    await workflow.import();
+    const homes = page.findAll(node => node.type === 'COMPONENT' && node.name.startsWith('图标/icon_home'));
+    assert.equal(homes.length, 2);
+    const before = new Map(homes.map(node => [node.id, node.getPluginData('atlas.source')]));
+    const foreign = figma.createComponent();
+    page.appendChild(foreign);
+    foreign.name = '外部组件';
+    page.selection = [...homes, foreign];
+
+    const result = await platform.setCategory(project, homes.map(node => node.id).concat(foreign.id), '背景');
+    assert.equal(result.updated, 2);
+    assert.match(result.messages.join('\n'), /外部组件.*跳过/);
+    assert.deepEqual(homes.map(node => node.name).sort(), [
+      '背景/icon_home · Static/icons_a.json',
+      '背景/icon_home · Static/icons_b.json'
+    ]);
+    for (const home of homes) assert.equal(home.getPluginData('atlas.source'), before.get(home.id));
+    assert.equal(foreign.name, '外部组件');
+    assert.equal(foreign.parent, page);
+
+    await assert.rejects(() => platform.setCategory(project, [homes[0].id], '不存在的分类'), /分类无效/);
+    assert.equal(homes[0].parent.name, '背景');
   } finally { await f.cleanup(); }
 });

@@ -1,6 +1,7 @@
 import {createFigmaPlatform} from './platform';
 import {Cancellation} from './api';
 import type {PublicProject,Scan} from './api';
+import type {CategoryName} from './category';
 figma.showUI(__html__,{width:520,height:720,themeColors:true});
 const platform=createFigmaPlatform(figma);
 const pairingKey='atlas.pairing.v1';
@@ -13,7 +14,7 @@ function validPairing(value:unknown):value is Pairing {
     && typeof pairing.token==='string' && /^[a-f0-9]{64}$/.test(pairing.token);
 }
 let active: Cancellation | undefined;
-figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicProject;scan:Scan;pairing?:Pairing})=>{
+figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicProject;scan:Scan;pairing?:Pairing;ids?:string[];category?:CategoryName|'auto'})=>{
   if(!message)return;
   // Cancellation is a control message, not a task reply; it may arrive while import is running.
   if(message.type==='cancel') {active?.cancel(); if(Number.isInteger(message.requestId)) figma.ui.postMessage({type:'result',requestId:message.requestId,result:true}); return;}
@@ -30,6 +31,8 @@ figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicPro
     }
     else if(message.type==='compare')reply(await platform.compare(message.project));
     else if(message.type==='tidy')reply(await platform.tidy(message.project));
+    else if(message.type==='selection')reply(await platform.selection(message.project));
+    else if(message.type==='set-category')reply(await platform.setCategory(message.project,message.ids ?? [],message.category ?? 'auto'));
     else if(message.type==='pairing-load') {
       const stored=await figma.clientStorage.getAsync(pairingKey);
       reply(validPairing(stored)?stored:null);
@@ -47,3 +50,4 @@ figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicPro
   } catch(error) {reply(null,error instanceof Error?error.message:'Figma 任务失败');}
 };
 figma.on('currentpagechange',()=>figma.ui.postMessage({type:'page-changed'}));
+figma.on('selectionchange',()=>figma.ui.postMessage({type:'selection-changed'}));

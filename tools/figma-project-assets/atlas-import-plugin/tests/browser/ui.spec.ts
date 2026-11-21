@@ -20,6 +20,8 @@ test('management dialog, full search, real scan, task lock, progress and hover g
       if(m.type==='pairing-load'){reply(window.pairing);return;}
       if(m.type==='pairing-save'){window.pairing=m.pairing;reply(true);return;}
       if(m.type==='pairing-clear'){window.pairing=null;reply(true);return;}
+      if(m.type==='selection'){const members=window.selectionMembers||[];reply({schemaVersion:1,members,ignored:window.selectionIgnored||0,mixed:new Set(members.map(x=>x.category)).size>1});return;}
+      if(m.type==='set-category'){window.categoryRequest=m;const members=(window.categoryMembers||window.selectionMembers||[]).map(x=>({...x,category:m.category,manual:m.category!=='auto'}));window.selectionMembers=members;reply({schemaVersion:1,action:m.category==='auto'?'auto':'manual',updated:members.length,moved:members.length,messages:[]});return;}
       if(m.type==='validate')reply(window.currentPageInvalid?{valid:false,message:'非空且未绑定页面不可导入'}:{valid:true,message:'空白页可导入'});
       if(m.type==='preview'){window.plan={schemaVersion:1,added:m.scan.resources.length,updated:0,removed:0,unchanged:0,blocked:0,removalSuppressed:false,messages:[]};reply(window.plan);}
       if(m.type==='import'){window.imported=m.scan;e.source.postMessage({pluginMessage:{type:'progress',progress:{done:1,total:2}}},'*');window.finish=cancelled=>reply({...window.plan,applied:{added:cancelled?1:window.plan.added,updated:0,removed:0},failures:[],cancelled:!!cancelled});}
@@ -147,6 +149,26 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await expect(ui.getByTestId('tidy-status')).toContainText('移动 2 个');
     await expect(ui.locator('#phase')).toHaveText('就绪');
     expect(await page.evaluate(()=>(window as any).tidyCalls)).toBe(1);
+    // Manual category controls use the live Figma selection; mixed choices stay explicit.
+    await page.evaluate(()=>{
+      const w=window as any;
+      w.selectionMembers=[
+        {id:'component-1',name:'按钮/ok',category:'按钮',manual:false,viaInstance:true},
+        {id:'component-2',name:'图标/coin',category:'图标',manual:false,viaInstance:false}
+      ];
+      w.selectionIgnored=1;
+      document.querySelector('iframe')!.contentWindow!.postMessage({pluginMessage:{type:'selection-changed'}},'*');
+    });
+    await expect(ui.getByTestId('selection-status')).toContainText('混合分类：按钮 / 图标');
+    await expect(ui.locator('#selection-note')).toContainText('已从 1 个实例定位主组件');
+    await expect(ui.locator('#selection-note')).toContainText('已忽略 1 个非本工具对象');
+    await expect(ui.getByRole('button',{name:'应用分类',exact:true})).toBeDisabled();
+    await ui.locator('#category-select').selectOption('艺术字');
+    await expect(ui.getByRole('button',{name:'应用分类',exact:true})).toBeEnabled();
+    await ui.getByRole('button',{name:'应用分类',exact:true}).click();
+    await expect(ui.getByTestId('selection-status')).toContainText('当前分类：艺术字');
+    expect(await page.evaluate(()=>(window as any).categoryRequest.category)).toBe('艺术字');
+    expect(await page.evaluate(()=>(window as any).categoryRequest.ids.length)).toBe(2);
     expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
     let releaseFailedScan!:()=>void;
     let failedScanStarted!:()=>void;

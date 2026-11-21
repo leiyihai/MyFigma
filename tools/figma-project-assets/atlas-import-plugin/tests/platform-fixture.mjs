@@ -49,6 +49,7 @@ export function figmaFixture() {
     return instance;
   };
   const page=pageNode();
+  page.selection=[];
   root={type:'DOCUMENT',children:[page]};
   const api={
     currentPage:page,
@@ -56,6 +57,12 @@ export function figmaFixture() {
     clientStorage:{async getAsync(k){return storage.get(k);},async setAsync(k,v){storage.set(k,v);},async deleteAsync(k){storage.delete(k);}},
     base64Decode:s=>Uint8Array.from(Buffer.from(s,'base64')),
     createImage(bytes){images.push(bytes);return {hash:'image-'+images.length};},
+    async getNodeByIdAsync(id){
+      let found=null;
+      const walk=nodes=>{for(const node of nodes){if(found)return;if(node.id===id){found=node;return;}if(Array.isArray(node.children))walk(node.children);}};
+      walk(root.children);
+      return found;
+    },
     createPage(){const created=pageNode();root.children.push(created);return created;},
     createFrame(){
       const n={type:'FRAME',name:'Frame',children:[],data:{},fills:[],

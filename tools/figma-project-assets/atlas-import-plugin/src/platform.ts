@@ -1,4 +1,4 @@
-import type { ImportPlan, ImportReport, LayoutUsage, Platform, Progress, PublicProject, Resource, Scan, Source, TidyResult } from './api';
+import type { CategoryResult, ImportPlan, ImportReport, LayoutUsage, Platform, Progress, PublicProject, Resource, Scan, SelectionState, Source, TidyResult } from './api';
 import { Cancellation } from './api';
 import { categoryIndex, classify, componentName, isCategoryName, type CategoryName } from './category';
 import { createNineSlicePlan, type Margins } from '../../packages/nine-slice/src/index';
@@ -12,6 +12,7 @@ const bindingKey = 'atlas.binding';
 const sourceKey = 'atlas.source';
 const syncKey = 'atlas.sync.v1';
 const categoryKey = 'atlas.category';
+const manualCategoryKey = 'atlas.category.manual';
 const compareKey = 'atlas.compare';
 const compareGroupKey = 'atlas.compare.group';
 const compareItemKey = 'atlas.compare.item';
@@ -278,8 +279,26 @@ function restoreCategoryLayouts(snapshots: CategoryLayout[]): void {
     } catch { /* best effort; never hide the import result for a layout restore */ }
   }
 }
+function manualCategory(component: ComponentNode): CategoryName | undefined {
+  const raw = component.getPluginData(manualCategoryKey);
+  return isCategoryName(raw) ? raw : undefined;
+}
+function currentCategory(component: ComponentNode): CategoryName | undefined {
+  const parent = component.parent;
+  return parent && parent.type === 'FRAME' ? frameCategory(parent as FrameNode) : undefined;
+}
+function componentPage(component: ComponentNode): PageNode | undefined {
+  let node: BaseNode | null = component;
+  while(node && node.type !== 'PAGE') node = node.parent;
+  return node && node.type === 'PAGE' ? node as PageNode : undefined;
+}
+function automaticCategory(component: ComponentNode, source: Source): CategoryName {
+  return classify({frameName:source.frameName,width:component.width,height:component.height,
+    nineSlice:!!readNineSliceRecord(component) || component.children.length > 0});
+}
 function plannedCategory(item: Candidate): CategoryName {
-  return classify({frameName:item.source.frameName,width:item.resource.width,height:item.resource.height,
+  const manual = item.existing ? manualCategory(item.existing.component) : undefined;
+  return manual || classify({frameName:item.source.frameName,width:item.resource.width,height:item.resource.height,
     nineSlice:item.planned.shape === 'slices'});
 }
 function existingComponents(page: PageNode, project: PublicProject): { items: Existing[]; corrupt: string[] } {
@@ -362,6 +381,9 @@ function isUnchanged(existing: Existing, item: Candidate, planned: Planned): boo
      existing.sync.sourceSize.w !== item.resource.width || existing.sync.sourceSize.h !== item.resource.height ||
      existing.component.width !== item.resource.width || existing.component.height !== item.resource.height) return false;
   if(existing.shape !== planned.shape) return false;
+  // A manual category (or a hand-moved component) is a document change that a
+  // normal content-identical scan still needs to correct.
+  if(currentCategory(existing.component) !== plannedCategory(item)) return false;
   if(planned.shape === 'image') return true;
   const record = existing.record;
   return !!record && sameMargins(record.current, planned.margins) && record.overlap === planned.overlap &&
@@ -771,7 +793,7 @@ function syncComparePage(page: PageNode, items: Map<string, CompareItem>, api: P
   }
   return {added, removed, kept, groups: keys.length, messages};
 }
-export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'createPage'|'createFrame'|'createComponent'|'createRectangle'|'createImage'|'base64Decode'>): Platform {
+export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'createPage'|'createFrame'|'createComponent'|'createRectangle'|'createImage'|'base64Decode'|'getNodeByIdAsync'>): Platform {
   let busy = false;
   return {
     async validate(project) {const page = api.currentPage; await loadPage(page); return validate(page,project);},
@@ -929,6 +951,83 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         restoreInstances(instances,updatedIds);
         throw error;
       } finally {restoreCategoryLayouts(categoryLayouts); busy=false;}
+    },
+    async selection(project) {
+      if(busy) throw new Error('任务执行中，请等待完成');
+      if(!project || typeof project.id !== 'string' || !project.name) throw new Error('项目信息无效');
+      const page = api.currentPage;
+      await loadPage(page);
+      const found = new Map<string, SelectionState['members'][number]>();
+      let ignored = 0;
+      for(const node of page.selection) {
+        let component: ComponentNode | undefined;
+        let viaInstance = false;
+        if(node.type === 'COMPONENT') component = node;
+        else if(node.type === 'INSTANCE') {
+          try { component = (await node.getMainComponentAsync()) || undefined; viaInstance = !!component; }
+          catch { component = undefined; }
+        }
+        if(!component) { ignored++; continue; }
+        const source = parseStoredSource(component, project);
+        const host = componentPage(component);
+        if(!source || !host || !validate(host, project).valid) { ignored++; continue; }
+        const category = manualCategory(component) || currentCategory(component) || automaticCategory(component, source);
+        const member = {id:component.id,name:component.name,category,manual:!!manualCategory(component),viaInstance};
+        const previous = found.get(component.id);
+        if(!previous) found.set(component.id, member);
+        else if(viaInstance) previous.viaInstance = true;
+      }
+      const members = [...found.values()];
+      return {schemaVersion:1,members,ignored,mixed:new Set(members.map(member=>member.category)).size > 1};
+    },
+    async setCategory(project, ids, category) {
+      if(busy) throw new Error('任务执行中，请等待完成');
+      if(!project || typeof project.id !== 'string' || !project.name) throw new Error('项目信息无效');
+      if(category !== 'auto' && !isCategoryName(category)) throw new Error('分类无效');
+      if(!Array.isArray(ids) || !ids.length || ids.length > 200 ||
+         ids.some(id=>typeof id !== 'string' || !/^[A-Za-z0-9:_;-]{1,128}$/.test(id))) throw new Error('主组件选择无效');
+      busy = true;
+      const createdFrames: FrameNode[] = [];
+      let layouts: CategoryLayout[] = [];
+      const messages: string[] = [];
+      try {
+        const jobs: Array<{component:ComponentNode;page:PageNode;target:CategoryName}> = [];
+        for(const id of [...new Set(ids)]) {
+          const node = await api.getNodeByIdAsync(id);
+          if(!node || node.type !== 'COMPONENT') { messages.push(`${id}：不是主组件，已跳过`); continue; }
+          const component = node as ComponentNode;
+          const source = parseStoredSource(component, project);
+          const host = componentPage(component);
+          if(!source || !host || !validate(host, project).valid) {
+            messages.push(`${component.name}：不是本项目资源页中的工具主组件，已跳过`);
+            continue;
+          }
+          if(category === 'auto') component.setPluginData(manualCategoryKey,'');
+          else component.setPluginData(manualCategoryKey,category);
+          const target = category === 'auto' ? automaticCategory(component, source) : category;
+          jobs.push({component,page:host,target});
+        }
+        if(!jobs.length) throw new Error('当前选择中没有可修改的本工具主组件');
+        const frames = new Map<string,FrameNode>();
+        for(const job of jobs) {
+          const target = ensureCategoryFrame(job.page,api,job.target,createdFrames);
+          frames.set(`${job.page.id}\u0000${target.id}`,target);
+        }
+        layouts = pauseCategoryLayouts(frames.values());
+        let moved = 0;
+        for(const job of jobs) {
+          const target = job.page.children.find(node=>node.type === 'FRAME' &&
+            frameCategory(node as FrameNode) === job.target) as FrameNode | undefined;
+          if(!target) { messages.push(`${job.component.name}：分类 Frame 不存在，已跳过`); continue; }
+          if(job.component.parent !== target) { target.appendChild(job.component); moved++; }
+        }
+        restoreCategoryLayouts(layouts); layouts = [];
+        for(const page of new Set(jobs.map(job=>job.page))) refreshDisplayNames(page,project,messages);
+        return {schemaVersion:1,action:category === 'auto' ? 'auto' : 'manual',updated:jobs.length,moved,messages};
+      } finally {
+        restoreCategoryLayouts(layouts);
+        busy = false;
+      }
     },
     async tidy(project) {
       if(!project || typeof project.id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(project.id) ||
