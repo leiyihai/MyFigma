@@ -1,6 +1,6 @@
-# Rust 本地资源助手（#2）
+# Rust 本地资源助手（#3）
 
-独立的 Windows 控制台程序；无需 ui-studio，不安装服务、托盘或开机启动项。
+独立的 Windows 控制台程序；无需 ui-studio，不安装服务、托盘或开机启动项。本批把 #2 的直接目录扫描扩展为项目私有资源的递归扫描与完整导入。
 
 ## 构建与启动
 
@@ -18,8 +18,9 @@ cargo build --release --locked
 - `token`：首次启动从操作系统随机源生成的 256 位 bearer 令牌。
 - `projects.json`：项目登记表；本机不同 Figma 文件复用。
 - `projects.tmp`：登记保存时先独占创建、同步，再替换正式文件；写失败不更新内存登记表。
+- `scans/<projectId>.json`：最近一次完整扫描结果（含恢复的散图与来源身份），供后续增量导入使用；内容只有项目编号/名称与项目内相对路径。
 
-拆图只在进程内存中处理，本版本不落盘缓存或凭据日志。`--data-dir <directory>`、`--port <port>` 供隔离测试/显式本机配置使用（`0` 表示随机端口）；生产插件 manifest 默认仅放行 38473。不要选择共享目录。Windows 依赖当前用户 Local AppData 的默认 ACL；不会主动扩宽 ACL。Unix 测试环境目录/新文件权限分别是 0700/0600，但不承诺非 Windows 产品支持。
+扫描结果先落盘到本机 `scans` 目录再返回，Figma 文档只保存白名单来源字段；不写凭据日志。`--data-dir <directory>`、`--port <port>` 供隔离测试/显式本机配置使用（`0` 表示随机端口）；生产插件 manifest 默认仅放行 38473。不要选择共享目录。Windows 依赖当前用户 Local AppData 的默认 ACL；不会主动扩宽 ACL。Unix 测试环境目录/新文件权限分别是 0700/0600，但不承诺非 Windows 产品支持。
 
 ## 手动配对
 
@@ -40,7 +41,7 @@ cargo build --release --locked
 | GET `/v1/projects` | 无 | `projects: Project[]` |
 | PUT `/v1/projects` | `{id,name,path,maintained}` | 全部 `projects`；编号相同则编辑 |
 | DELETE `/v1/projects/<id>` | 无 | 全部 `projects`；只删登记，不删资源 |
-| POST `/v1/scan` | `{projectId}` | `project:{id,name}, resources, summary, errors, complete` |
+| POST `/v1/scan` | `{projectId}` | `schemaVersion: 2`、`project:{id,name}`、`resources`、`errors`、`summary`、`truncated`、`complete` |
 
 `Project.id` 为 1–64 个 ASCII 字母、数字、下划线或连字符，是稳定项目身份。编辑编号意味着新项目；UI 编辑时锁定编号。名称非空且最多 200 UTF-8 字节。路径仅在助手登记与受认证 UI 中存在，不进入扫描响应的项目字段。
 
@@ -53,7 +54,7 @@ cargo build --release --locked
 
 ## 支持的最小图集格式
 
-把**直接包含图集 JSON 与 PNG 的目录**登记为资源目录（例如游戏的 `res/imageset`，不是要求登记整个游戏根）。可直接登记本目录下的 `examples` 来演示：`tiny.png` 是 2×1 红/绿图集，`red` 恢复为 2×2，右下角为红色，其余透明；`green` 为 1×1 绿色。
+登记范围保持兼容：登记游戏根时，若存在 `<根>/res/imageset` 就从该私有图集目录递归扫描；否则把登记目录本身作为扫描范围（例如直接登记 `res/imageset`，或用于演示的 `examples`）。只扫描登记范围内部，不向项目外补找公共图集。可由 `examples` 演示：`tiny.png` 是 2×1 红/绿图集，`red` 恢复为 2×2，右下角为红色，其余透明；`green` 为 1×1 绿色。
 
 ```json
 {
@@ -72,18 +73,22 @@ cargo build --release --locked
 
 对象式 `frames`，整数像素坐标；`sourceSize` 和非负偏移恢复透明留白；也支持 `offset:{x,y}`（有 `spriteSourceSize` 时优先使用它）。无裁切元数据的普通帧默认原大小、零偏移；显式 `trimmed:true` 必须同时提供原尺寸与偏移。PNG 不指定时使用 JSON 同名 PNG。
 
-限制：直接目录最多 16 个 JSON、每图集和每次最多 64 张散图、图集最大 2048×2048、恢复散图最大 1024×1024、单次恢复像素最多 8 Mi；JSON 最大 1 MiB、PNG 最大 16 MiB。输出是**各散图独立 PNG 的 base64**，不是整张图集。
+扫描递归遍历全部子目录并导入全部帧，不按布局引用过滤。扫描范围内未被任何图集作为源图引用的 PNG 视为独立图片：`kind:"standalone"`、`crop` 为整图、`offset` 为零，`relativePath` 含扩展名。与 JSON 同名或由 `meta.image` 指向的图集 PNG 不会被当成独立图片；即使该 JSON 解析失败也按同名规则排除，避免把整张图集二次导入。
 
-旋转、越界、损坏文件等明确报告并跳过；`complete:false` 表示有错误或未扫描子目录；摘要给出散图/异常/未扫描子目录数。允许导入已成功拆解的散图，但不表示完整扫描。没有删除推断或增量逻辑。未知结构不承诺兼容。子目录不递归、不扫描独立散图文件，不做九宫格、布局引用统计、完整分类或托盘（留给 #3–12）。
+规模上限仅用于防止失控：单次最多 20 000 项资源、恢复像素总量 10 亿、扫描条目 200 000、单图 4096×4096；JSON 最大 16 MiB、PNG 最大 64 MiB。触达上限时返回已恢复内容并给出明确错误、`truncated:true`、`complete:false`，不静默截断。输出是**各散图独立 PNG 的 base64**，不是整张图集。
+
+旋转帧、越界帧、缺图、坏 JSON 等明确报告问题位置（图集相对路径与帧名）并跳过该帧或该图集，不生成错误图片；`complete:false` 表示存在错误或扫描未完成，`truncated:true` 表示触达规模上限；摘要给出图集数/图集帧数/散图数/独立图片数/异常数/条目数。允许导入已成功拆解的散图，但不表示完整扫描；失败不会被当作源资源移除。没有删除推断或增量逻辑。未知结构不承诺兼容。不做九宫格统计、分类、对照页或托盘（留给 #4–12）。
 
 ## 来源身份
 
 每张散图包含：
 
 - `source.schemaVersion:1`、`kind:"atlas"`、`projectId`；
-- `relativePath`（本期 JSON 文件名）、`frameName`（原名）；
+- `relativePath`（图集 JSON 相对扫描范围的嵌套路径，`/` 分隔）、`frameName`（原名）；
 - `identity = JSON.stringify([projectId,"atlas",relativePath,frameName])`，分类和像素不影响身份；
-- `engineReference`、`sourceSize`、`crop`、`offset`。
+- `engineReference`（`set:<relativePath> image:<frameName>`）、`sourceSize`、`crop`、`offset`。
+
+独立图片的来源记录字段相同，差异为：`kind:"standalone"`、`relativePath` 为项目内相对路径含扩展名、`frameName` 为去扩展名的文件名、`identity = JSON.stringify([projectId,"standalone",relativePath])`、`engineReference = image:<relativePath>`、`crop` 为整图、`offset` 为零。
 
 Figma 插件只按白名单保存这些字段，不保存绝对路径、令牌或未知响应字段。这个 v1 格式不是与后续共享核心预先绑定的正式跨插件契约；集成时应保持版本检查，不把它擅自扩展为九宫格 schema。
 
@@ -100,6 +105,6 @@ npm test
 
 `npm test` 的 pretest 自动构建 Rust，然后运行真实子进程的 HTTP 集成测试（不是 Rust 单元 mock）。`pngjs` 仅用于测试读取恢复 PNG，对照固定样本的 RGBA 字面值；Rust 实际解码、拆图、编码由 `image` 执行。Rust 原生 `cargo test` 当前只有构建检查，没有额外单元用例。
 
-公开边界测试覆盖鉴权、Host/CORS/预检、请求限制、项目增删改和重启持久化、拆图像素与身份、非法/外部资源及缺失恢复信息。记录过的红→绿包括：初始进程退出导致登记用例失败；未实现 `/v1/scan` 返回 400 而非 200；`trimmed:true` 缺元数据仍错误导出，新增回归先失败（多出 green），修复后通过。新增 localhost Host 验证后共 7 个 HTTP 测试通过。
+公开边界测试覆盖鉴权、Host/CORS/预检、请求限制、项目增删改和重启持久化、拆图像素与身份、非法/外部资源及缺失恢复信息。新增 #3 回归（`tests/scan.test.mjs`，共 9 例）覆盖：游戏根/直接 imageset 两种登记、嵌套递归、跨图集同名、独立图片与图集排除、透明留白与偏移像素、坏 JSON/缺图/旋转/越界定位、超过旧上限的整本导入与触达上限的显式截断报告、助手侧扫描缓存不含绝对路径，以及本机样本包 g1008 子集（9 图集 263 帧 + 1 独立图片，逐像素对照原图集裁切）。记录过的红→绿包括：初始进程退出导致登记用例失败；未实现 `/v1/scan` 返回 400 而非 200；`trimmed:true` 缺元数据仍错误导出；#3 首次运行时嵌套图集返回 1 个资源而非 2 个、缺少 `summary.scanRoot` 与 `summary.standalone`、扫描缓存文件不存在，修复后通过。共 16 个 HTTP/扫描测试通过。
 
 依赖：`tiny_http`（HTTP）、`serde/serde_json`（协议与登记）、`rand`（随机令牌）、`image` 仅启用 PNG、`base64`；锁文件固定版本。没有运行时 Node 依赖。尚未执行 RustSec 审计，不把 cargo check 当作依赖安全审计。

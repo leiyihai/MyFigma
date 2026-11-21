@@ -26,7 +26,7 @@ struct App {
     projects: Vec<Project>,
 }
 
-fn private_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn private_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -95,7 +95,7 @@ impl App {
                     .iter()
                     .find(|p| p.id == id)
                     .ok_or("项目未登记")?;
-                atlas::scan(project)
+                atlas::scan(&self.data, project)
             }
             (&Method::Get, "/v1/projects") => {
                 Ok(json!({"schemaVersion":1,"projects":self.projects}))

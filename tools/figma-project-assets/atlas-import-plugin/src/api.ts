@@ -1,14 +1,18 @@
 export interface Project { id: string; name: string; path: string; maintained: boolean }
 export interface PublicProject { id: string; name: string }
 export interface Source {
-  schemaVersion: 1; projectId: string; kind: 'atlas'; relativePath: string; frameName: string;
+  schemaVersion: 1; projectId: string; kind: 'atlas' | 'standalone'; relativePath: string; frameName: string;
   identity: string; engineReference: string; sourceSize: {w: number; h: number};
   crop: {x: number; y: number; w: number; h: number}; offset: {x: number; y: number};
 }
 export interface Resource { width: number; height: number; png: string; source: Source }
+export interface ScanSummary {
+  scanRoot: string; atlases: number; atlasFrames: number; sprites: number; standalone: number;
+  resources: number; errors: number; skippedLinks: number; entries: number;
+}
 export interface Scan {
-  schemaVersion: 1; project: PublicProject; resources: Resource[]; errors: string[];
-  summary: {atlases: number; sprites: number; errors: number; skippedDirectories: number}; complete: boolean;
+  schemaVersion: 2; project: PublicProject; resources: Resource[]; errors: string[];
+  summary: ScanSummary; truncated: boolean; complete: boolean;
 }
 export interface PageStatus { valid: boolean; message: string }
 export interface Progress { done: number; total: number }
@@ -24,7 +28,7 @@ export class HelperClient {
     if (!/^http:\/\/(?:localhost|127\.0\.0\.1):\d{1,5}$/.test(base)) throw new Error('仅允许本机 localhost 或 127.0.0.1 HTTP 助手');
     if (!/^[a-f0-9]{64}$/.test(token)) throw new Error('请输入本机 token 文件中的 64 位配对令牌');
   }
-  private async request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  private async request<T>(path: string, method = 'GET', body?: unknown, version = 1): Promise<T> {
     let response: Response;
     try {
       response = await fetch(this.base + path, {method, headers: {
@@ -38,14 +42,14 @@ export class HelperClient {
       throw new Error(typeof error.error === 'string' ? error.error : '助手请求失败');
     }
     const value = await response.json();
-    if (value.schemaVersion !== 1) throw new Error('助手协议版本不兼容');
+    if (value.schemaVersion !== version) throw new Error('助手协议版本不兼容');
     return value as T;
   }
   async health(): Promise<void> { await this.request('/v1/health'); }
   async projects(): Promise<Project[]> { return (await this.request<{projects:Project[]}>('/v1/projects')).projects; }
   async saveProject(project: Project): Promise<Project[]> { return (await this.request<{projects:Project[]}>('/v1/projects','PUT',project)).projects; }
   async deleteProject(id: string): Promise<Project[]> { return (await this.request<{projects:Project[]}>('/v1/projects/'+encodeURIComponent(id),'DELETE')).projects; }
-  scan(projectId: string): Promise<Scan> { return this.request('/v1/scan','POST',{projectId}); }
+  scan(projectId: string): Promise<Scan> { return this.request('/v1/scan','POST',{projectId},2); }
 }
 export interface State {
   connected: boolean; busy: boolean; phase: string; error: string;
