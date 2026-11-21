@@ -3,10 +3,21 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use image::{ImageFormat, ImageReader, RgbaImage};
 use serde_json::{Value, json};
 use std::{
+    collections::HashSet,
     fs,
     io::{Cursor, Read},
-    path::{Component, Path},
+    path::{Component, Path, PathBuf},
 };
+
+const SCAN_SCHEMA_VERSION: u32 = 2;
+const MAX_JSON_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+/// Restored sprites and atlas sheets share one dimension limit so a large
+/// project is scanned whole rather than silently truncated.
+const MAX_IMAGE_DIMENSION: u32 = 4096;
+const MAX_SCAN_ENTRIES: u64 = 200_000;
+const MAX_RESOURCES: usize = 20_000;
+const MAX_TOTAL_PIXELS: u64 = 1_000_000_000;
 
 fn small_file(path: &Path, max: u64) -> Result<Vec<u8>> {
     let file = fs::File::open(path).map_err(|_| "文件不可读")?;
@@ -15,11 +26,11 @@ fn small_file(path: &Path, max: u64) -> Result<Vec<u8>> {
         .read_to_end(&mut bytes)
         .map_err(|_| "文件不可读")?;
     if bytes.len() as u64 > max {
-        return Err("文件超过小型图集限制");
+        return Err("文件超过扫描大小上限");
     }
     Ok(bytes)
 }
-fn within(root: &Path, path: &Path) -> Result<std::path::PathBuf> {
+fn within(root: &Path, path: &Path) -> Result<PathBuf> {
     let resolved = path.canonicalize().map_err(|_| "资源不存在")?;
     if !resolved.starts_with(root) {
         return Err("拒绝项目外资源");
@@ -40,6 +51,42 @@ fn safe_name(name: &str) -> bool {
         && !name.starts_with('/')
         && !name.split('/').any(|p| p == "..")
         && !name.chars().any(char::is_control)
+}
+/// Portable path relative to the scan scope. Every segment is validated so the
+/// value can travel to Figma without local directory information.
+fn relative_path(scope: &Path, path: &Path) -> Result<String> {
+    let relative = path.strip_prefix(scope).map_err(|_| "资源不在扫描范围")?;
+    let mut parts = Vec::new();
+    for component in relative.components() {
+        match component {
+            Component::Normal(part) => parts.push(part.to_str().ok_or("资源名无效")?),
+            _ => return Err("资源名无效"),
+        }
+    }
+    let joined = parts.join("/");
+    if !safe_name(&joined) {
+        return Err("资源名无效");
+    }
+    Ok(joined)
+}
+fn decode_png(bytes: Vec<u8>) -> Result<RgbaImage> {
+    let mut reader = ImageReader::with_format(Cursor::new(bytes), ImageFormat::Png);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_IMAGE_DIMENSION);
+    limits.max_image_height = Some(MAX_IMAGE_DIMENSION);
+    limits.max_alloc = Some(128 * 1024 * 1024);
+    reader.limits(limits);
+    reader
+        .decode()
+        .map(|image| image.into_rgba8())
+        .map_err(|_| "PNG 无效或超过 4096 像素限制")
+}
+fn encode_png(image: &RgbaImage) -> Result<String> {
+    let mut png = Cursor::new(Vec::new());
+    image
+        .write_to(&mut png, ImageFormat::Png)
+        .map_err(|_| "PNG 编码失败")?;
+    Ok(STANDARD.encode(png.into_inner()))
 }
 fn restore(
     project: &Project,
@@ -76,14 +123,14 @@ fn restore(
         || h == 0
         || sw == 0
         || sh == 0
-        || sw > 1024
-        || sh > 1024
+        || sw > MAX_IMAGE_DIMENSION
+        || sh > MAX_IMAGE_DIMENSION
         || x.checked_add(w).is_none_or(|v| v > atlas.width())
         || y.checked_add(h).is_none_or(|v| v > atlas.height())
         || ox.checked_add(w).is_none_or(|v| v > sw)
         || oy.checked_add(h).is_none_or(|v| v > sh)
     {
-        return Err("帧越界或超过 1024 像素限制");
+        return Err("帧越界或超过 4096 像素限制");
     }
     let mut restored = RgbaImage::new(sw, sh);
     for dy in 0..h {
@@ -91,12 +138,8 @@ fn restore(
             restored.put_pixel(ox + dx, oy + dy, *atlas.get_pixel(x + dx, y + dy));
         }
     }
-    let mut png = Cursor::new(Vec::new());
-    restored
-        .write_to(&mut png, ImageFormat::Png)
-        .map_err(|_| "PNG 编码失败")?;
     Ok(
-        json!({"width":sw,"height":sh,"png":STANDARD.encode(png.into_inner()),"source":{
+        json!({"width":sw,"height":sh,"png":encode_png(&restored)?,"source":{
             "schemaVersion":1,"projectId":project.id,"kind":"atlas","relativePath":relative,"frameName":name,
             "identity":serde_json::to_string(&json!([project.id,"atlas",relative,name])).map_err(|_| "身份编码失败")?,
             "engineReference":format!("set:{relative} image:{name}"),"sourceSize":{"w":sw,"h":sh},
@@ -104,113 +147,296 @@ fn restore(
         }}),
     )
 }
-fn read_atlas(
-    project: &Project,
-    root: &Path,
-    path: &Path,
-    resources: &mut Vec<Value>,
-    errors: &mut Vec<String>,
-    pixels: &mut u64,
-) -> Result<()> {
-    let relative = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or("图集名无效")?;
-    if !safe_name(relative) {
-        return Err("图集名无效");
+/// A PNG that no atlas consumes is its own source asset; crop is the whole
+/// image and offset is zero, so it shares the main-component source record.
+fn standalone(project: &Project, root: &Path, path: &Path) -> Result<Value> {
+    let relative = relative_path(root, path)?;
+    let name = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or("资源名无效")?;
+    if !safe_name(name) {
+        return Err("散图名无效");
     }
-    let bytes = small_file(&within(root, path)?, 1024 * 1024)?;
+    let bytes = small_file(&within(root, path)?, MAX_IMAGE_BYTES)?;
+    let image = decode_png(bytes)?;
+    let (w, h) = image.dimensions();
+    if w == 0 || h == 0 {
+        return Err("图片尺寸无效");
+    }
+    Ok(
+        json!({"width":w,"height":h,"png":encode_png(&image)?,"source":{
+            "schemaVersion":1,"projectId":project.id,"kind":"standalone","relativePath":relative,"frameName":name,
+            "identity":serde_json::to_string(&json!([project.id,"standalone",relative])).map_err(|_| "身份编码失败")?,
+            "engineReference":format!("image:{relative}"),"sourceSize":{"w":w,"h":h},
+            "crop":{"x":0,"y":0,"w":w,"h":h},"offset":{"x":0,"y":0}
+        }}),
+    )
+}
+
+/// Registration stays compatible: a game root that holds `res/imageset` is
+/// scanned from that private imageset directory, otherwise the registered
+/// directory is the scan scope itself.
+fn scan_scope(root: &Path) -> (PathBuf, String) {
+    let imageset = root.join("res").join("imageset");
+    match imageset.canonicalize() {
+        Ok(path) if path.is_dir() && path.starts_with(root) => (path, "res/imageset".to_string()),
+        _ => (root.to_path_buf(), ".".to_string()),
+    }
+}
+
+struct Found {
+    atlases: Vec<PathBuf>,
+    images: Vec<PathBuf>,
+    links: u64,
+    entries: u64,
+    errors: Vec<String>,
+    truncated: bool,
+}
+
+fn finish(mut found: Found, root: &Path) -> Found {
+    found
+        .atlases
+        .sort_by_key(|path| relative_path(root, path).unwrap_or_default());
+    found
+        .images
+        .sort_by_key(|path| relative_path(root, path).unwrap_or_default());
+    found
+}
+
+fn collect(root: &Path) -> Found {
+    let mut found = Found {
+        atlases: Vec::new(),
+        images: Vec::new(),
+        links: 0,
+        entries: 0,
+        errors: Vec::new(),
+        truncated: false,
+    };
+    let mut stack = vec![(root.to_path_buf(), 0u32)];
+    while let Some((directory, depth)) = stack.pop() {
+        let label = relative_path(root, &directory).unwrap_or_else(|_| ".".to_string());
+        if depth > 32 {
+            found
+                .errors
+                .push(format!("目录 {label}：层级超过 32 层，已跳过"));
+            found.truncated = true;
+            continue;
+        }
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(_) => {
+                found.errors.push(format!("目录 {label}：不可读"));
+                found.truncated = true;
+                continue;
+            }
+        };
+        for entry in entries {
+            if found.entries >= MAX_SCAN_ENTRIES {
+                found
+                    .errors
+                    .push("扫描条目超过上限，结果不完整".to_string());
+                found.truncated = true;
+                return finish(found, root);
+            }
+            found.entries += 1;
+            let Ok(entry) = entry else {
+                found.errors.push(format!("目录 {label}：存在不可读条目"));
+                found.truncated = true;
+                continue;
+            };
+            let Ok(file_type) = entry.file_type() else {
+                found.errors.push(format!("目录 {label}：存在不可读条目"));
+                found.truncated = true;
+                continue;
+            };
+            let path = entry.path();
+            if file_type.is_symlink() {
+                // Never follow links: they can leave the registered project.
+                found.links += 1;
+            } else if file_type.is_dir() {
+                stack.push((path, depth + 1));
+            } else if file_type.is_file() {
+                let extension = path
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or_default();
+                if extension.eq_ignore_ascii_case("json") {
+                    found.atlases.push(path);
+                } else if extension.eq_ignore_ascii_case("png") {
+                    found.images.push(path);
+                }
+            }
+        }
+    }
+    finish(found, root)
+}
+
+fn limit_error(resources: usize, pixels: u64, width: u64, height: u64) -> Option<&'static str> {
+    if resources >= MAX_RESOURCES {
+        return Some("资源数量超过单次扫描上限");
+    }
+    if pixels.saturating_add(width.saturating_mul(height)) > MAX_TOTAL_PIXELS {
+        return Some("恢复像素总量超过单次扫描上限");
+    }
+    None
+}
+
+#[derive(Default)]
+struct ScanState {
+    resources: Vec<Value>,
+    errors: Vec<String>,
+    pixels: u64,
+    atlas_frames: usize,
+    /// Sheets already consumed by an atlas, keyed by canonical path so a packed
+    /// sheet is never re-imported as a standalone image.
+    claimed: HashSet<PathBuf>,
+    truncated: bool,
+}
+
+fn read_atlas(project: &Project, root: &Path, path: &Path, state: &mut ScanState) -> Result<usize> {
+    let relative = relative_path(root, path)?;
+    let bytes = small_file(&within(root, path)?, MAX_JSON_BYTES)?;
     let doc: Value = serde_json::from_slice(&bytes).map_err(|_| "JSON 格式无效")?;
     let frames = doc["frames"].as_object().ok_or("需要对象式 frames")?;
-    if frames.len() > 64 {
-        return Err("单图集最多 64 帧");
-    }
     let default_image = path
         .with_extension("png")
         .file_name()
-        .unwrap()
-        .to_string_lossy()
-        .into_owned();
+        .and_then(|value| value.to_str())
+        .ok_or("图集名无效")?
+        .to_string();
     let image_name = doc["meta"]["image"].as_str().unwrap_or(&default_image);
-    if !safe_name(image_name)
-        || Path::new(image_name).components().count() != 1
-        || !matches!(
-            Path::new(image_name).components().next(),
-            Some(Component::Normal(_))
-        )
-        || !image_name.to_ascii_lowercase().ends_with(".png")
-    {
-        return Err("图集图片必须位于登记目录");
+    if !safe_name(image_name) || !image_name.to_ascii_lowercase().ends_with(".png") {
+        return Err("图集图片必须位于项目扫描范围内");
     }
-    let image_bytes = small_file(&within(root, &root.join(image_name))?, 16 * 1024 * 1024)?;
-    let mut reader = ImageReader::with_format(Cursor::new(image_bytes), ImageFormat::Png);
-    let mut limits = image::Limits::default();
-    limits.max_image_width = Some(2048);
-    limits.max_image_height = Some(2048);
-    limits.max_alloc = Some(32 * 1024 * 1024);
-    reader.limits(limits);
-    let atlas = reader
-        .decode()
-        .map_err(|_| "PNG 无效或超过 2048 像素限制")?
-        .into_rgba8();
+    let image_path = path.parent().ok_or("图集路径无效")?.join(image_name);
+    let resolved = within(root, &image_path).map_err(|_| "图集图片必须位于项目扫描范围内")?;
+    state.claimed.insert(resolved.clone());
+    let atlas = decode_png(small_file(&resolved, MAX_IMAGE_BYTES)?)?;
     for (name, frame) in frames {
-        if resources.len() >= 64 {
-            return Err("本次最多导入 64 张散图");
-        }
-        match restore(project, relative, name, frame, &atlas) {
+        match restore(project, &relative, name, frame, &atlas) {
             Ok(resource) => {
-                *pixels +=
-                    resource["width"].as_u64().unwrap() * resource["height"].as_u64().unwrap();
-                if *pixels > 8 * 1024 * 1024 {
-                    return Err("本次恢复像素超过限制");
+                let width = resource["width"].as_u64().unwrap_or_default();
+                let height = resource["height"].as_u64().unwrap_or_default();
+                if let Some(limit) = limit_error(state.resources.len(), state.pixels, width, height)
+                {
+                    state
+                        .errors
+                        .push(format!("图集 {relative}：{limit}，扫描结果不完整"));
+                    state.truncated = true;
+                    return Ok(frames.len());
                 }
-                resources.push(resource);
+                state.pixels += width * height;
+                state.resources.push(resource);
             }
-            Err(error) => errors.push(error.to_string()),
+            Err(error) => state
+                .errors
+                .push(format!("图集 {relative} 帧 {name}：{error}")),
         }
     }
-    Ok(())
+    Ok(frames.len())
 }
-pub fn scan(project: &Project) -> Result<Value> {
+
+/// The complete scan record is kept next to the helper's own data so later
+/// incremental work can rely on it; Figma only ever receives whitelisted
+/// source fields.
+fn cache_scan(data: &Path, project: &Project, scan: &Value) -> Result<()> {
+    let directory = data.join("scans");
+    fs::create_dir_all(&directory).map_err(|_| "扫描缓存目录不可写")?;
+    let path = directory.join(format!("{}.json", project.id));
+    let temp = directory.join(format!("{}.tmp", project.id));
+    let bytes = serde_json::to_vec(scan).map_err(|_| "扫描缓存编码失败")?;
+    if temp.exists() {
+        fs::remove_file(&temp).map_err(|_| "扫描缓存不可写")?;
+    }
+    crate::private_write(&temp, &bytes).map_err(|_| "扫描缓存不可写")?;
+    fs::rename(&temp, &path).map_err(|_| "扫描缓存不可写")
+}
+
+pub fn scan(data: &Path, project: &Project) -> Result<Value> {
     let root = Path::new(&project.path)
         .canonicalize()
         .map_err(|_| "资源目录不可用")?;
-    let mut paths = Vec::new();
-    let mut skipped_directories = 0;
-    for entry in fs::read_dir(&root).map_err(|_| "资源目录不可读")? {
-        let entry = entry.map_err(|_| "目录项不可读")?;
-        if entry.file_type().map_err(|_| "目录项不可读")?.is_dir() {
-            skipped_directories += 1;
-        }
-        if entry
-            .path()
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+    let (scope, label) = scan_scope(&root);
+    let found = collect(&scope);
+    let mut state = ScanState {
+        errors: found.errors.clone(),
+        truncated: found.truncated,
+        ..ScanState::default()
+    };
+    // A sheet is consumed by the atlas JSON next to it even when that JSON is
+    // broken, so a failed parse can never turn a packed sheet into a standalone.
+    for path in &found.atlases {
+        if let Ok(sheet) = path.with_extension("png").canonicalize()
+            && sheet.starts_with(&scope)
         {
-            paths.push(entry.path());
-        }
-        if paths.len() > 16 {
-            return Err("登记目录最多支持 16 个 JSON 图集");
+            state.claimed.insert(sheet);
         }
     }
-    paths.sort();
-    let mut resources = Vec::new();
-    let mut errors = Vec::new();
-    let mut pixels = 0;
-    for path in &paths {
-        if let Err(error) = read_atlas(
-            project,
-            &root,
-            path,
-            &mut resources,
-            &mut errors,
-            &mut pixels,
-        ) {
-            errors.push(error.to_string());
+    for path in &found.atlases {
+        if state.truncated {
+            break;
+        }
+        match read_atlas(project, &scope, path, &mut state) {
+            Ok(frames) => state.atlas_frames += frames,
+            Err(error) => {
+                let relative =
+                    relative_path(&scope, path).unwrap_or_else(|_| "未知图集".to_string());
+                state.errors.push(format!("图集 {relative}：{error}"));
+            }
         }
     }
-    Ok(
-        json!({"schemaVersion":1,"project":{"id":project.id,"name":project.name},"resources":resources,"errors":errors,
-        "summary":{"atlases":paths.len(),"sprites":resources.len(),"errors":errors.len(),"skippedDirectories":skipped_directories},"complete":errors.is_empty() && skipped_directories == 0}),
-    )
+    for path in &found.images {
+        if state.truncated {
+            break;
+        }
+        let relative = relative_path(&scope, path).unwrap_or_else(|_| "未知图片".to_string());
+        let Ok(resolved) = path.canonicalize() else {
+            state
+                .errors
+                .push(format!("独立图片 {relative}：文件不可读"));
+            continue;
+        };
+        if state.claimed.contains(&resolved) {
+            continue;
+        }
+        match standalone(project, &scope, path) {
+            Ok(resource) => {
+                let width = resource["width"].as_u64().unwrap_or_default();
+                let height = resource["height"].as_u64().unwrap_or_default();
+                if let Some(limit) = limit_error(state.resources.len(), state.pixels, width, height)
+                {
+                    state
+                        .errors
+                        .push(format!("独立图片 {relative}：{limit}，扫描结果不完整"));
+                    state.truncated = true;
+                    break;
+                }
+                state.pixels += width * height;
+                state.resources.push(resource);
+            }
+            Err(error) => state.errors.push(format!("独立图片 {relative}：{error}")),
+        }
+    }
+    let sprites = state
+        .resources
+        .iter()
+        .filter(|resource| resource["source"]["kind"] == "atlas")
+        .count();
+    let complete = state.errors.is_empty() && !state.truncated;
+    let mut value = json!({"schemaVersion":SCAN_SCHEMA_VERSION,"project":{"id":project.id,"name":project.name},
+        "resources":state.resources,"errors":state.errors,
+        "summary":{"scanRoot":label,"atlases":found.atlases.len(),"atlasFrames":state.atlas_frames,
+            "sprites":sprites,"standalone":state.resources.len()-sprites,"resources":state.resources.len(),
+            "errors":state.errors.len(),"skippedLinks":found.links,"entries":found.entries},
+        "truncated":state.truncated,"complete":complete});
+    if let Err(error) = cache_scan(data, project, &value) {
+        if let Some(list) = value["errors"].as_array_mut() {
+            list.push(json!(error));
+        }
+        let count = value["errors"].as_array().map_or(0, Vec::len);
+        value["summary"]["errors"] = json!(count);
+        value["complete"] = json!(false);
+    }
+    Ok(value)
 }

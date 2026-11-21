@@ -76,7 +76,7 @@ test('scan reports rotated, out-of-bounds and project-external images without le
     await writeFile(path,JSON.stringify(doc));
     const external=await(await f.request('/v1/scan','POST',{projectId:'g2'})).json();
     assert.equal(external.resources.length,0);
-    assert.match(external.errors[0],/登记目录/);
+    assert.match(external.errors[0],/扫描范围/);
     assert.equal(JSON.stringify(external).includes(JSON.stringify(f.root).slice(1,-1)),false);
   }finally{await f.cleanup();}
 });
@@ -103,7 +103,7 @@ test('scan restores individual PNG pixels and stable relative source identities'
     const response = await f.request('/v1/scan','POST',{projectId:'g2'});
     assert.equal(response.status,200);
     const scan = await response.json();
-    assert.equal(scan.schemaVersion,1);
+    assert.equal(scan.schemaVersion,2);
     assert.equal(scan.resources.length,2);
     assert.deepEqual(scan.errors,[]);
     const red = scan.resources.find(r=>r.source.frameName==='red');

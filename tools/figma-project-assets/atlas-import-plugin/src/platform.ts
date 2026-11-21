@@ -13,15 +13,30 @@ function validate(page: PageNode, project: PublicProject) {
 function safeName(name: unknown): name is string {
   return typeof name === 'string' && name.length > 0 && name.length <= 256 && !/[\\:\x00-\x1f]/.test(name) && !name.startsWith('/') && !name.split('/').includes('..');
 }
-function int(n: unknown, max = 2048): n is number {return Number.isInteger(n) && Number(n) >= 0 && Number(n) <= max;}
+function int(n: unknown, max = 4096): n is number {return Number.isInteger(n) && Number(n) >= 0 && Number(n) <= max;}
+// Scan scopes are recursive, so source paths carry `/` separators. Each segment
+// must stay a plain name; the value never contains a local absolute path.
+function relativePath(path: unknown): path is string {
+  if(typeof path !== 'string' || path.length === 0 || path.length > 512 || /[\\:\x00-\x1f]/.test(path) || path.startsWith('/')) return false;
+  return path.split('/').every(segment=>segment.length > 0 && segment.length <= 256 && segment !== '.' && segment !== '..');
+}
 function sourceFor(resource: Resource, project: PublicProject): Source {
   const s = resource.source;
-  if(!s || s.schemaVersion !== 1 || s.projectId !== project.id || s.kind !== 'atlas' || !safeName(s.relativePath) || s.relativePath.includes('/') || !safeName(s.frameName)) throw new Error('散图来源身份无效');
-  const identity = JSON.stringify([project.id,'atlas',s.relativePath,s.frameName]);
-  if(s.identity !== identity || !int(resource.width,1024) || !int(resource.height,1024) || !resource.width || !resource.height || !s.crop || !s.offset || !s.sourceSize || s.sourceSize.w !== resource.width || s.sourceSize.h !== resource.height || !Object.values(s.crop).every(n=>int(n)) || !int(s.crop.x) || !int(s.crop.y) || !int(s.crop.w) || !int(s.crop.h) || !s.crop.w || !s.crop.h || !int(s.offset.x) || !int(s.offset.y) || s.offset.x+s.crop.w>resource.width || s.offset.y+s.crop.h>resource.height || typeof resource.png !== 'string' || resource.png.length > 6*1024*1024) throw new Error('散图尺寸或来源数据无效');
+  if(!s || s.schemaVersion !== 1 || s.projectId !== project.id || !relativePath(s.relativePath) || !safeName(s.frameName)) throw new Error('散图来源身份无效');
+  let identity: string, engineReference: string;
+  if(s.kind === 'atlas') {
+    identity = JSON.stringify([project.id,'atlas',s.relativePath,s.frameName]);
+    engineReference = `set:${s.relativePath} image:${s.frameName}`;
+  } else if(s.kind === 'standalone') {
+    if(!s.relativePath.toLowerCase().endsWith('.png')) throw new Error('散图来源身份无效');
+    identity = JSON.stringify([project.id,'standalone',s.relativePath]);
+    engineReference = `image:${s.relativePath}`;
+  } else throw new Error('散图来源身份无效');
+  if(s.identity !== identity || !int(resource.width) || !int(resource.height) || !resource.width || !resource.height || !s.crop || !s.offset || !s.sourceSize || s.sourceSize.w !== resource.width || s.sourceSize.h !== resource.height || !Object.values(s.crop).every(n=>int(n)) || !int(s.crop.x) || !int(s.crop.y) || !int(s.crop.w) || !int(s.crop.h) || !s.crop.w || !s.crop.h || !int(s.offset.x) || !int(s.offset.y) || s.offset.x+s.crop.w>resource.width || s.offset.y+s.crop.h>resource.height || typeof resource.png !== 'string' || resource.png.length > 64*1024*1024) throw new Error('散图尺寸或来源数据无效');
+  if(s.kind === 'standalone' && (s.crop.x !== 0 || s.crop.y !== 0 || s.crop.w !== resource.width || s.crop.h !== resource.height || s.offset.x !== 0 || s.offset.y !== 0)) throw new Error('散图尺寸或来源数据无效');
   // Deliberate whitelist: no local paths, credentials or unknown helper fields enter the document.
-  return {schemaVersion:1,projectId:project.id,kind:'atlas',relativePath:s.relativePath,frameName:s.frameName,identity,
-    engineReference:`set:${s.relativePath} image:${s.frameName}`,sourceSize:{w:resource.width,h:resource.height},
+  return {schemaVersion:1,projectId:project.id,kind:s.kind,relativePath:s.relativePath,frameName:s.frameName,identity,
+    engineReference,sourceSize:{w:resource.width,h:resource.height},
     crop:{x:s.crop.x,y:s.crop.y,w:s.crop.w,h:s.crop.h},offset:{x:s.offset.x,y:s.offset.y}};
 }
 export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFrame'|'createComponent'|'createImage'|'base64Decode'>): Platform {
@@ -36,7 +51,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFra
       let writtenName = '', writtenBinding = '';
       const oldName = page.name, oldBinding = page.getPluginData(bindingKey);
       try {
-        if(scan.schemaVersion !== 1 || !scan.project || !/^[a-zA-Z0-9_-]{1,64}$/.test(scan.project.id) || typeof scan.project.name !== 'string' || !scan.project.name.trim() || scan.project.name.length > 200 || !Array.isArray(scan.resources) || !scan.resources.length || scan.resources.length > 64) throw new Error('扫描协议无效');
+        if(scan.schemaVersion !== 2 || !scan.project || !/^[a-zA-Z0-9_-]{1,64}$/.test(scan.project.id) || typeof scan.project.name !== 'string' || !scan.project.name.trim() || scan.project.name.length > 200 || !Array.isArray(scan.resources) || !scan.resources.length || scan.resources.length > 20000 || typeof scan.complete !== 'boolean') throw new Error('扫描协议版本不兼容');
         const status = validate(page,scan.project);
         if(!status.valid) throw new Error(status.message);
         const sources = scan.resources.map(r=>sourceFor(r,scan.project));

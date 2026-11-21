@@ -53,7 +53,7 @@ function render() {
   el<HTMLButtonElement>('scan').disabled=busy||pageValidationPending||!connected||!s?.selected||s.page?.valid===false;
   el<HTMLButtonElement>('import').disabled=busy||pageValidationPending||!s?.scan?.resources.length||s.page?.valid===false;
   const summary=s?.scan?.summary;
-  el('summary').textContent=summary?`图集 ${summary.atlases} · 散图 ${summary.sprites} · 异常 ${summary.errors} · 未扫描子目录 ${summary.skippedDirectories}`:'尚未扫描';
+  el('summary').textContent=summary?`图集 ${summary.atlases} · 散图 ${summary.sprites} · 独立图片 ${summary.standalone} · 异常 ${summary.errors}${s?.scan?.complete?'':' · 扫描不完整'}`:'尚未扫描';
   const details=el('details');details.textContent=s?.scan?.errors.join('\n')||'';details.classList.toggle('hidden',!details.textContent);
   const progress=s?.progress||{done:0,total:0};
   el('progress').textContent=`${progress.done} / ${progress.total}`;
