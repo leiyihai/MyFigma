@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "types": [
+      "@figma/plugin-typings"
+    ],
+    "skipLibCheck": true
+  },
+  "include": [
+    "code.ts",
+    "../../../packages/nine-slice/src/**/*.ts"
+  ]
+}

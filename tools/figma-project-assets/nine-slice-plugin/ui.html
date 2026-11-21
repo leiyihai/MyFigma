@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    :root { --primary: #18a0fb; --bg: #f5f5f5; --card-bg: #ffffff; --text-main: #333333; --text-mute: #888888; --border: #e6e6e6; --success: #34c759; }
+    body { font-family: "Inter", -apple-system, sans-serif; background: var(--bg); padding: 14px; margin: 0; user-select: none; font-size: 12px; height: 712px; display: flex; flex-direction: column; color: var(--text-main); }
+    .card { background: var(--card-bg); border-radius: 12px; padding: 14px; margin-bottom: 12px; border: 1px solid rgba(0,0,0,0.03); box-shadow: 0 2px 5px rgba(0,0,0,0.05); position: relative; }
+    #canvas-container { width: 100%; height: 260px; background: #111; border-radius: 10px; overflow: hidden; position: relative; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; box-shadow: inset 0 0 20px rgba(0,0,0,0.5); }
+    #viewport { position: absolute; transform-origin: 0 0; transition: transform 0.1s ease-out; }
+    #preview-img { display: block; image-rendering: pixelated; pointer-events: none; }
+    #empty-hint { color: #666; text-align: center; line-height: 1.6; z-index: 5; font-weight: 500; }
+    #batch-overlay { display: none; position: absolute; bottom: 6px; left: 6px; padding: 4px 8px; border-radius: 4px; background: rgba(255,255,255,0.85); pointer-events: none; z-index: 100; color: var(--text-main); font-weight: 600; font-size: 11px; }
+    .guide-wrapper { position: absolute; background: transparent; pointer-events: all; z-index: 10; display: flex; align-items: center; justify-content: center; }
+    .guide-wrapper-h { height: 20px; width: 40000px; left: -20000px; cursor: ns-resize; }
+    .guide-wrapper-v { width: 20px; height: 40000px; top: -20000px; cursor: ew-resize; }
+    .guide-visual { background: #00ff00; pointer-events: none; position: absolute; box-shadow: 0 0 4px rgba(0,255,0,0.5); }
+    .guide-visual-h { height: 1px; width: 100%; top: 50%; transform: translateY(-50%); }
+    .guide-visual-v { width: 1px; height: 100%; left: 50%; transform: translateX(-50%); }
+    .interact-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .tool-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #444; }
+    .tool-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .zoom-txt { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--text-mute); margin-left: auto; }
+    .help-wrap { position: relative; display: inline-flex; align-items: center; }
+    .help-icon { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; background: #eee; border-radius: 50%; font-size: 9px; color: #aaa; margin-left: 5px; cursor: help; font-weight: bold; }
+    .tooltip { visibility: hidden; width: 190px; background: rgba(30,30,30,0.98); color: #fff; text-align: left; border-radius: 8px; padding: 12px; position: absolute; z-index: 1000; bottom: 120%; left: 100%; opacity: 0; transition: 0.2s; font-size: 11px; line-height: 1.5; pointer-events: none; }
+    .help-wrap:hover .tooltip { visibility: visible; opacity: 1; transform: translateY(-5px); }
+    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    input[type="number"] { width: 60px; padding: 7px; border: 1px solid var(--border); border-radius: 7px; text-align: center; font-family: "JetBrains Mono", monospace; outline: none; font-size: 11px; }
+    button#main-btn { width: 100%; height: 46px; background: linear-gradient(135deg, #18a0fb 0%, #007aff 100%); color: #fff; border: none; border-radius: 10px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(24,160,251,0.3); }
+    .switch { position: relative; width: 34px; height: 18px; }
+    .switch input { display: none; }
+    .slider { position: absolute; cursor: pointer; background: #ddd; border-radius: 20px; top:0; left:0; right:0; bottom:0; transition: .3s; }
+    .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 2px; top: 2px; background: #fff; border-radius: 50%; transition: .3s; }
+    input:checked + .slider { background: var(--success); }
+    input:checked + .slider:before { transform: translateX(16px); }
+    .footer { margin-top: auto; display: flex; justify-content: space-between; align-items: center; padding-top: 14px; border-top: 1px solid var(--border); position: relative; }
+    .lang-trigger { display: flex; align-items: center; gap: 6px; background: #eee; padding: 5px 12px; border-radius: 20px; cursor: pointer; font-weight: 700; font-size: 10px; color: #666; }
+    .lang-list { display: none; position: absolute; bottom: 50px; left: 0; background: rgba(255,255,255,0.9); backdrop-filter: blur(15px); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); padding: 6px; z-index: 2000; min-width: 120px; }
+    .lang-list.show { display: block; }
+    .lang-item { padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 11px; color: #555; }
+    .lang-item:hover { background: var(--primary); color: #fff; }
+  </style>
+</head>
+<body>
+  <div id="canvas-container">
+    <div id="batch-overlay" data-t="batchOverlay">📦 批量模式已开启</div>
+    <div id="empty-hint">
+        <span data-t="emptyHint">请在画布选中图片图层</span><br>
+        <span style="font-size: 10px; color: #999; margin-top: 6px; display: block;" data-t="controlHint">中键拖拽平移 / 滚轮缩放</span>
+    </div>
+    <div id="viewport" style="display:none;">
+      <img id="preview-img" draggable="false" src="">
+      <div id="g-top" class="guide-wrapper guide-wrapper-h"><div class="guide-visual guide-visual-h"></div></div>
+      <div id="g-bottom" class="guide-wrapper guide-wrapper-h"><div class="guide-visual guide-visual-h"></div></div>
+      <div id="g-left" class="guide-wrapper guide-wrapper-v"><div class="guide-visual guide-visual-v"></div></div>
+      <div id="g-right" class="guide-wrapper guide-wrapper-v"><div class="guide-visual guide-visual-v"></div></div>
+    </div>
+  </div>
+
+  <div class="interact-bar">
+    <button id="btn-pan" class="tool-btn" onclick="togglePanMode()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg></button>
+    <button class="tool-btn" onclick="changeZoom(0.1)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+    <button class="tool-btn" onclick="changeZoom(-0.1)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+    <button class="tool-btn" onclick="resetView()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h6v6M9 21H3v-6M21 15v6h-6M3 9V3h6"/></svg></button>
+    <span id="zoom-txt" class="zoom-txt">100%</span>
+  </div>
+
+  <div class="card">
+    <div class="row"><span style="font-weight: 600;" data-t="allLabel">统一边距 (All)</span><input id="all" type="number" value="0" onfocus="this.select()"></div>
+    <div style="height: 1px; background: var(--border); margin: 12px 0;"></div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+      <div class="row"><span data-t="topLabel">上</span> <input id="top" type="number" value="0" onfocus="this.select()"></div>
+      <div class="row"><span data-t="bottomLabel">下</span> <input id="bottom" type="number" value="0" onfocus="this.select()"></div>
+      <div class="row"><span data-t="leftLabel">左</span> <input id="left" type="number" value="0" onfocus="this.select()"></div>
+      <div class="row"><span data-t="rightLabel">右</span> <input id="right" type="number" value="0" onfocus="this.select()"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row"><span data-t="keepOriginal">保留原图</span><label class="switch"><input id="keepOriginal" type="checkbox" checked><span class="slider"></span></label></div>
+    <div class="row" style="margin-top:10px">
+        <span><span data-t="batchMode">批量模式</span> <span class="help-wrap"><span class="help-icon">?</span><span class="tooltip" data-t="batchTip"></span></span></span>
+        <label class="switch"><input id="batchMode" type="checkbox"><span class="slider"></span></label>
+    </div>
+    <div class="row" style="margin-top:10px">
+        <span><span data-t="overlap">消除缝隙</span> <span class="help-wrap"><span class="help-icon">?</span><span class="tooltip" data-t="overlapTip"></span></span></span>
+        <label class="switch"><input id="overlap" type="checkbox"><span class="slider"></span></label>
+    </div>
+  </div>
+
+  <button id="main-btn" onclick="submit()" data-t="generateBtn">生成九宫格组件</button>
+
+  <div class="footer">
+    <div id="lang-menu" class="lang-trigger" onclick="toggleLangList()">
+        <span id="current-lang-code">ZH</span>
+        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div id="lang-list" class="lang-list">
+        <div class="lang-item" onclick="setLang('en')">English</div>
+        <div class="lang-item" onclick="setLang('zh')">简体中文</div>
+        <div class="lang-item" onclick="setLang('ja')">日本語</div>
+        <div class="lang-item" onclick="setLang('ko')">한국어</div>
+        <div class="lang-item" onclick="setLang('ru')">Русский</div>
+        <div class="lang-item" onclick="setLang('de')">Deutsch</div>
+        <div class="lang-item" onclick="setLang('fr')">Français</div>
+    </div>
+  </div>
+
+  <script>
+    const i18n = {
+      zh: { code: "ZH", batchOverlay: "📦 批量模式已开启", emptyHint: "请在画布选中图片图层", controlHint: "鼠标中键拖拽平移 / 滚轮缩放", allLabel: "统一边距 (All)", topLabel: "上", bottomLabel: "下", leftLabel: "左", rightLabel: "右", keepOriginal: "保留原图", batchMode: "批量模式", batchTip: "同步处理多张图片。开启后，选中的所有图层将统一应用当前切片数值。", overlap: "消除缝隙", overlapTip: "修正渲染缝隙。开启后切片间将产生 1px 重叠以消除拼接黑线（透明图片慎用）。", generateBtn: "生成九宫格组件" },
+      en: { code: "EN", batchOverlay: "📦 Batch Mode Active", emptyHint: "Please select an image layer", controlHint: "Middle click to pan / Scroll to zoom", allLabel: "All Margins", topLabel: "Top", bottomLabel: "Bottom", leftLabel: "Left", rightLabel: "Right", keepOriginal: "Keep Original", batchMode: "Batch Mode", batchTip: "Sync multiple images. All selected layers will use the same slice values.", overlap: "Fix Gaps", overlapTip: "Fix rendering gaps. Creates a 1px overlap to eliminate lines.", generateBtn: "Generate 9-Slice" },
+      ja: { code: "JP", batchOverlay: "📦 一括モード有効", emptyHint: "画像レイヤーを選択してください", controlHint: "中ボタンでパン / スクロールでズーム", allLabel: "一括余白", topLabel: "上", bottomLabel: "下", leftLabel: "左", rightLabel: "右", keepOriginal: "元画像を保持", batchMode: "一括モード", batchTip: "複数の画像を同期します。", overlap: "隙間を補正", overlapTip: "1pxの重なりを作り、境界線を消去します。", generateBtn: "コンポーネント作成" },
+      ko: { code: "KO", batchOverlay: "📦 일괄 모드 활성화", emptyHint: "이미지 레이어를 선택하세요", controlHint: "중앙 클릭으로 이동 / 스크롤로 확대", allLabel: "전체 여백", topLabel: "상", bottomLabel: "하", leftLabel: "좌", rightLabel: "우", keepOriginal: "원본 유지", batchMode: "일괄 모드", batchTip: "모든 레이어에 동일한 수치가 적용됩니다.", overlap: "간격 수정", overlapTip: "1px 중첩을 생성하여 선을 제거합니다.", generateBtn: "구성 요소 생성" },
+      ru: { code: "RU", batchOverlay: "📦 Пакетный режим", emptyHint: "Выберите слой с изображением", controlHint: "Колесо: масштаб / Кнопка: панорама", allLabel: "Все отступы", topLabel: "Верх", bottomLabel: "Низ", leftLabel: "Лев", rightLabel: "Прав", keepOriginal: "Оригинал", batchMode: "Пакетный", batchTip: "Применить ко всем слоям.", overlap: "Без швов", overlapTip: "Устраняет линии на стыках.", generateBtn: "Создать компонент" },
+      de: { code: "DE", batchOverlay: "📦 Batch-Modus", emptyHint: "Bildebene auswählen", controlHint: "Mittelklick: Schwenken / Scrollen: Zoom", allLabel: "Alle Ränder", topLabel: "Oben", bottomLabel: "Unten", leftLabel: "Links", rightLabel: "Rechts", keepOriginal: "Original behalten", batchMode: "Batch-Modus", batchTip: "Alle ausgewählten Ebenen synchronisieren.", overlap: "Lücken fixen", overlapTip: "Erzeugt 1px Überlappung.", generateBtn: "Komponente erstellen" },
+      fr: { code: "FR", batchOverlay: "📦 Mode par lot", emptyHint: "Sélectionnez un calque image", controlHint: "Clic milieu: panoramique / Scroll: zoom", allLabel: "Toutes marges", topLabel: "Haut", bottomLabel: "Bas", leftLabel: "Gauche", rightLabel: "Droite", keepOriginal: "Garder l'original", batchMode: "Mode lot", batchTip: "Synchroniser tous les calques.", overlap: "Réparer vides", overlapTip: "Crée un chevauchement de 1px.", generateBtn: "Générer composant" }
+    };
+
+    let currentLang = 'zh';
+    function toggleLangList() { document.getElementById('lang-list').classList.toggle('show'); }
+
+    function setLang(lang) {
+      if (lang === 'auto') {
+        const sys = navigator.language.toLowerCase();
+        // 匹配字典键名，匹配不到则默认 en
+        lang = Object.keys(i18n).find(k => sys.startsWith(k)) || 'en';
+      }
+
+      // 冷门语言保底：如果请求的语言不在字典里，强行 fallback 到 en
+      if (!i18n[lang]) lang = 'en';
+
+      currentLang = lang;
+      const hints = lang === 'zh' ? [
+        '切换平移模式；选中图片后拖动预览（也可按鼠标中键）',
+        '放大选中图片的预览，不改变原图或组件尺寸',
+        '缩小选中图片的预览，不改变原图或组件尺寸',
+        '将选中图片适配到预览区域',
+        '将选中图片转换为九宫格组件；批量时应用到所有选中图片，关闭保留原图会删除原图'
+      ] : [
+        'Toggle pan mode; drag the selected image preview (or use the middle mouse button)',
+        'Zoom in the preview without resizing the source or component',
+        'Zoom out the preview without resizing the source or component',
+        'Fit the selected image to the preview',
+        'Convert selected images to 9-slice components; batch applies to all selected images. Disabling Keep Original deletes sources.'
+      ];
+      document.querySelectorAll('button').forEach((button, index) => {
+        button.title = hints[index];
+        button.setAttribute('aria-label', hints[index]);
+      });
+      document.getElementById('current-lang-code').innerText = i18n[lang].code;
+      document.querySelectorAll('[data-t]').forEach(el => {
+        const key = el.getAttribute('data-t');
+        if (i18n[lang][key]) el.innerText = i18n[lang][key];
+      });
+      document.getElementById('lang-list').classList.remove('show');
+      saveSettings();
+    }
+
+    window.addEventListener('click', (e) => {
+        if (!document.getElementById('lang-menu').contains(e.target)) {
+            document.getElementById('lang-list').classList.remove('show');
+        }
+    });
+
+    var state = { zoom: 1, x: 0, y: 0, imgW: 0, imgH: 0, isPanMode: false };
+    var el = function(id) { return document.getElementById(id); };
+    var container = el('canvas-container');
+    var viewport = el('viewport');
+
+    var previewURL = null;
+    window.onmessage = function(e) {
+      if (e.source !== parent) return;
+      var msg = e.data && e.data.pluginMessage;
+      if (!msg) return;
+      if (msg.type === 'init-settings') {
+        var s = msg.settings;
+        // 首次或重载时，边距数值初始化（如果之前保存过则读，否则默认0）
+        ['top','bottom','left','right','all'].forEach(k => { el(k).value = s[k] !== undefined ? s[k] : 0; });
+        el('overlap').checked = s.overlap;
+        el('batchMode').checked = s.batchMode;
+        el('keepOriginal').checked = (s.keepOriginal !== undefined) ? s.keepOriginal : true;
+        setLang(s.lang || 'auto');
+        updateUIState();
+        syncGuidesFromInputs();
+      }
+      if (msg.type === 'update-preview') {
+        if (msg.bytes) {
+          el('empty-hint').style.display = 'none';
+          viewport.style.display = 'block';
+          var blob = new Blob([msg.bytes], { type: 'image/png' });
+          if (previewURL) URL.revokeObjectURL(previewURL);
+          previewURL = URL.createObjectURL(blob);
+          el('preview-img').src = previewURL;
+          el('preview-img').style.width = msg.width + 'px';
+          el('preview-img').style.height = msg.height + 'px';
+          state.imgW = msg.width; state.imgH = msg.height;
+          resetView();
+          syncGuidesFromInputs();
+        } else {
+          if (previewURL) URL.revokeObjectURL(previewURL);
+          previewURL = null;
+          el('preview-img').removeAttribute('src');
+          state.imgW = 0; state.imgH = 0;
+          el('empty-hint').style.display = 'block';
+          viewport.style.display = 'none';
+        }
+      }
+    };
+
+    function resetView() { if(state.imgW === 0) return; var pad = 40; var ratio = Math.min((container.clientWidth-pad)/state.imgW, (container.clientHeight-pad)/state.imgH); state.zoom = ratio; state.x = (container.clientWidth/2)-(state.imgW*state.zoom/2); state.y = (container.clientHeight/2)-(state.imgH*state.zoom/2); updateViewport(); }
+    function updateViewport() { viewport.style.left = state.x + 'px'; viewport.style.top = state.y + 'px'; viewport.style.transform = 'scale(' + state.zoom + ')'; el('zoom-txt').innerText = Math.round(state.zoom * 100) + '%'; var thick = 1 / state.zoom; document.querySelectorAll('.guide-visual-h').forEach(g => g.style.height = thick + 'px'); document.querySelectorAll('.guide-visual-v').forEach(g => g.style.width = thick + 'px'); document.querySelectorAll('.guide-wrapper-h').forEach(g => g.style.height = (20 / state.zoom) + 'px'); document.querySelectorAll('.guide-wrapper-v').forEach(g => g.style.width = (20 / state.zoom) + 'px'); syncGuidesFromInputs(); }
+
+    var isDragging = false, lastX, lastY;
+    container.onmousedown = (e) => { if (state.isPanMode || e.button === 1) { isDragging = true; lastX = e.clientX; lastY = e.clientY; container.style.cursor = 'grabbing'; e.preventDefault(); } };
+    window.onmousemove = (e) => { if (isDragging) { state.x += (e.clientX - lastX); state.y += (e.clientY - lastY); lastX = e.clientX; lastY = e.clientY; updateViewport(); } if (activeGuide) dragGuide(e); };
+    window.onmouseup = () => { isDragging = false; activeGuide = null; container.style.cursor = state.isPanMode ? 'grab' : 'default'; };
+    container.onwheel = (e) => { if (state.imgW === 0) return; e.preventDefault(); var delta = e.deltaY > 0 ? -0.05 : 0.05; var oldZoom = state.zoom; state.zoom = Math.max(0.01, state.zoom + delta); state.x -= (state.imgW * (state.zoom - oldZoom)) / 2; state.y -= (state.imgH * (state.zoom - oldZoom)) / 2; updateViewport(); };
+
+    function togglePanMode() { state.isPanMode = !state.isPanMode; el('btn-pan').classList.toggle('active', state.isPanMode); container.style.cursor = state.isPanMode ? 'grab' : 'default'; }
+    function changeZoom(delta) { var oldZoom = state.zoom; state.zoom = Math.max(0.01, state.zoom + delta); state.x -= (state.imgW * (state.zoom - oldZoom)) / 2; state.y -= (state.imgH * (state.zoom - oldZoom)) / 2; updateViewport(); }
+
+    var activeGuide = null;
+    ['top','bottom','left','right'].forEach(dir => { el('g-'+dir).onmousedown = (e) => { if(e.button === 0 && !state.isPanMode) { activeGuide = dir; e.stopPropagation(); } }; });
+    function dragGuide(e) {
+        var rect = el('preview-img').getBoundingClientRect();
+        if (activeGuide === 'top') el('top').value = Math.max(0, Math.round((e.clientY - rect.top) / state.zoom));
+        if (activeGuide === 'bottom') el('bottom').value = Math.max(0, Math.round((rect.bottom - e.clientY) / state.zoom));
+        if (activeGuide === 'left') el('left').value = Math.max(0, Math.round((e.clientX - rect.left) / state.zoom));
+        if (activeGuide === 'right') el('right').value = Math.max(0, Math.round((rect.right - e.clientX) / state.zoom));
+        syncGuidesFromInputs();
+        saveSettings();
+    }
+    function syncGuidesFromInputs() { if(state.imgW === 0) return; var t = parseInt(el('top').value) || 0, b = parseInt(el('bottom').value) || 0, l = parseInt(el('left').value) || 0, r = parseInt(el('right').value) || 0; var halfHit = 10 / state.zoom; el('g-top').style.top = (t - halfHit) + 'px'; el('g-bottom').style.top = (state.imgH - b - halfHit) + 'px'; el('g-left').style.left = (l - halfHit) + 'px'; el('g-right').style.left = (state.imgW - r - halfHit) + 'px'; }
+
+    el('batchMode').onchange = () => { updateUIState(); saveSettings(); };
+    el('overlap').onchange = saveSettings;
+    el('keepOriginal').onchange = saveSettings;
+
+    function updateUIState() { var isBatch = el('batchMode').checked; el('batch-overlay').style.display = isBatch ? 'block' : 'none'; el('empty-hint').style.display = state.imgW === 0 ? 'block' : 'none'; }
+
+    function saveSettings() {
+      parent.postMessage({ pluginMessage: {
+        type: 'save-only', top: Number(el('top').value), bottom: Number(el('bottom').value), left: Number(el('left').value), right: Number(el('right').value), all: Number(el('all').value), overlap: el('overlap').checked, keepOriginal: el('keepOriginal').checked, batchMode: el('batchMode').checked, lang: currentLang
+      }}, '*');
+    }
+
+    ['top','bottom','left','right','all'].forEach(id => {
+      el(id).min = '0';
+      el(id).step = 'any';
+      el(id).oninput = () => { if(id === 'all') ['top','bottom','left','right'].forEach(k => { el(k).value = el('all').value; }); syncGuidesFromInputs(); saveSettings(); };
+    });
+
+    function submit() {
+      parent.postMessage({ pluginMessage: {
+        type: 'generate', top: Number(el('top').value), bottom: Number(el('bottom').value), left: Number(el('left').value), right: Number(el('right').value), all: Number(el('all').value), overlap: el('overlap').checked, keepOriginal: el('keepOriginal').checked, batchMode: el('batchMode').checked, lang: currentLang
+      }}, '*');
+    }
+  </script>
+</body>
+</html>
