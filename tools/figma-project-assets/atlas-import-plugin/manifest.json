@@ -1,0 +1,20 @@
+{
+  "name": "项目图集导入",
+  "id": "figma-project-assets-atlas-import",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "dist/ui.html",
+  "editorType": [
+    "figma"
+  ],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": [
+      "none"
+    ],
+    "devAllowedDomains": [
+      "http://127.0.0.1:38473"
+    ],
+    "reasoning": "仅开发模式连接本机 Rust 助手；需要手动配对令牌，不访问远端。"
+  }
+}
