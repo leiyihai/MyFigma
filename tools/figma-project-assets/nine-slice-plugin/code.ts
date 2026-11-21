@@ -3,7 +3,7 @@ import type { Margins } from '../packages/nine-slice/src/index';
 import { applyNineSliceComponent, createNineSliceComponent } from '../packages/nine-slice/src/figma';
 import {
   NINE_SLICE_RECORD_KEY, createNineSliceRecord, parseNineSliceRecord,
-  serializeNineSliceRecord, type NineSliceRecord
+  readNineSliceRecord, writeNineSliceRecord, serializeNineSliceRecord, type NineSliceRecord
 } from '../packages/nine-slice/src/record';
 
 type Language = 'zh' | 'en' | 'ja' | 'ko' | 'ru' | 'de' | 'fr';
@@ -82,7 +82,7 @@ function deriveSlice(component: ComponentNode): { margins: Margins; overlap: boo
   };
 }
 function savedMargins(component: ComponentNode): NineSliceRecord | undefined {
-  return parseNineSliceRecord(component.getPluginData(NINE_SLICE_RECORD_KEY));
+  return parseNineSliceRecord(readNineSliceRecord(component));
 }
 function findEditable(node: SceneNode | undefined): EditableSlice | null {
   if (!node) return null;
@@ -116,7 +116,7 @@ function rememberSlice(component: ComponentNode, margins: Margins, overlap: bool
     // plugins read the same state; anything the designer changed is an override.
     const record = createNineSliceRecord(margins, { width: component.width, height: component.height },
       { project: existing?.project, overlap, override });
-    component.setPluginData(NINE_SLICE_RECORD_KEY, serializeNineSliceRecord(record));
+    writeNineSliceRecord(component, serializeNineSliceRecord(record));
   } catch (error) {
     console.error('保存九宫格信息失败', error);
   }
@@ -129,6 +129,11 @@ function editPayload(edit: EditableSlice, editable: boolean) {
 let previewVersion = 0;
 async function sendSelectionToUI() {
   const version = ++previewVersion;
+  // dynamic-page: a large page may not have its contents/selection available
+  // until it is explicitly loaded. Without this, currentPage.selection is empty
+  // and the plugin falls back to "generate" even when a component is selected.
+  try { await figma.currentPage.loadAsync(); } catch (error) { console.error('加载当前页失败', error); }
+  if (version !== previewVersion) return;
   const node = figma.currentPage.selection[0];
   const edit = findEditable(node);
   let instanceComponent: ComponentNode | null = null;

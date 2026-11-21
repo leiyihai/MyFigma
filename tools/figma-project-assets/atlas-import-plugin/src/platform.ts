@@ -5,7 +5,7 @@ import { createNineSlicePlan, type Margins } from '../../packages/nine-slice/src
 import { applyNineSliceComponent, createNineSliceComponent } from '../../packages/nine-slice/src/figma';
 import {
   NINE_SLICE_RECORD_KEY, createNineSliceRecord, parseNineSliceRecord,
-  serializeNineSliceRecord, type NineSliceRecord
+  readNineSliceRecord, writeNineSliceRecord, serializeNineSliceRecord, type NineSliceRecord
 } from '../../packages/nine-slice/src/record';
 
 const bindingKey = 'atlas.binding';
@@ -162,9 +162,13 @@ function verifyNineSlice(component: ComponentNode, record: NineSliceRecord): boo
   return seen.size === expected.size;
 }
 function storedRecord(component: ComponentNode): {record?: NineSliceRecord; corrupt: boolean} {
-  const raw = component.getPluginData(NINE_SLICE_RECORD_KEY);
+  const raw = readNineSliceRecord(component);
   if(!raw) return {corrupt:false};
   const record = parseNineSliceRecord(raw);
+  // Migrate records written before the shared-data change. Private plugin data
+  // is scoped to this importer's plugin ID, so the nine-slice plugin cannot read
+  // it until the same raw value is copied into shared plugin data.
+  if(record) writeNineSliceRecord(component, raw);
   return {record, corrupt:!record};
 }
 // Category frames are tool-managed page children. New frames store the category
@@ -190,7 +194,7 @@ function managedCategory(node: ComponentNode): boolean {
 // have a damaged source record; plain user components are left alone.
 function carriesToolRecord(node: ComponentNode): boolean {
   return Boolean(node.getPluginData(sourceKey) || node.getPluginData(syncKey) ||
-    node.getPluginData(NINE_SLICE_RECORD_KEY));
+    readNineSliceRecord(node));
 }
 function legacyManagedParent(node: ComponentNode): boolean {
   const parent = node.parent;
@@ -474,8 +478,8 @@ function writeSync(component: ComponentNode, item: Candidate, imageHash: string)
   component.setPluginData(syncKey,JSON.stringify(sync));
 }
 function writeRecord(component: ComponentNode, planned: Planned): void {
-  if(planned.record) component.setPluginData(NINE_SLICE_RECORD_KEY, serializeNineSliceRecord(planned.record));
-  else if(component.getPluginData(NINE_SLICE_RECORD_KEY)) component.setPluginData(NINE_SLICE_RECORD_KEY, '');
+  if(planned.record) writeNineSliceRecord(component, serializeNineSliceRecord(planned.record));
+  else if(readNineSliceRecord(component)) writeNineSliceRecord(component, '');
 }
 function markMissing(existing: Existing): void {
   const sync: SyncState = existing.sync || {schemaVersion:1,identity:existing.source.identity,contentHash:'',
@@ -511,7 +515,7 @@ function snapshot(component: ComponentNode, existing: Existing): UpdateSnapshot 
     fills:Array.isArray(component.fills) ? [...component.fills] : [],
     imageFill:imageFillOf(component, existing.shape),
     source:component.getPluginData(sourceKey), sync:component.getPluginData(syncKey),
-    record:component.getPluginData(NINE_SLICE_RECORD_KEY),
+    record:readNineSliceRecord(component),
     shape:existing.shape, parsedRecord:existing.record
   };
 }
@@ -522,7 +526,7 @@ function restoreSnapshot(api: Pick<PluginAPI,'createRectangle'>, snap: UpdateSna
     snap.component.fills = snap.fills;
     snap.component.setPluginData(sourceKey,snap.source);
     snap.component.setPluginData(syncKey,snap.sync);
-    snap.component.setPluginData(NINE_SLICE_RECORD_KEY,snap.record);
+    writeNineSliceRecord(snap.component,snap.record);
     if(snap.shape === 'slices' && snap.parsedRecord && snap.imageFill) {
       applyNineSliceComponent(api,snap.component,
         {width:snap.width,height:snap.height,fill:snap.imageFill},snap.parsedRecord.current,

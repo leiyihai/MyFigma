@@ -34,7 +34,7 @@ async function restoreWithNineSlicePlugin(figma, component) {
     showUI() {}, on() {},
     ui: { postMessage() {} },
     clientStorage: { async getAsync() { return { lang: 'zh', settingsVersion: 2 }; }, async setAsync() {} },
-    currentPage: { selection: [component] },
+    currentPage: { selection: [component], async loadAsync() {} },
     getImageByHash() { return { async getBytesAsync() { return new Uint8Array([1]); } }; },
     notify(text) { notices.push(text); },
     viewport: { scrollAndZoomIntoView() {} },
@@ -179,6 +179,7 @@ test('keeps a valid manual margin on image updates, reports unappliable margins 
     const manual = record(plain);
     manual.override = true;
     plain.setPluginData('myfigma.nineSlice.v1', JSON.stringify(manual));
+    plain.setSharedPluginData('myfigma', 'nineSlice.v1', JSON.stringify(manual));
     await writeLayout(layoutPath(f.project), [
       layoutImageNode('小图九宫格', 'set:buttons.json image:plain', '4 4 4 4')
     ]);

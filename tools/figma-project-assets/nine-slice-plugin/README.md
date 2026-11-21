@@ -1,4 +1,4 @@
-# MyFigma 九宫格工具 v2 插件
+# MyFigma 九宫格工具 v4 插件
 
 由旧独立 9-Slice 插件迁移，保留单张／批量转换、四边及统一边距、保留或替换原图、可选重叠、预览缩放／平移及七种语言。旧插件目录不参与构建，也未写入。
 
@@ -14,9 +14,11 @@ npx playwright install chromium
 npm test
 ```
 
-Figma 桌面端通过开发插件菜单导入本目录的 **`manifest.json`**；其中 `main`／`ui` 指向构建后的 `dist/code.js` 与 `dist/ui.html`，因此先执行构建。无需本地助手、图集导入插件、旧插件、ui-studio 或运行时网络服务。构建只读取仓库的 `tools/figma-project-assets/packages/nine-slice/src/` 并 bundle 到产物。
+Figma 桌面端通过开发插件菜单导入本目录的 **`manifest.json`**；其中 `main`／`ui` 指向构建后的 `dist/code-v4.js` 与 `dist/ui-v4.html`，因此先执行构建。无需本地助手、图集导入插件、旧插件、ui-studio 或运行时网络服务。构建只读取仓库的 `tools/figma-project-assets/packages/nine-slice/src/` 并 bundle 到产物。
 
-没有复用旧发布插件的 ID；如 Figma 客户端要求注册 ID，先创建独立开发插件，使用其新 ID，勿覆盖旧发布插件。实际客户端导入尚未验证。
+没有复用旧发布插件的 ID。manifest 必须保留 `"id": "figma-project-assets-nine-slice"`；开发插件缺少 ID 时 Figma 会禁止读写 plugin data，表现为选中九宫格组件仍显示「生成九宫格组件」。复制本插件目录时也要保留同一个 ID，或按 Figma 分配的新 ID 同步修改记录读写。
+
+Figma 开发插件可能按 `main`／`ui` 路径缓存旧 bundle；只改插件名或关闭窗口后重新打开，不一定执行新代码。更新后若界面/行为仍是旧版本，请重新导入本目录 `manifest.json`，必要时移除该开发插件或重启 Figma。入口文件名带有版本后缀；修改构建产物时必须同步 manifest，详细排查见 [真实客户端测试指南](../docs/real-figma-testing.md#开发插件可能缓存旧代码)。
 
 ## 使用
 

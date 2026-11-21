@@ -1,6 +1,26 @@
 import type { Margins } from './index.js';
 
 export const NINE_SLICE_RECORD_KEY = 'myfigma.nineSlice.v1';
+export const NINE_SLICE_SHARED_NAMESPACE = 'myfigma';
+export const NINE_SLICE_SHARED_KEY = 'nineSlice.v1';
+
+// Atlas importer and nine-slice plugin have different plugin IDs. Figma private
+// plugin data is scoped to the writer, so the shared record must use the shared
+// plugin-data store; private data remains as a legacy fallback.
+export type RecordNode = {
+  getPluginData(key: string): string;
+  setPluginData(key: string, value: string): void;
+  getSharedPluginData?(namespace: string, key: string): string;
+  setSharedPluginData?(namespace: string, key: string, value: string): void;
+};
+export function readNineSliceRecord(node: RecordNode): string {
+  return node.getSharedPluginData?.(NINE_SLICE_SHARED_NAMESPACE, NINE_SLICE_SHARED_KEY) || node.getPluginData(NINE_SLICE_RECORD_KEY);
+}
+export function writeNineSliceRecord(node: RecordNode, value: string): void {
+  if (node.setSharedPluginData) node.setSharedPluginData(NINE_SLICE_SHARED_NAMESPACE, NINE_SLICE_SHARED_KEY, value);
+  // Keep the legacy private copy for older plugin builds and existing tests.
+  node.setPluginData(NINE_SLICE_RECORD_KEY, value);
+}
 
 /**
  * Shared nine-slice component record used by both plugins.

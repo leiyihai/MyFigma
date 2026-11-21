@@ -8,7 +8,9 @@ export function figmaFixture() {
   };
   const pluginData=node=>({
     getPluginData(k){return this.data[k]||'';},
-    setPluginData(k,v){this.data[k]=v;}
+    setPluginData(k,v){this.data[k]=v;},
+    getSharedPluginData(ns,k){return (this.shared||{})[ns+'/'+k]||'';},
+    setSharedPluginData(ns,k,v){(this.shared||(this.shared={}))[ns+'/'+k]=v;}
   });
   const appendChild=node=>child=>{
     // Real appendChild moves a node between parents; keep the old parent consistent.

@@ -17,6 +17,8 @@ function setup(sizes = [[100, 80]], options = {}) {
       data: {},
       getPluginData(key) { return this.data[key] || ''; },
       setPluginData(key, value) { this.data[key] = value; },
+      getSharedPluginData(ns, key) { return (this.shared || {})[ns + '/' + key] || ''; },
+      setSharedPluginData(ns, key, value) { (this.shared ||= {})[ns + '/' + key] = value; },
       resize(width, height) { this.width = width; this.height = height; },
       appendChild(child) { child.parent = this; this.children.push(child); },
       remove() { this.removed = true; if (this.parent && Array.isArray(this.parent.children)) this.parent.children = this.parent.children.filter(child => child !== this); }
@@ -144,6 +146,7 @@ test('editing a legacy overlap component preserves overlap and derives margins',
   await env.figma.ui.onmessage(settings);
   const component = env.created[0];
   component.data = {};
+  component.shared = {};
   env.figma.currentPage.selection = [component];
   await env.figma.ui.onmessage({ ...settings, left: 14, right: 6, top: 8, bottom: 9 });
   const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
@@ -187,6 +190,7 @@ test('editing a legacy component derives margins and writes the editable metadat
   await env.figma.ui.onmessage(env.settings);
   const component = env.created[0];
   component.data = {};
+  component.shared = {};
   env.figma.currentPage.selection = [component];
   await env.figma.ui.onmessage({ ...env.settings, left: 12, right: 8, top: 9, bottom: 11 });
   assert.equal(env.created.length, 1);
@@ -244,11 +248,11 @@ test('reads and writes the shared project/current/override record used by the at
   assert.equal(generated.override, true);
 
   // Simulate an atlas-imported record: project statistics 8, current 10, no manual override yet.
-  component.setPluginData('myfigma.nineSlice.v1', JSON.stringify({
+  setRecord(component, {
     schemaVersion: 1, margins: { left: 10, top: 10, right: 10, bottom: 10 }, overlap: false,
     width: 100, height: 80, project: { left: 8, top: 8, right: 8, bottom: 8 },
     current: { left: 10, top: 10, right: 10, bottom: 10 }, override: false
-  }));
+  });
   env.figma.currentPage.selection = [component];
   await env.figma.ui.onmessage({ ...env.settings, left: 12, right: 7, top: 9, bottom: 11 });
   const edited = JSON.parse(component.data['myfigma.nineSlice.v1']);
@@ -260,6 +264,7 @@ test('reads and writes the shared project/current/override record used by the at
 
 function setRecord(component, record) {
   component.setPluginData('myfigma.nineSlice.v1', JSON.stringify(record));
+  component.setSharedPluginData('myfigma', 'nineSlice.v1', JSON.stringify(record));
 }
 function atlasRecord(override = false) {
   return {
@@ -393,6 +398,7 @@ test('selection payloads tell the UI whether margins are manual, project-driven 
   await env.figma.ui.onmessage(env.settings);
   const component = env.created[0];
   component.data = {};
+  component.shared = {};
   env.figma.currentPage.selection = [component];
   await env.figma.ui.onmessage({ type: 'ui-ready' });
   await new Promise(resolve => setTimeout(resolve, 0));
