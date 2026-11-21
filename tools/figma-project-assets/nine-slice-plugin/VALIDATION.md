@@ -99,4 +99,4 @@ npm run test:browser -- --grep 'small selected'
 - 恢复项目参数：新增 `restore-project` 插件消息与界面按钮。回归覆盖原位重建 9 切片、`current=project`、清除 `override`、主组件对象与实例关联保持不变；项目参数缺失或不适用于当前尺寸时拒绝并保留原切片。浏览器测试真实点击按钮并断言发送消息、按钮悬浮说明及项目状态隐藏恢复操作。
 - 不可识别组件与实例：选中带图片填充的实例时不再按普通图片转换；选中结构无法识别的组件时给出明确提示且不修改。两者均有插件入口回归。
 - 跨插件链路：导入插件测试在图片缩小、人工边距 6 失效后先验证跳过与「恢复项目参数」提示；随后用构建后的独立九宫格插件入口对同一主组件执行恢复，再运行导入 Workflow，确认原位更新到 10×10、重新生成 9 切片且 `override:false`。该用例调用真实插件产物，不是手工改写结构的替身。
-- 命令与结果：`nine-slice-plugin` 的 `npm run typecheck`、`npm test`（24 个 Node、12 个浏览器用例）通过；`atlas-import-plugin` 的 `npm run test:all`（类型检查、34 个 Node、4 个浏览器用例）通过；`packages/nine-slice` 的 `npm test` 通过。未使用 figma／figwright MCP，也未在真实 Figma 重跑 #7；恢复后的实例关联和拉伸仍属父代理串行验收项。
+- 命令与结果：`nine-slice-plugin` 的 `npm run typecheck`、`npm test`（24 个 Node、12 个浏览器用例）通过；`atlas-import-plugin` 的 `npm run test:all`（类型检查、41 个 Node、4 个浏览器用例）通过；`packages/nine-slice` 的 `npm test` 通过。未使用 figma／figwright MCP，也未在真实 Figma 重跑 #7；恢复后的实例关联和拉伸仍属父代理串行验收项。
