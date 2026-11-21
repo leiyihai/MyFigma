@@ -29,6 +29,7 @@ figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicPro
       finally {if(active===cancellation)active=undefined;}
     }
     else if(message.type==='compare')reply(await platform.compare(message.project));
+    else if(message.type==='tidy')reply(await platform.tidy(message.project));
     else if(message.type==='pairing-load') {
       const stored=await figma.clientStorage.getAsync(pairingKey);
       reply(validPairing(stored)?stored:null);

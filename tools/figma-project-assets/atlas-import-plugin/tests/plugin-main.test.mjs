@@ -62,6 +62,13 @@ test('built main script loads in an import-rejecting sandbox, stores pairing loc
     assert.equal(page.name, '测试游戏（g2）- 分类资源');
     assert.equal(page.children[0].children.length, 2);
     assert.equal(replies.filter(reply => reply.type === 'progress').at(-1).progress.done, 2);
+    await figma.ui.onmessage({ type: 'tidy', requestId: 4, project: { id: 'g2', name: '测试游戏' } });
+    const tidied = replies.find(reply => reply.requestId === 4);
+    assert.equal(tidied.error, undefined);
+    assert.equal(tidied.result.frames, 1);
+    assert.equal(page.children[0].x, 0);
+    assert.equal(page.children[0].y, 0);
+    assert.equal(page.children[0].children.length, 2);
     await figma.ui.onmessage({ type: 'compare', requestId: 3, project: { id: 'g2', name: '测试游戏' } });
     const compared = replies.find(reply => reply.requestId === 3);
     assert.equal(compared.error, undefined);

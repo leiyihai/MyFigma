@@ -44,7 +44,7 @@ test('task entry imports nested atlas sprites and standalone images with whiteli
     const group = page.children.find(node => node.name === '未分类');
     const components = group.children;
     assert.deepEqual(components.map(node => node.name).sort(), [
-      '未分类/default_headshot · Static/default_headshot.png',
+      '未分类/default_headshot',
       '未分类/dup · Dynamic/buttons.json',
       '未分类/dup · Static/buttons.json'
     ]);

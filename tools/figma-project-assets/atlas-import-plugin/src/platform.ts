@@ -1,5 +1,6 @@
-import type { ImportPlan, ImportReport, LayoutUsage, Platform, Progress, PublicProject, Resource, Scan, Source } from './api';
+import type { ImportPlan, ImportReport, LayoutUsage, Platform, Progress, PublicProject, Resource, Scan, Source, TidyResult } from './api';
 import { Cancellation } from './api';
+import { categoryIndex, classify, componentName, isCategoryName, type CategoryName } from './category';
 import { createNineSlicePlan, type Margins } from '../../packages/nine-slice/src/index';
 import { applyNineSliceComponent, createNineSliceComponent } from '../../packages/nine-slice/src/figma';
 import {
@@ -166,10 +167,77 @@ function storedRecord(component: ComponentNode): {record?: NineSliceRecord; corr
   const record = parseNineSliceRecord(raw);
   return {record, corrupt:!record};
 }
+// Category frames are tool-managed page children. New frames store the category
+// name in `atlas.category`; `unsorted` is the legacy #3 marker for 未分类.
+const categoryGap = 48;
+function frameCategory(node: FrameNode): CategoryName | undefined {
+  const raw = node.getPluginData(categoryKey);
+  if(raw === 'unsorted') return '未分类';
+  if(isCategoryName(raw)) return raw;
+  // Legacy #3 frames carry no marker; their managed children identify them.
+  if(node.name === '未分类' && Array.isArray(node.children) && node.children.some(child => child.getPluginData(sourceKey))) return '未分类';
+  return undefined;
+}
+function managedCategoryFrames(page: PageNode): FrameNode[] {
+  return page.children.filter((node): node is FrameNode => node.type === 'FRAME' && !!frameCategory(node as FrameNode));
+}
 function managedCategory(node: ComponentNode): boolean {
   const parent = node.parent;
-  if(!parent || parent.type !== 'FRAME' || parent.name !== '未分类') return false;
-  return parent.getPluginData(categoryKey) === 'unsorted' || parent.children.some(child => child.getPluginData(sourceKey));
+  return !!parent && parent.type === 'FRAME' && !!frameCategory(parent as FrameNode);
+}
+// Category frames are tool-owned, but users may drop unrelated components into
+// them. Only components carrying tool records (or children of legacy frames) can
+// have a damaged source record; plain user components are left alone.
+function carriesToolRecord(node: ComponentNode): boolean {
+  return Boolean(node.getPluginData(sourceKey) || node.getPluginData(syncKey) ||
+    node.getPluginData(NINE_SLICE_RECORD_KEY));
+}
+function legacyManagedParent(node: ComponentNode): boolean {
+  const parent = node.parent;
+  return !!parent && parent.type === 'FRAME' && !parent.getPluginData(categoryKey) &&
+    parent.name === '未分类' && !!frameCategory(parent as FrameNode);
+}
+// If every tool record was cleared, the derived display name is the remaining
+// evidence that this was a managed component; a plain user name is not flagged.
+function looksManagedName(node: ComponentNode): boolean {
+  const separator = node.name.indexOf('/');
+  return separator > 0 && isCategoryName(node.name.slice(0,separator));
+}
+function findCategoryFrame(page: PageNode, category: CategoryName): FrameNode | undefined {
+  return managedCategoryFrames(page).find(frame => frameCategory(frame) === category);
+}
+function nextCategoryFrameY(page: PageNode): number {
+  const frames = managedCategoryFrames(page);
+  if(!frames.length) return 0;
+  return Math.max(...frames.map(frame => frame.y + frame.height)) + categoryGap;
+}
+function createCategoryFrame(page: PageNode, api: Pick<PluginAPI,'createFrame'>, category: CategoryName): FrameNode {
+  const y = nextCategoryFrameY(page);
+  const frame = api.createFrame();
+  page.appendChild(frame);
+  frame.name = category;
+  frame.fills = [];
+  frame.resize(1200,100); frame.layoutMode = 'HORIZONTAL'; frame.layoutWrap = 'WRAP';
+  frame.primaryAxisSizingMode = 'FIXED'; frame.counterAxisSizingMode = 'AUTO';
+  frame.itemSpacing = 16; frame.counterAxisSpacing = 16;
+  frame.paddingTop = frame.paddingRight = frame.paddingBottom = frame.paddingLeft = 16;
+  frame.setPluginData(categoryKey, category);
+  // New frames are placed below the existing ones; normal imports never reflow
+  // existing frame positions, only 重新整理 does.
+  frame.x = 0; frame.y = y;
+  return frame;
+}
+function ensureCategoryFrame(page: PageNode, api: Pick<PluginAPI,'createFrame'>, category: CategoryName,
+  created: FrameNode[]): FrameNode {
+  const found = findCategoryFrame(page, category);
+  if(found) return found;
+  const frame = createCategoryFrame(page, api, category);
+  created.push(frame);
+  return frame;
+}
+function plannedCategory(item: Candidate): CategoryName {
+  return classify({frameName:item.source.frameName,width:item.resource.width,height:item.resource.height,
+    nineSlice:item.planned.shape === 'slices'});
 }
 function existingComponents(page: PageNode, project: PublicProject): { items: Existing[]; corrupt: string[] } {
   const result: Existing[] = [], corrupt: string[] = [];
@@ -177,7 +245,8 @@ function existingComponents(page: PageNode, project: PublicProject): { items: Ex
     if(node.type !== 'COMPONENT') continue;
     const source = parseStoredSource(node, project);
     if(!source) {
-      if(node.getPluginData(sourceKey) || managedCategory(node)) corrupt.push(node.name);
+      if(carriesToolRecord(node) || (managedCategory(node) &&
+         (legacyManagedParent(node) || looksManagedName(node)))) corrupt.push(node.name);
       continue;
     }
     const sync = parseSync(node,source.identity);
@@ -335,27 +404,65 @@ function buildPlan(scan: Scan, page: PageNode): PlanState {
       !scanItems.has(group[0].source.identity) && scan.complete).map(group => group[0])
   };
 }
-function categoryFrame(page: PageNode): FrameNode | undefined {
-  return page.children.find(node => {
-    if(node.type !== 'FRAME' || node.name !== '未分类') return false;
-    if(node.getPluginData(categoryKey) === 'unsorted') return true;
-    // Legacy #3 frames have no category marker; identify them by their managed children.
-    return Array.isArray(node.children) && node.children.some(child => child.getPluginData(sourceKey));
-  }) as FrameNode | undefined;
+function orderedCategoryFrames(page: PageNode): FrameNode[] {
+  const index = new Map<SceneNode, number>();
+  page.children.forEach((node, position) => index.set(node, position));
+  // Canonical category order is the layout contract; duplicates of one category
+  // stay stacked in their previous visual/page order to keep the move minimal.
+  return [...managedCategoryFrames(page)].sort((left, right) => {
+    const category = categoryIndex(frameCategory(left)!) - categoryIndex(frameCategory(right)!);
+    if(category) return category;
+    if(left.y !== right.y) return left.y - right.y;
+    if(left.x !== right.x) return left.x - right.x;
+    return (index.get(left) || 0) - (index.get(right) || 0);
+  });
 }
-function ensureCategoryFrame(page: PageNode, api: Pick<PluginAPI,'createFrame'>): FrameNode {
-  const found = categoryFrame(page);
-  if(found) return found;
-  const frame = api.createFrame();
-  page.appendChild(frame);
-  frame.name = '未分类';
-  frame.fills = [];
-  frame.resize(1200,100); frame.layoutMode = 'HORIZONTAL'; frame.layoutWrap = 'WRAP';
-  frame.primaryAxisSizingMode = 'FIXED'; frame.counterAxisSizingMode = 'AUTO';
-  frame.itemSpacing = 16; frame.counterAxisSpacing = 16;
-  frame.paddingTop = frame.paddingRight = frame.paddingBottom = frame.paddingLeft = 16;
-  frame.setPluginData(categoryKey,'unsorted');
-  return frame;
+// 重新整理 only touches category frame coordinates. Components, their source
+// records, instance links and nine-slice child constraints stay untouched.
+function tidyCategoryFrames(page: PageNode): TidyResult {
+  const frames = orderedCategoryFrames(page);
+  if(!frames.length) return {schemaVersion:1,frames:0,moved:0,
+    messages:['当前页没有本工具创建的分类 Frame，无需整理']};
+  let y = 0, moved = 0;
+  for(const frame of frames) {
+    if(frame.x !== 0 || frame.y !== y) {
+      frame.x = 0; frame.y = y;
+      moved++;
+    }
+    y += (frame.height || 0) + categoryGap;
+  }
+  return {schemaVersion:1,frames:frames.length,moved,messages:[]};
+}
+// Display names are derived, never part of the resource identity. Same-name
+// components in one category add their source location so both stay unique.
+function refreshDisplayNames(page: PageNode, project: PublicProject, messages: string[]): void {
+  const groups = new Map<string, Array<{component: ComponentNode; source: Source; category: CategoryName}>>();
+  for(const frame of managedCategoryFrames(page)) {
+    const category = frameCategory(frame);
+    if(!category) continue;
+    for(const child of frame.children) {
+      if(child.type !== 'COMPONENT') continue;
+      const source = parseStoredSource(child, project);
+      if(!source) continue;
+      const key = category + '\u0000' + source.frameName;
+      const group = groups.get(key) || [];
+      group.push({component:child,source,category});
+      groups.set(key,group);
+    }
+  }
+  for(const group of groups.values()) {
+    group.sort((left,right) => left.source.identity < right.source.identity ? -1 : left.source.identity > right.source.identity ? 1 : 0);
+    const used = new Set<string>();
+    group.forEach((entry,index) => {
+      let name = componentName(entry.category,entry.source.frameName,
+        group.length > 1 ? entry.source.relativePath : undefined);
+      if(used.has(name)) name = `${name} #${index + 1}`;
+      used.add(name);
+      if(entry.component.name === name) return;
+      try { entry.component.name = name; }
+      catch { messages.push(`${name}：显示名更新失败`); }
+    });
+  }
 }
 function writeSync(component: ComponentNode, item: Candidate, imageHash: string): void {
   const sync: SyncState = {schemaVersion:1,identity:item.source.identity,contentHash:item.hash,imageHash,
@@ -433,7 +540,8 @@ function applyComponent(api: Pick<PluginAPI,'createRectangle'>, component: Compo
   writeSync(component,item,image.imageHash || '');
   writeRecord(component,planned);
 }
-function createComponent(api: Pick<PluginAPI,'createComponent'|'createRectangle'>, target: FrameNode, item: Candidate, image: ImagePaint): ComponentNode {
+function createComponent(api: Pick<PluginAPI,'createComponent'|'createRectangle'>, target: FrameNode, item: Candidate,
+  image: ImagePaint, category: CategoryName): ComponentNode {
   const planned = item.planned;
   const component = planned.shape === 'slices' && planned.margins
     ? createNineSliceComponent(api,{width:item.resource.width,height:item.resource.height,fill:image},
@@ -441,7 +549,7 @@ function createComponent(api: Pick<PluginAPI,'createComponent'|'createRectangle'
     : api.createComponent();
   target.appendChild(component);
   try {
-    component.name = `未分类/${item.source.frameName} · ${item.source.relativePath}`;
+    component.name = componentName(category,item.source.frameName);
     if(planned.shape !== 'slices' || !planned.margins) {
       component.resize(item.resource.width,item.resource.height);
       component.fills = [{...image,scaleMode:'FILL'}];
@@ -456,7 +564,9 @@ function createComponent(api: Pick<PluginAPI,'createComponent'|'createRectangle'
     throw error;
   }
 }
-function describeCandidate(item: Candidate): string { return `未分类/${item.source.frameName} · ${item.source.relativePath}`; }
+function describeCandidate(item: Candidate, category: CategoryName): string {
+  return componentName(category,item.source.frameName);
+}
 async function loadPage(page: PageNode): Promise<void> {
   // dynamic-page documents require explicit loading before findAll().
   if(typeof page.loadAsync === 'function') await page.loadAsync();
@@ -629,8 +739,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
       busy = true;
       const page = api.currentPage;
       const oldName = page.name, oldBinding = page.getPluginData(bindingKey);
-      let frame: FrameNode | undefined;
-      let createdFrame = false;
+      const createdFrames: FrameNode[] = [];
       let writtenName = '', writtenBinding = '';
       const created: ComponentNode[] = [];
       let instances: InstanceSize[] = [];
@@ -645,8 +754,12 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         if(page.name === writtenName) page.name = oldName;
         if(page.getPluginData(bindingKey) === writtenBinding) page.setPluginData(bindingKey, oldBinding);
       };
-      const dropEmptyFrame = () => {
-        if(createdFrame && frame && !frame.children.length) { frame.remove(); createdFrame = false; }
+      const dropEmptyFrames = () => {
+        for(const created of [...createdFrames]) {
+          if(created.children.length) continue;
+          created.remove();
+          createdFrames.splice(createdFrames.indexOf(created),1);
+        }
       };
       try {
         await loadPage(page);
@@ -678,11 +791,16 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
           if(cancellation.cancelled) { report.cancelled = true; break; }
           if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已停止导入，已完成的项会保留');
           const component = item.existing?.component;
-          if(!component) { fail(describeCandidate(item),new Error('待更新组件已消失')); await step(); continue; }
+          const category = plannedCategory(item);
+          if(!component) { fail(describeCandidate(item,category),new Error('待更新组件已消失')); await step(); continue; }
           const snap = snapshot(component,item.existing!);
           try {
             const image = api.createImage(api.base64Decode(item.resource.png));
             applyComponent(api,component,item,{type:'IMAGE',imageHash:image.hash,scaleMode:'FILL'});
+            // A size or nine-slice change may move the component to another
+            // purpose category; identity and source stay on the same node.
+            const target = ensureCategoryFrame(page,api,category,createdFrames);
+            if(component.parent !== target) target.appendChild(component);
             report.applied.updated++;
           } catch(error) {
             // Isolate the failure: restore this item so the next run detects it again.
@@ -692,18 +810,17 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
           await step();
         }
         if(!report.cancelled && state.adds.length) {
-          const found = categoryFrame(page);
-          frame = found || ensureCategoryFrame(page,api);
-          createdFrame = !found;
           for(const item of state.adds) {
             if(cancellation.cancelled) { report.cancelled = true; break; }
             if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已停止导入，已完成的项会保留');
+            const category = plannedCategory(item);
             try {
               const image = api.createImage(api.base64Decode(item.resource.png));
-              created.push(createComponent(api,frame!,item,{type:'IMAGE',imageHash:image.hash,scaleMode:'FILL'}));
+              const target = ensureCategoryFrame(page,api,category,createdFrames);
+              created.push(createComponent(api,target,item,{type:'IMAGE',imageHash:image.hash,scaleMode:'FILL'},category));
               report.applied.added++;
             } catch(error) {
-              fail(describeCandidate(item),error);
+              fail(describeCandidate(item,category),error);
             }
             await step();
           }
@@ -721,11 +838,12 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
           }
           await step();
         }
+        if(report.applied.added+report.applied.updated > 0) refreshDisplayNames(page,scan.project,report.messages);
+        dropEmptyFrames();
         restoreInstances(instances,updatedIds);
         if(report.cancelled) {
           // Cancelled items are neither success nor source deletions; a retry fills them.
           report.messages = [...report.messages,'任务已取消：已完成项保留，未完成项未记成功，可再次运行补齐'];
-          dropEmptyFrame();
           if(report.applied.added+report.applied.updated+report.applied.removed === 0) restoreBinding();
         }
         return report;
@@ -733,11 +851,24 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         // No whole-task atomic rollback: completed items stay valid and retryable.
         if(report.applied.added+report.applied.updated+report.applied.removed === 0) {
           for(const component of created) component.remove();
-          if(createdFrame && frame) frame.remove();
+          dropEmptyFrames();
           restoreBinding();
         }
         restoreInstances(instances,updatedIds);
         throw error;
+      } finally {busy=false;}
+    },
+    async tidy(project) {
+      if(!project || typeof project.id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(project.id) ||
+         typeof project.name !== 'string' || !project.name.trim() || project.name.length > 200) throw new Error('项目信息无效');
+      if(busy) throw new Error('导入任务正在执行');
+      busy = true;
+      try {
+        const page = api.currentPage;
+        await loadPage(page);
+        const status = validate(page, project);
+        if(!status.valid) throw new Error(status.message);
+        return tidyCategoryFrames(page);
       } finally {busy=false;}
     },
     async compare(project) {

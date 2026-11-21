@@ -40,7 +40,9 @@ async function writePanelLayout(f, margins = '10 10 10 10', extra = []) {
 }
 
 function component(page, name) {
-  return page.children.flatMap(node => node.children || []).find(node => node.name.includes('/' + name + ' ·'));
+  // The display name is 分类/原名; same-name duplicates add the source path.
+  const pattern = new RegExp('(^|/)' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '( ·|$)');
+  return page.children.flatMap(node => node.children || []).find(node => pattern.test(node.name));
 }
 function record(node) {
   return JSON.parse(node.data['myfigma.nineSlice.v1']);

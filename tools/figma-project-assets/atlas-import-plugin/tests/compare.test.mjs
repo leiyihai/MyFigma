@@ -69,11 +69,11 @@ test('手动创建对照页按源图集分组，只放关联主组件的实例',
     assert.deepEqual(groupNames(compare), compareGroupNames);
     const [atlas, standalone] = compare.children;
     assert.deepEqual(atlas.children.map(node => node.name).sort(), [
-      '未分类/green · Static/buttons.json',
-      '未分类/red · Static/buttons.json'
+      '未分类/green',
+      '未分类/red'
     ]);
     assert.deepEqual(standalone.children.map(node => node.name), [
-      '未分类/default_headshot · Static/default_headshot.png'
+      '未分类/default_headshot'
     ]);
     // Instances point at the existing components; no component copy is created.
     assert.equal(compare.findAll(node => node.type === 'COMPONENT').length, 0);

@@ -31,6 +31,10 @@ export interface CompareResult {
   schemaVersion: 1; pageName: string; created: boolean; groups: number;
   added: number; removed: number; kept: number; messages: string[];
 }
+// Tidy only changes category frame positions on the current resource page.
+export interface TidyResult {
+  schemaVersion: 1; frames: number; moved: number; messages: string[];
+}
 export interface ItemFailure { name: string; reason: string }
 // Import is not one atomic transaction: every item commits or is isolated and
 // reported, so a later incremental run can fill only what is still missing.
@@ -64,6 +68,7 @@ export interface Platform {
   preview(scan: Scan): Promise<ImportPlan>;
   importResources(scan: Scan, progress: (value: Progress) => void, cancellation?: Cancellation): Promise<ImportReport>;
   compare(project: PublicProject): Promise<CompareResult>;
+  tidy(project: PublicProject): Promise<TidyResult>;
 }
 
 class HelperConnectionError extends Error {}
@@ -108,7 +113,7 @@ export class HelperClient {
 }
 export interface State {
   connected: boolean; busy: boolean; phase: string; error: string;
-  selected?: PublicProject; page?: PageStatus; scan?: Scan; plan?: ImportPlan; result?: ImportReport; compare?: CompareResult; progress: Progress;
+  selected?: PublicProject; page?: PageStatus; scan?: Scan; plan?: ImportPlan; result?: ImportReport; compare?: CompareResult; tidy?: TidyResult; progress: Progress;
 }
 export class Workflow {
   readonly state: State = {connected:false,busy:false,phase:'未连接',error:'',progress:{done:0,total:0}};
@@ -144,13 +149,13 @@ export class Workflow {
   }
   async connect(): Promise<void> {
     await this.task('连接中',async () => {
-      this.state.connected = false; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined;
+      this.state.connected = false; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined;
       await this.helper.health(); this.projects = await this.helper.projects(); this.state.connected = true;
     });
   }
   async saveProject(project: Project): Promise<void> {
     await this.task('保存登记',async () => {
-      this.projects = await this.helper.saveProject(project); this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined;
+      this.projects = await this.helper.saveProject(project); this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined;
       if(this.state.selected?.id === project.id) {
         this.state.selected = {id:project.id,name:project.name};
         this.state.page = await this.platform.validate(this.state.selected);
@@ -160,27 +165,27 @@ export class Workflow {
   async deleteProject(id: string): Promise<void> {
     await this.task('删除登记',async () => {
       this.projects = await this.helper.deleteProject(id);
-      if (this.state.selected?.id === id) {this.state.selected = undefined; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.page = undefined; this.state.compare = undefined;}
+      if (this.state.selected?.id === id) {this.state.selected = undefined; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.page = undefined; this.state.compare = undefined; this.state.tidy = undefined;}
     });
   }
   async selectProject(id: string): Promise<void> {
     await this.task('页面校验',async () => {
-      this.state.compare = undefined;
+      this.state.compare = undefined; this.state.tidy = undefined;
       if(!id) {this.state.selected=undefined;this.state.scan=undefined;this.state.plan=undefined;this.state.result=undefined;this.state.page=undefined;this.state.progress={done:0,total:0};return;}
       const project = this.projects.find(p=>p.id===id);
       if (!project) throw new Error('请选择已登记的游戏');
-      this.state.selected = {id:project.id,name:project.name}; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.progress = {done:0,total:0};
+      this.state.selected = {id:project.id,name:project.name}; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined; this.state.progress = {done:0,total:0};
       this.state.page = await this.platform.validate(this.state.selected);
     });
   }
-  invalidateScan(): void {this.state.scan=undefined;this.state.plan=undefined;this.state.result=undefined;this.state.compare=undefined;this.state.progress={done:0,total:0};}
+  invalidateScan(): void {this.state.scan=undefined;this.state.plan=undefined;this.state.result=undefined;this.state.compare=undefined;this.state.tidy=undefined;this.state.progress={done:0,total:0};}
   async validatePage(): Promise<void> {
     await this.task('页面校验',async () => {if (this.state.selected) this.state.page = await this.platform.validate(this.state.selected);});
   }
   async scan(): Promise<void> {
     await this.task('扫描中',async cancellation => {
       if(!this.state.selected || !this.state.connected) throw new Error('请连接助手并选择游戏');
-      this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.progress = {done:0,total:0};
+      this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.tidy = undefined; this.state.progress = {done:0,total:0};
       this.state.page = await this.platform.validate(this.state.selected);
       if(!this.state.page.valid) throw new Error(this.state.page.message);
       const controller = new AbortController();
@@ -199,6 +204,7 @@ export class Workflow {
     await this.task('导入中',async cancellation => {
       const scan = this.state.scan;
       if(!scan || scan.project.id !== this.state.selected?.id) throw new Error('请先扫描当前游戏');
+      this.state.tidy = undefined;
       this.state.page = await this.platform.validate(scan.project);
       if(!this.state.page.valid) throw new Error(this.state.page.message);
       let report: ImportReport;
@@ -227,6 +233,14 @@ export class Workflow {
       const project = this.state.selected;
       if(!project) throw new Error('请选择游戏');
       this.state.compare = await this.platform.compare(project);
+    });
+  }
+  // Reposition existing category frames only; no component, source or slice is rebuilt.
+  async tidy(): Promise<void> {
+    await this.task('重新整理',async () => {
+      const project = this.state.selected;
+      if(!project) throw new Error('请选择游戏');
+      this.state.tidy = await this.platform.tidy(project);
     });
   }
 }
