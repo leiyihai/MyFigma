@@ -83,10 +83,24 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await expect(ui.getByLabel('选择游戏', {exact:true})).toBeEnabled();
     expect(await page.evaluate(()=>(window as any).imported.resources.length)).toBe(2);
     expect(await page.evaluate(()=>'path' in (window as any).imported.project)).toBe(false);
-    await f.stop();
+    let releaseFailedScan!:()=>void;
+    let failedScanStarted!:()=>void;
+    const failedHeld=new Promise<void>(resolve=>{releaseFailedScan=resolve;});
+    const failedStarted=new Promise<void>(resolve=>{failedScanStarted=resolve;});
+    await page.route(f.base+'/v1/scan',async route=>{failedScanStarted();await failedHeld;await route.abort('connectionfailed');});
     await ui.getByRole('button',{name:'扫描资源',exact:true}).click();
+    await failedStarted;
+    await page.evaluate(()=>{
+      (window as any).currentPageInvalid=true;
+      document.querySelector('iframe')!.contentWindow!.postMessage({pluginMessage:{type:'page-changed'}},'*');
+    });
+    releaseFailedScan();
     await expect(ui.getByTestId('connection')).toHaveText('未连接');
+    await expect(ui.locator('#page-status')).toContainText('非空且未绑定');
     await expect(ui.getByRole('alert')).toContainText('请启动 figma-assets-helper');
+    await expect(ui.locator('#phase')).toHaveText('失败');
+    await page.unroute(f.base+'/v1/scan');
+    await f.stop();
     await ui.getByLabel('配对令牌').fill('0'.repeat(64));
     await ui.getByRole('button',{name:'连接助手',exact:true}).click();
     await expect(ui.getByRole('alert')).toContainText('请启动 figma-assets-helper');

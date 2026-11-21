@@ -32,7 +32,7 @@ document.querySelectorAll<HTMLButtonElement>('button').forEach(tooltip);
 function render() {
   const s=workflow?.state,busy=!!s?.busy,connected=!!s?.connected;
   el('connection').textContent=connected?'已连接':'未连接';
-  el('phase').textContent=s?.phase||'未连接';
+  el('phase').textContent=uiError?'失败':s?.phase||'未连接';
   el('error').textContent=uiError||s?.error||'';
   input('address').disabled=busy;input('token').disabled=busy;
   el<HTMLButtonElement>('connect').disabled=busy;
@@ -70,7 +70,10 @@ async function run(action:()=>Promise<void>) {
   try{await action();}catch(error){uiError=error instanceof Error?error.message:'操作失败';}
   if(pageValidationPending&&workflow&&!workflow.state.busy) {
     pageValidationPending=false;
+    const taskError=uiError;
     await run(()=>workflow!.validatePage());
+    if(taskError)uiError=uiError?`${taskError}\n${uiError}`:taskError;
+    render();
     return;
   }
   render();
