@@ -92,12 +92,19 @@ function findEditable(node: SceneNode | undefined): EditableSlice | null {
   if (!fills.length || new Set(fills.map(fill => fill.imageHash)).size !== 1) return null;
   const saved = savedMargins(component);
   const derived = deriveSlice(component);
-  const margins = saved?.current ?? derived.margins;
-  const overlap = saved?.overlap ?? derived.overlap;
+  let margins = saved?.current ?? derived.margins;
+  let overlap = saved?.overlap ?? derived.overlap;
   try {
     createNineSlicePlan(component, margins, overlap);
   } catch {
-    return null;
+    // A saved manual value can become invalid after the source shrinks. The
+    // component is still structurally editable, so fall back to geometry and
+    // let the UI offer "restore project parameter" instead of treating it as
+    // an unrelated image layer.
+    if (!saved) return null;
+    margins = derived.margins;
+    overlap = derived.overlap;
+    try { createNineSlicePlan(component, margins, overlap); } catch { return null; }
   }
   return { component, margins, overlap, fill: fills[0], width: component.width, height: component.height,
     target: 'component', record: saved, legacy: !saved };

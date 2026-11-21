@@ -1,5 +1,5 @@
 {
-  "name": "MyFigma 九宫格工具",
+  "name": "MyFigma 九宫格工具 v2",
   "api": "1.0.0",
   "main": "dist/code.js",
   "capabilities": [],

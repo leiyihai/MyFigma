@@ -269,6 +269,23 @@ function atlasRecord(override = false) {
   };
 }
 
+test('an invalid saved manual margin still falls back to slice geometry instead of generating a new component', async () => {
+  const env = setup();
+  await env.figma.ui.onmessage(env.settings);
+  const component = env.created[0];
+  setRecord(component, { ...atlasRecord(true), project: { left: 8, top: 8, right: 8, bottom: 8 },
+    current: { left: 60, top: 60, right: 60, bottom: 60 },
+    margins: { left: 60, top: 60, right: 60, bottom: 60 } });
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ ...env.settings, left: 20, right: 5, top: 8, bottom: 9 });
+  assert.equal(env.created.length, 1);
+  assert.equal(component.children.length, 9);
+  const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.deepEqual(saved.project, { left: 8, top: 8, right: 8, bottom: 8 });
+  assert.deepEqual(saved.current, { left: 20, right: 5, top: 8, bottom: 9 });
+  assert.equal(saved.override, true);
+});
+
 test('submitting unchanged margins keeps the importer project state without a new manual override', async () => {
   const env = setup();
   await env.figma.ui.onmessage(env.settings);
