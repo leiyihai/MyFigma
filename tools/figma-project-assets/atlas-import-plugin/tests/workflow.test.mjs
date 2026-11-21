@@ -65,7 +65,7 @@ test('clearing the game selection invalidates the previous scan and import targe
   }finally{await f.cleanup();}
 });
 
-test('failed Figma import rolls back only its own nodes and resets visible progress for retry',async()=>{
+test('a failed item keeps earlier successes, records the failure and retries only what is missing',async()=>{
   const f=await fixture();
   try {
     const {api:figma,page}=figmaFixture();
@@ -74,18 +74,105 @@ test('failed Figma import rolls back only its own nodes and resets visible progr
     const original=figma.createImage;
     let count=0;
     figma.createImage=bytes=>{if(++count===2)throw new Error('Figma image rejected');return original(bytes);};
-    await assert.rejects(workflow.import(),/Figma image rejected/);
-    assert.equal(page.children.length,0);
-    assert.equal(page.name,'Page 1');
-    assert.equal(page.getPluginData('atlas.binding'),'');
-    assert.equal(workflow.state.progress.done,0);
+    await workflow.import();
+    const first=workflow.state.result;
+    assert.equal(first.cancelled,false);
+    assert.equal(first.failures.length,1);
+    assert.match(first.failures[0].reason,/Figma image rejected/);
+    assert.deepEqual(first.applied,{added:1,updated:0,removed:0});
+    assert.equal(workflow.state.phase,'部分失败');
+    assert.match(workflow.state.error,/1 项未完成/);
+    assert.equal(workflow.state.progress.done,2);
+    // 部分成果保留：已成功项仍在，未成功项没有组件也没有同步记录。
+    assert.equal(page.children.length,1);
+    assert.equal(page.children[0].children.length,1);
+    assert.equal(JSON.parse(page.children[0].children[0].data['atlas.sync.v1']).status,'current');
+    // 保留的扫描结果直接重试；不需要重新扫描，也不会重复创建。
+    assert.ok(workflow.state.scan);
     figma.createImage=original;
     await workflow.import();
+    assert.equal(workflow.state.result.failures.length,0);
+    assert.deepEqual(workflow.state.result.applied,{added:1,updated:0,removed:0});
     assert.equal(page.children[0].children.length,2);
+    assert.equal(workflow.state.phase,'就绪');
+    assert.equal(workflow.state.scan,undefined);
+    await workflow.scan();
+    assert.deepEqual([workflow.state.plan.added,workflow.state.plan.updated,workflow.state.plan.removed,workflow.state.plan.unchanged],[0,0,0,2]);
   }finally{await f.cleanup();}
 });
 
-test('failed import preserves page names, bindings and unrelated nodes edited during import',async()=>{
+test('cancelling an import keeps completed items, records no success for the rest and retries idempotently',async()=>{
+  const f=await fixture();
+  try {
+    const {api:figma,page}=figmaFixture();
+    let workflow;
+    let cancelled=false;
+    workflow=new api.Workflow(new api.HelperClient(f.base,f.token),api.createFigmaPlatform(figma),()=>{
+      if(!cancelled&&workflow.state.busy&&workflow.state.progress.done===1){cancelled=true;workflow.cancel();}
+    });
+    await workflow.connect();
+    await workflow.saveProject({id:'g2',name:'测试游戏',path:f.project,maintained:true});
+    await workflow.selectProject('g2');
+    await workflow.scan();
+    await workflow.import();
+    const report=workflow.state.result;
+    assert.equal(report.cancelled,true);
+    assert.deepEqual(report.applied,{added:1,updated:0,removed:0});
+    assert.equal(report.failures.length,0);
+    assert.equal(workflow.state.phase,'已取消');
+    assert.equal(workflow.state.busy,false);
+    assert.equal(workflow.state.progress.done,1);
+    assert.equal(page.children[0].children.length,1);
+    // 未完成项不记成功：只有真正写入的组件带当前同步记录。
+    for(const child of page.children[0].children) assert.equal(JSON.parse(child.data['atlas.sync.v1']).status,'current');
+    // 保留扫描结果，重试只补齐剩余项且不重复创建。
+    assert.ok(workflow.state.scan);
+    await workflow.import();
+    assert.equal(workflow.state.result.cancelled,false);
+    assert.deepEqual(workflow.state.result.applied,{added:1,updated:0,removed:0});
+    assert.equal(page.children[0].children.length,2);
+    assert.equal(new Set(page.children[0].children.map(child=>JSON.parse(child.data['atlas.source']).identity)).size,2);
+    assert.equal(workflow.state.phase,'就绪');
+  }finally{await f.cleanup();}
+});
+
+test('cancelling a scan discards the result instead of treating missing items as source removals',async()=>{
+  const f=await fixture();
+  try {
+    const {api:figma,page}=figmaFixture();
+    let release;
+    const gate=new Promise(resolve=>{release=resolve;});
+    class GatedClient extends api.HelperClient {
+      constructor(base,token){super(base,token);this.started=new Promise(resolve=>{this.markStarted=resolve;});}
+      async scan(id,signal){this.markStarted();const scan=await super.scan(id,signal);await gate;return scan;}
+    }
+    const helper=new GatedClient(f.base,f.token);
+    const workflow=new api.Workflow(helper,api.createFigmaPlatform(figma));
+    await workflow.connect();
+    await workflow.saveProject({id:'g2',name:'测试游戏',path:f.project,maintained:true});
+    await workflow.selectProject('g2');
+    const running=workflow.scan();
+    await helper.started;
+    workflow.cancel();
+    assert.equal(workflow.state.phase,'取消中');
+    release();
+    await running;
+    assert.equal(workflow.state.phase,'已取消');
+    assert.equal(workflow.state.error,'');
+    assert.equal(workflow.state.scan,undefined);
+    assert.equal(workflow.state.plan,undefined);
+    assert.equal(workflow.state.busy,false);
+    assert.equal(page.children.length,0);
+    // 取消后的重新扫描仍能完成正常导入，不遗留误判的源缺失。
+    await workflow.scan();
+    assert.equal(workflow.state.scan.summary.sprites,2);
+    await workflow.import();
+    assert.equal(page.children[0].children.length,2);
+    assert.equal(workflow.state.result.failures.length,0);
+  }finally{await f.cleanup();}
+});
+
+test('a failed item preserves concurrent page edits made by the user',async()=>{
   const f=await fixture();
   try {
     const {api:figma,page}=figmaFixture();
@@ -106,10 +193,12 @@ test('failed import preserves page names, bindings and unrelated nodes edited du
     const createImage=figma.createImage;
     let images=0;
     figma.createImage=bytes=>{if(++images===2)throw new Error('Figma image rejected');return createImage(bytes);};
-    await assert.rejects(workflow.import(),/Figma image rejected/);
+    await workflow.import();
+    assert.equal(workflow.state.result.failures.length,1);
     assert.equal(page.name,'用户同期修改的名称');
     assert.equal(page.getPluginData('atlas.binding'),userBinding);
-    assert.deepEqual(page.children,[userNode]);
+    assert.deepEqual(page.children.filter(node=>node===userNode),[userNode]);
+    assert.equal(page.children.flatMap(node=>node.children||[]).length,1);
   }finally{await f.cleanup();}
 });
 

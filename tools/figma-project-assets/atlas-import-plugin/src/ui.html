@@ -42,7 +42,10 @@ button.quiet{background:transparent;border-color:var(--figma-color-border,#ccc)}
 .status-line{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
 .summary-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px}
 #summary{font-size:11px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#details{white-space:pre-wrap;overflow-wrap:anywhere;max-height:44px;overflow:auto;font-size:11px;color:var(--figma-color-text-danger,#a20);margin-top:4px}
+#details{max-height:62px;overflow:auto;font-size:11px;color:var(--figma-color-text-danger,#a20);margin-top:4px}
+#details summary{cursor:pointer;font-size:11px;margin-top:4px}
+#details-body{margin:3px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}
+.status-actions{display:flex;align-items:center;gap:8px}
 #error{white-space:pre-wrap;overflow-wrap:anywhere;max-height:46px;overflow:auto;color:var(--figma-color-text-danger,#a20);font-size:11px;margin-top:3px}
 .hidden{display:none!important}
 progress{width:100%;height:6px;margin:5px 0 2px;accent-color:var(--figma-color-bg-brand,#0d99ff)}
@@ -111,15 +114,15 @@ dialog::backdrop{background:#0006}
   <div class="card-head"><h2>页面校验</h2><button id="validate" title="检查当前页是否为空白或已绑定当前游戏；不会修改页面。">校验当前页</button></div>
   <p id="page-status" class="small">请选择游戏后校验页面</p>
   <p class="muted small" style="margin-top:3px">支持登记目录内的小型对象式 JSON + PNG 图集；暂归未分类。空白页首次导入，绑定一致的资源页可增量更新；未绑定非空页和错绑页受保护。</p>
-  <div class="summary-row"><span id="summary" data-testid="summary">尚未扫描</span><button id="scan" title="扫描登记目录中的 JSON + PNG 图集并计算新增、更新和源缺失；空白页或绑定一致的资源页可开始。">扫描资源</button></div>
-  <div id="details" class="hidden"></div>
-  <div class="actions"><button id="import" class="primary" title="新增创建主组件，变化原位更新，源缺失仅标记；空白页首次导入会绑定并重命名当前页。不上传整张图集。">导入主组件</button></div>
+  <div class="summary-row"><span id="summary" data-testid="summary">尚未扫描</span><button id="scan" title="扫描登记目录中的 JSON + PNG 图集并计算新增、更新和源缺失；空白页或绑定一致的资源页可开始。扫描期间可取消，取消后不会把结果当作源删除。">扫描资源</button></div>
+  <div class="actions"><button id="import" class="primary" title="新增创建主组件，变化原位更新，源缺失仅标记；单项失败保留其他成果，失败或取消后再次点击只补齐未完成项；空白页首次导入会绑定并重命名当前页。不上传整张图集。">导入主组件</button></div>
 </section>
 
 <section class="card" aria-label="任务状态">
-  <div class="status-line"><span id="phase">未连接</span><span id="progress" data-testid="progress" class="muted small">0 / 0</span></div>
+  <div class="status-line"><span id="phase">未连接</span><div class="status-actions"><span id="progress" data-testid="progress" class="muted small">0 / 0</span><button id="cancel" class="quiet" disabled title="取消当前扫描或导入；已完成的项会保留，未完成项不会记为成功，可再次运行补齐。">取消任务</button></div></div>
   <progress id="bar" max="1" value="0"></progress>
   <p id="error" role="alert"></p>
+  <details id="details" class="hidden"><summary id="details-summary">异常与失败详情（0）</summary><pre id="details-body"></pre></details>
 </section>
 </main>
 

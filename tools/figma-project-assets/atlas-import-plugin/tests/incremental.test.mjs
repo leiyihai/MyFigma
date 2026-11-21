@@ -9,7 +9,7 @@ import * as api from '../dist/api.mjs';
 const atlas = (project, image = 'buttons.png') => join(project, 'res', 'imageset', 'Static', 'buttons.json');
 const image = project => join(project, 'res', 'imageset', 'Static', 'buttons.png');
 
-async function setup() {
+async function setup(changed = () => {}) {
   const f = await projectFixture();
   await writePng(image(f.project), 3, 1, [
     255, 0, 0, 255,
@@ -24,7 +24,7 @@ async function setup() {
     }
   });
   const fixture = figmaFixture();
-  const workflow = new api.Workflow(new api.HelperClient(f.base, f.token), api.createFigmaPlatform(fixture.api));
+  const workflow = new api.Workflow(new api.HelperClient(f.base, f.token), api.createFigmaPlatform(fixture.api), changed);
   await workflow.connect();
   await workflow.saveProject({ id: 'g4', name: '增量测试', path: f.project, maintained: true });
   await workflow.selectProject('g4');
@@ -169,6 +169,90 @@ function pick(plan) {
     unchanged: plan.unchanged, blocked: plan.blocked
   };
 }
+
+test('a cancelled import leaves pending source removals unmarked and retries idempotently', async () => {
+  let current;
+  let armed = false;
+  let cancelled = false;
+  const built = await setup(() => {
+    if (armed && !cancelled && current?.state.busy && current.state.phase === '导入中' && current.state.progress.done === 1) {
+      cancelled = true;
+      current.cancel();
+    }
+  });
+  current = built.workflow;
+  const { f, page } = built;
+  try {
+    await current.scan();
+    await current.import();
+    const red = component(page, 'red');
+    const green = component(page, 'green');
+    // Replace the atlas with one new sprite so the next plan adds one item and removes two.
+    await writeAtlas(atlas(f.project), {
+      image: 'buttons.png', size: { w: 3, h: 1 },
+      frames: { blue: { frame: { x: 2, y: 0, w: 1, h: 1 } } }
+    });
+    await current.scan();
+    assert.deepEqual(pick(current.state.plan), { added: 1, updated: 0, removed: 2, unchanged: 0, blocked: 0 });
+    armed = true;
+    await current.import();
+    assert.equal(current.state.result.cancelled, true);
+    assert.deepEqual(current.state.result.applied, { added: 1, updated: 0, removed: 0 });
+    assert.equal(current.state.phase, '已取消');
+    assert.ok(component(page, 'blue'));
+    // Cancelled items are neither success nor source deletion.
+    assert.equal(JSON.parse(red.data['atlas.sync.v1']).status, 'current');
+    assert.equal(JSON.parse(green.data['atlas.sync.v1']).status, 'current');
+    // The kept scan reports the unfinished work instead of treating it as done.
+    await current.scan();
+    assert.deepEqual(pick(current.state.plan), { added: 0, updated: 0, removed: 2, unchanged: 1, blocked: 0 });
+    await current.import();
+    assert.equal(current.state.result.cancelled, false);
+    assert.deepEqual(current.state.result.applied, { added: 0, updated: 0, removed: 2 });
+    assert.equal(JSON.parse(red.data['atlas.sync.v1']).status, 'source-missing');
+    assert.equal(JSON.parse(green.data['atlas.sync.v1']).status, 'source-missing');
+    assert.equal(page.children.flatMap(node => node.children || []).length, 3);
+    assert.deepEqual(page.children.flatMap(node => node.children || [])
+      .map(node => JSON.parse(node.data['atlas.source']).identity).sort(), [
+      '["g4","atlas","Static/buttons.json","blue"]',
+      '["g4","atlas","Static/buttons.json","green"]',
+      '["g4","atlas","Static/buttons.json","red"]'
+    ]);
+  } finally { await f.cleanup(); }
+});
+
+test('a failed update restores that component and the next run applies it', async () => {
+  const { f, workflow, page, api: figma } = await setup();
+  try {
+    await workflow.scan();
+    await workflow.import();
+    const red = component(page, 'red');
+    const originalHash = red.fills[0].imageHash;
+    const originalSync = red.data['atlas.sync.v1'];
+    await writePng(image(f.project), 3, 1, [
+      0, 255, 0, 255,
+      0, 0, 255, 255,
+      255, 0, 0, 255
+    ]);
+    await workflow.scan();
+    assert.deepEqual(pick(workflow.state.plan), { added: 0, updated: 2, removed: 0, unchanged: 0, blocked: 0 });
+    const createImage = figma.createImage;
+    figma.createImage = () => { throw new Error('Figma image rejected'); };
+    await workflow.import();
+    assert.equal(workflow.state.result.failures.length, 2);
+    assert.deepEqual(workflow.state.result.applied, { added: 0, updated: 0, removed: 0 });
+    assert.equal(workflow.state.phase, '部分失败');
+    // The failed update must not look successful or corrupted.
+    assert.equal(red.fills[0].imageHash, originalHash);
+    assert.equal(red.data['atlas.sync.v1'], originalSync);
+    figma.createImage = createImage;
+    await workflow.import();
+    assert.equal(workflow.state.result.failures.length, 0);
+    assert.deepEqual(workflow.state.result.applied, { added: 0, updated: 2, removed: 0 });
+    assert.notEqual(red.fills[0].imageHash, originalHash);
+    assert.equal(JSON.parse(red.data['atlas.sync.v1']).status, 'current');
+  } finally { await f.cleanup(); }
+});
 
 test('a cleared managed source record blocks duplicate recreation', async () => {
   const { f, workflow, page } = await setup();

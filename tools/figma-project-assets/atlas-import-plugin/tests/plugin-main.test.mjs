@@ -42,10 +42,23 @@ test('built main script loads in an import-rejecting sandbox, stores pairing loc
   try {
     await f.request('/v1/projects', 'PUT', { id: 'g2', name: '测试游戏', path: f.project, maintained: true });
     const scan = await (await f.request('/v1/scan', 'POST', { projectId: 'g2' })).json();
+    // Cancelling before the first item must stop scheduling and leave the page untouched.
+    const importing = figma.ui.onmessage({ type: 'import', requestId: 20, scan });
+    await figma.ui.onmessage({ type: 'cancel' });
+    await importing;
+    const cancelled = replies.find(reply => reply.requestId === 20);
+    assert.equal(cancelled.error, undefined);
+    assert.equal(cancelled.result.cancelled, true);
+    assert.deepEqual(cancelled.result.applied, { added: 0, updated: 0, removed: 0 });
+    assert.equal(page.children.length, 0);
+    assert.equal(page.name, 'Page 1');
+    assert.equal(page.getPluginData('atlas.binding'), '');
     await figma.ui.onmessage({ type: 'import', requestId: 2, scan });
     const result = replies.find(reply => reply.requestId === 2);
     assert.equal(result.error, undefined);
     assert.equal(result.result.added, 2);
+    assert.deepEqual(result.result.applied, { added: 2, updated: 0, removed: 0 });
+    assert.deepEqual([result.result.failures.length, result.result.cancelled], [0, false]);
     assert.equal(page.name, '测试游戏（g2）- 分类资源');
     assert.equal(page.children[0].children.length, 2);
     assert.equal(replies.filter(reply => reply.type === 'progress').at(-1).progress.done, 2);

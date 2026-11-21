@@ -1,4 +1,5 @@
 import {createFigmaPlatform} from './platform';
+import {Cancellation} from './api';
 import type {PublicProject,Scan} from './api';
 figma.showUI(__html__,{width:520,height:720,themeColors:true});
 const platform=createFigmaPlatform(figma);
@@ -11,13 +12,22 @@ function validPairing(value:unknown):value is Pairing {
     && /^http:\/\/(?:localhost|127\.0\.0\.1):\d{1,5}$/.test(pairing.address)
     && typeof pairing.token==='string' && /^[a-f0-9]{64}$/.test(pairing.token);
 }
+let active: Cancellation | undefined;
 figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicProject;scan:Scan;pairing?:Pairing})=>{
-  if(!message || !Number.isInteger(message.requestId))return;
+  if(!message)return;
+  // Cancellation is a control message, not a task reply; it may arrive while import is running.
+  if(message.type==='cancel') {active?.cancel(); if(Number.isInteger(message.requestId)) figma.ui.postMessage({type:'result',requestId:message.requestId,result:true}); return;}
+  if(!Number.isInteger(message.requestId))return;
   const reply=(result:unknown,error?:string)=>figma.ui.postMessage({type:'result',requestId:message.requestId,result,error});
   try {
     if(message.type==='validate')reply(await platform.validate(message.project));
     else if(message.type==='preview')reply(await platform.preview(message.scan));
-    else if(message.type==='import') {const plan=await platform.importResources(message.scan,progress=>figma.ui.postMessage({type:'progress',progress}));reply(plan);}
+    else if(message.type==='import') {
+      const cancellation=new Cancellation();
+      active=cancellation;
+      try {const report=await platform.importResources(message.scan,progress=>figma.ui.postMessage({type:'progress',progress}),cancellation);reply(report);}
+      finally {if(active===cancellation)active=undefined;}
+    }
     else if(message.type==='pairing-load') {
       const stored=await figma.clientStorage.getAsync(pairingKey);
       reply(validPairing(stored)?stored:null);

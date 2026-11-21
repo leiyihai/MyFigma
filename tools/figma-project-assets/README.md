@@ -1,6 +1,6 @@
 # 项目图集导入工具
 
-本批实现 GitHub [#1](https://github.com/leiyihai/MyFigma/issues/1)、[#2](https://github.com/leiyihai/MyFigma/issues/2)、[#3](https://github.com/leiyihai/MyFigma/issues/3)、[#4](https://github.com/leiyihai/MyFigma/issues/4)、[#6](https://github.com/leiyihai/MyFigma/issues/6) 与 [#11](https://github.com/leiyihai/MyFigma/issues/11)；已在用户授权的独立 Figma 测试文件完成小样客户端验收，仍不是完整资源管理版本。
+本批实现 GitHub [#1](https://github.com/leiyihai/MyFigma/issues/1)、[#2](https://github.com/leiyihai/MyFigma/issues/2)、[#3](https://github.com/leiyihai/MyFigma/issues/3)、[#4](https://github.com/leiyihai/MyFigma/issues/4)、[#5](https://github.com/leiyihai/MyFigma/issues/5)、[#6](https://github.com/leiyihai/MyFigma/issues/6) 与 [#11](https://github.com/leiyihai/MyFigma/issues/11)；已在用户授权的独立 Figma 测试文件完成小样客户端验收，仍不是完整资源管理版本。
 
 ## 组成与启动
 
@@ -32,7 +32,7 @@
 
 ### 集成审查修复
 
-- 失败回滚只恢复仍保留插件写入值的页面名称与绑定，保留用户同期修改及无关节点；回归先失败，再通过。
+- 失败项只恢复自身状态，不整体回滚；页面名称与绑定只在本轮无成功写入时恢复，保留用户同期修改及无关节点；先失败后通过的回归见 #5 条目。
 - 扫描期间切页会记录待校验状态，结束后重新校验，并在校验前禁用导入；自动重验保留原任务的失败提示及失败显示，不吞掉断连后的启动指引。浏览器用受控网络等待和断连复现并回归。
 - 小数边距辅助线与提交参数使用一致数值，四边实际位置经过浏览器验证；详见 [九宫格验证记录](nine-slice-plugin/VALIDATION.md)。
 
@@ -48,7 +48,9 @@
 ## 尚未实现／验收
 
 - #4 增量更新已完成公开流程、真实助手子进程及独立 Figma 测试文件的像素/尺寸/实例/源缺失小样验收；尚未覆盖三个实际游戏项目、不完整扫描和人工结构修改的真实客户端验收。
-- #6 已实现布局九宫格统计、共用核心生成、普通组件原位升级和不自动降级；公开扫描—导入—更新流程已回归，真实 Figma 的不同尺寸拉伸、实例关联与接缝验收待父代理串行完成。取消与补齐、已有九宫格原位编辑、自动或手动分类、可选图集对照页及真实项目性能验收，分别属于后续 #5、#7–10、#12。
+- #5 取消、单项失败隔离与增量补齐已完成公开流程、真实助手子进程及浏览器交互验证；真实客户端取消/失败注入验收待父流程串行执行。
+- #6 已实现布局九宫格统计、共用核心生成、普通组件原位升级和不自动降级；公开扫描—导入—更新流程已回归，真实 Figma 的不同尺寸拉伸、实例关联与接缝验收待父代理串行完成。
+- 已有九宫格原位编辑与恢复、自动或手动分类、可选图集对照页及真实项目性能验收，分别属于后续 #7–10、#12。
 - 完整递归扫描／独立图片（#3）与 Windows 托盘助手（#11）已完成；真实鼠标托盘点击仍待人工验收。
 - 未操作测试文件以外的用户设计；未知图集格式、三个真实项目全量兼容与性能仍未验收。
 - 用户反馈的主面板排版、项目编号说明、编辑锁定态、免滚动及记住本机配对已完成；首次配对仍需手动复制令牌。
