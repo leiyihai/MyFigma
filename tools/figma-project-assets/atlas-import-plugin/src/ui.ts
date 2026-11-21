@@ -6,10 +6,10 @@ function input(id:string) {return el<HTMLInputElement>(id);}
 let sequence=0;
 const pending=new Map<number,{resolve:(value:any)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
 let reportProgress:((value:Progress)=>void)|undefined;
-function rpc<T>(type:string,payload:object):Promise<T> {
+function rpc<T>(type:string,payload:object,timeout=60000):Promise<T> {
   return new Promise((resolve,reject)=>{
     const requestId=++sequence;
-    const timer=setTimeout(()=>{pending.delete(requestId);reject(new Error('Figma 响应超时，请关闭并重新打开插件'));},60000);
+    const timer=setTimeout(()=>{pending.delete(requestId);reject(new Error('Figma 响应超时，请关闭并重新打开插件'));},timeout);
     pending.set(requestId,{resolve,reject,timer});
     parent.postMessage({pluginMessage:{type,requestId,...payload}},'*');
   });
@@ -21,7 +21,8 @@ const platform:Platform={
     reportProgress=progress;
     // The figure import runs in the plugin main thread; forward cancellation there.
     const stop=cancellation?.onCancel(()=>{void rpc('cancel',{}).catch(()=>{});})||(()=>{});
-    try{return await rpc<import('./api').ImportReport>('import',{scan});}
+    // Large projects can take minutes; keep the bridge open until the main thread completes.
+    try{return await rpc<import('./api').ImportReport>('import',{scan},15*60*1000);}
     finally{reportProgress=undefined;stop();}
   },
   compare:project=>rpc('compare',{project}),
