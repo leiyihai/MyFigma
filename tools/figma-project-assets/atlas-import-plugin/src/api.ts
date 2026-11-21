@@ -16,9 +16,14 @@ export interface Scan {
 }
 export interface PageStatus { valid: boolean; message: string }
 export interface Progress { done: number; total: number }
+export interface ImportPlan {
+  schemaVersion: 1; added: number; updated: number; removed: number; unchanged: number; blocked: number;
+  removalSuppressed: boolean; messages: string[];
+}
 export interface Platform {
   validate(project: PublicProject): Promise<PageStatus>;
-  importResources(scan: Scan, progress: (value: Progress) => void): Promise<void>;
+  preview(scan: Scan): Promise<ImportPlan>;
+  importResources(scan: Scan, progress: (value: Progress) => void): Promise<ImportPlan>;
 }
 
 class HelperConnectionError extends Error {}
@@ -53,7 +58,7 @@ export class HelperClient {
 }
 export interface State {
   connected: boolean; busy: boolean; phase: string; error: string;
-  selected?: PublicProject; page?: PageStatus; scan?: Scan; progress: Progress;
+  selected?: PublicProject; page?: PageStatus; scan?: Scan; plan?: ImportPlan; progress: Progress;
 }
 export class Workflow {
   readonly state: State = {connected:false,busy:false,phase:'未连接',error:'',progress:{done:0,total:0}};
@@ -73,13 +78,13 @@ export class Workflow {
   }
   async connect(): Promise<void> {
     await this.task('连接中',async () => {
-      this.state.connected = false; this.state.scan = undefined;
+      this.state.connected = false; this.state.scan = undefined; this.state.plan = undefined;
       await this.helper.health(); this.projects = await this.helper.projects(); this.state.connected = true;
     });
   }
   async saveProject(project: Project): Promise<void> {
     await this.task('保存登记',async () => {
-      this.projects = await this.helper.saveProject(project); this.state.scan = undefined;
+      this.projects = await this.helper.saveProject(project); this.state.scan = undefined; this.state.plan = undefined;
       if(this.state.selected?.id === project.id) {
         this.state.selected = {id:project.id,name:project.name};
         this.state.page = await this.platform.validate(this.state.selected);
@@ -89,39 +94,45 @@ export class Workflow {
   async deleteProject(id: string): Promise<void> {
     await this.task('删除登记',async () => {
       this.projects = await this.helper.deleteProject(id);
-      if (this.state.selected?.id === id) {this.state.selected = undefined; this.state.scan = undefined; this.state.page = undefined;}
+      if (this.state.selected?.id === id) {this.state.selected = undefined; this.state.scan = undefined; this.state.plan = undefined; this.state.page = undefined;}
     });
   }
   async selectProject(id: string): Promise<void> {
     await this.task('页面校验',async () => {
-      if(!id) {this.state.selected=undefined;this.state.scan=undefined;this.state.page=undefined;this.state.progress={done:0,total:0};return;}
+      if(!id) {this.state.selected=undefined;this.state.scan=undefined;this.state.plan=undefined;this.state.page=undefined;this.state.progress={done:0,total:0};return;}
       const project = this.projects.find(p=>p.id===id);
       if (!project) throw new Error('请选择已登记的游戏');
-      this.state.selected = {id:project.id,name:project.name}; this.state.scan = undefined; this.state.progress = {done:0,total:0};
+      this.state.selected = {id:project.id,name:project.name}; this.state.scan = undefined; this.state.plan = undefined; this.state.progress = {done:0,total:0};
       this.state.page = await this.platform.validate(this.state.selected);
     });
   }
+  invalidateScan(): void {this.state.scan=undefined;this.state.plan=undefined;this.state.progress={done:0,total:0};}
   async validatePage(): Promise<void> {
     await this.task('页面校验',async () => {if (this.state.selected) this.state.page = await this.platform.validate(this.state.selected);});
   }
   async scan(): Promise<void> {
     await this.task('扫描中',async () => {
       if(!this.state.selected || !this.state.connected) throw new Error('请连接助手并选择游戏');
-      this.state.scan = undefined;
+      this.state.scan = undefined; this.state.plan = undefined;
       this.state.page = await this.platform.validate(this.state.selected);
       if(!this.state.page.valid) throw new Error(this.state.page.message);
       this.state.scan = await this.helper.scan(this.state.selected.id);
+      this.state.plan = await this.platform.preview(this.state.scan);
       this.state.progress = {done:0,total:this.state.scan.resources.length};
     });
   }
   async import(): Promise<void> {
     await this.task('导入中',async () => {
       const scan = this.state.scan;
-      if(!scan || !scan.resources.length || scan.project.id !== this.state.selected?.id) throw new Error('请先扫描当前游戏');
+      if(!scan || scan.project.id !== this.state.selected?.id) throw new Error('请先扫描当前游戏');
       this.state.page = await this.platform.validate(scan.project);
       if(!this.state.page.valid) throw new Error(this.state.page.message);
-      try {await this.platform.importResources(scan,progress=>{this.state.progress=progress;this.changed();});}
-      catch(error) {this.state.progress={done:0,total:scan.resources.length};throw error;}
+      try {this.state.plan = await this.platform.importResources(scan,progress=>{this.state.progress=progress;this.changed();});}
+      catch(error) {
+        const plan=this.state.plan;
+        this.state.progress={done:0,total:plan ? plan.added+plan.updated+plan.removed : scan.resources.length};
+        throw error;
+      }
       this.state.scan = undefined;
       this.state.page = await this.platform.validate(scan.project);
     });

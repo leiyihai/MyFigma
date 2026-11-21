@@ -45,7 +45,7 @@ test('built main script loads in an import-rejecting sandbox, stores pairing loc
     await figma.ui.onmessage({ type: 'import', requestId: 2, scan });
     const result = replies.find(reply => reply.requestId === 2);
     assert.equal(result.error, undefined);
-    assert.equal(result.result, null);
+    assert.equal(result.result.added, 2);
     assert.equal(page.name, '测试游戏（g2）- 分类资源');
     assert.equal(page.children[0].children.length, 2);
     assert.equal(replies.filter(reply => reply.type === 'progress').at(-1).progress.done, 2);

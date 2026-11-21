@@ -108,12 +108,12 @@ dialog::backdrop{background:#0006}
 </section>
 
 <section class="card" aria-label="页面与资源">
-  <div class="card-head"><h2>页面校验</h2><button id="validate" title="检查当前页是否为空白且项目绑定一致；不会修改页面。">校验当前页</button></div>
+  <div class="card-head"><h2>页面校验</h2><button id="validate" title="检查当前页是否为空白或已绑定当前游戏；不会修改页面。">校验当前页</button></div>
   <p id="page-status" class="small">请选择游戏后校验页面</p>
-  <p class="muted small" style="margin-top:3px">仅支持登记目录直接包含的小型对象式 JSON + PNG 图集；暂归未分类。非空页受保护，本版本不做增量。</p>
-  <div class="summary-row"><span id="summary" data-testid="summary">尚未扫描</span><button id="scan" title="扫描登记目录中的小型 JSON + PNG 图集并实际拆图；仅空白且绑定一致的页面可开始。">扫描资源</button></div>
+  <p class="muted small" style="margin-top:3px">支持登记目录内的小型对象式 JSON + PNG 图集；暂归未分类。空白页首次导入，绑定一致的资源页可增量更新；未绑定非空页和错绑页受保护。</p>
+  <div class="summary-row"><span id="summary" data-testid="summary">尚未扫描</span><button id="scan" title="扫描登记目录中的 JSON + PNG 图集并计算新增、更新和源缺失；空白页或绑定一致的资源页可开始。">扫描资源</button></div>
   <div id="details" class="hidden"></div>
-  <div class="actions"><button id="import" class="primary" title="仅在空白页导入扫描所得的散图普通主组件；绑定并重命名当前页，不上传整张图集。">导入主组件</button></div>
+  <div class="actions"><button id="import" class="primary" title="新增创建主组件，变化原位更新，源缺失仅标记；空白页首次导入会绑定并重命名当前页。不上传整张图集。">导入主组件</button></div>
 </section>
 
 <section class="card" aria-label="任务状态">

@@ -28,7 +28,7 @@ cargo build --release --locked
 - `token`：首次启动从操作系统随机源生成的 256 位 bearer 令牌。
 - `projects.json`：项目登记表；本机不同 Figma 文件复用。
 - `projects.tmp`：登记保存时先独占创建、同步，再替换正式文件；写失败不更新内存登记表。
-- `scans/<projectId>.json`：最近一次完整扫描结果的本地副本，含恢复图片 base64、来源身份与错误；当前仅写入、尚无读取方（增量任务 #4 再接入），体积可能较大，删除登记不会自动清理。
+- `scans/<projectId>.json`：最近一次完整扫描结果的本地副本，含恢复图片 base64、来源身份与错误；当前仅写入、尚无读取方（增量判定由 Figma 组件的 `atlas.sync.v1` 记录完成），体积可能较大，删除登记不会自动清理。
 
 扫描结果先落盘到本机 `scans` 目录再返回，Figma 文档只保存白名单来源字段；不写凭据日志。`--data-dir <directory>`、`--port <port>` 供隔离测试/显式本机配置使用（`0` 表示随机端口）；生产插件 manifest 默认仅放行 38473。不要选择共享目录。Windows 依赖当前用户 Local AppData 的默认 ACL；不会主动扩宽 ACL。Unix 测试环境目录/新文件权限分别是 0700/0600，但不承诺非 Windows 产品支持。
 

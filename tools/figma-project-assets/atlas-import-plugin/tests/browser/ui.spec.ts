@@ -19,7 +19,8 @@ test('management dialog, full search, real scan, task lock, progress and hover g
       if(m.type==='pairing-save'){window.pairing=m.pairing;reply(true);return;}
       if(m.type==='pairing-clear'){window.pairing=null;reply(true);return;}
       if(m.type==='validate')reply(window.currentPageInvalid?{valid:false,message:'非空且未绑定页面不可导入'}:{valid:true,message:'空白页可导入'});
-      if(m.type==='import'){window.imported=m.scan;e.source.postMessage({pluginMessage:{type:'progress',progress:{done:1,total:2}}},'*');window.finish=()=>reply(null);}
+      if(m.type==='preview'){window.plan={schemaVersion:1,added:m.scan.resources.length,updated:0,removed:0,unchanged:0,blocked:0,removalSuppressed:false,messages:[]};reply(window.plan);}
+      if(m.type==='import'){window.imported=m.scan;e.source.postMessage({pluginMessage:{type:'progress',progress:{done:1,total:2}}},'*');window.finish=()=>reply(window.plan);}
     });
     </script>`);}
   });
@@ -93,8 +94,9 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await expect(ui.locator('#page-status')).toContainText('空白页可导入');
     await ui.getByRole('button',{name:'扫描资源',exact:true}).click();
     await expect(ui.getByTestId('summary')).toContainText('散图 2');
+    await expect(ui.getByTestId('summary')).toContainText('新增 2');
     await ui.getByRole('button',{name:'导入主组件',exact:true}).hover();
-    await expect(ui.getByRole('tooltip')).toContainText('仅在空白页');
+    await expect(ui.getByRole('tooltip')).toContainText('新增创建主组件');
     await ui.getByRole('button',{name:'导入主组件',exact:true}).click();
     await expect(ui.locator('#project')).toBeDisabled();
     await expect(ui.getByRole('button',{name:'扫描资源',exact:true})).toBeDisabled();
@@ -102,6 +104,7 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await expect(ui.getByTestId('progress')).toContainText('1 / 2');
     await page.evaluate(()=>{(window as any).finish();});
     await expect(ui.locator('#project')).toBeEnabled();
+    await expect(ui.getByTestId('summary')).toContainText('上次操作');
     expect(await page.evaluate(()=>(window as any).imported.resources.length)).toBe(2);
     expect(await page.evaluate(()=>'path' in (window as any).imported.project)).toBe(false);
     let releaseFailedScan!:()=>void;

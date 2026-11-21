@@ -16,7 +16,8 @@ function rpc<T>(type:string,payload:object):Promise<T> {
 }
 const platform:Platform={
   validate:project=>rpc('validate',{project}),
-  async importResources(scan,progress){reportProgress=progress;try{await rpc('import',{scan});}finally{reportProgress=undefined;}}
+  preview:scan=>rpc('preview',{scan}),
+  async importResources(scan,progress){reportProgress=progress;try{return await rpc<import('./api').ImportPlan>('import',{scan});}finally{reportProgress=undefined;}}
 };
 let workflow:Workflow|undefined;
 let uiError='';
@@ -71,10 +72,13 @@ function render() {
   el('page-status').textContent=pageValidationPending?'当前页已变化，任务结束后重新校验':s?.page?.message||'请选择游戏后校验页面';
   el<HTMLButtonElement>('validate').disabled=busy||!s?.selected;
   el<HTMLButtonElement>('scan').disabled=busy||pageValidationPending||!connected||!s?.selected||s.page?.valid===false;
-  el<HTMLButtonElement>('import').disabled=busy||pageValidationPending||!s?.scan?.resources.length||s.page?.valid===false;
+  const plan=s?.plan;
+  const actionable=!!plan&&plan.added+plan.updated+plan.removed>0;
+  el<HTMLButtonElement>('import').disabled=busy||pageValidationPending||!s?.scan||s.page?.valid===false||!actionable;
   const summary=s?.scan?.summary;
-  el('summary').textContent=summary?`图集 ${summary.atlases} · 散图 ${summary.sprites} · 独立图片 ${summary.standalone} · 异常 ${summary.errors}${s?.scan?.complete?'':' · 扫描不完整'}`:'尚未扫描';
-  const details=el('details');details.textContent=s?.scan?.errors.join('\n')||'';details.classList.toggle('hidden',!details.textContent);
+  const diff=plan?`新增 ${plan.added} · 更新 ${plan.updated} · 源缺失 ${plan.removed} · 未变 ${plan.unchanged}${plan.blocked?` · 跳过 ${plan.blocked}`:''}${plan.removalSuppressed?' · 扫描不完整，未标记源删除':''}`:'';
+  el('summary').textContent=summary?`图集 ${summary.atlases} · 散图 ${summary.sprites} · 独立图片 ${summary.standalone} · 异常 ${summary.errors}${s?.scan?.complete?'':' · 扫描不完整'} · ${diff}`:plan?`上次操作 · ${diff}`:'尚未扫描';
+  const details=el('details');details.textContent=[...(s?.scan?.errors||[]),...(plan?.messages||[])].join('\n');details.classList.toggle('hidden',!details.textContent);
   const progress=s?.progress||{done:0,total:0};
   el('progress').textContent=`${progress.done} / ${progress.total}`;
   el<HTMLProgressElement>('bar').max=progress.total||1;el<HTMLProgressElement>('bar').value=progress.done;
@@ -130,6 +134,7 @@ async function run(action:()=>Promise<void>) {
   try{await action();}catch(error){uiError=error instanceof Error?error.message:'操作失败';}
   if(pageValidationPending&&workflow&&!workflow.state.busy) {
     pageValidationPending=false;
+    workflow.invalidateScan();
     const taskError=uiError;
     await run(()=>workflow!.validatePage());
     if(taskError)uiError=uiError?`${taskError}\n${uiError}`:taskError;
@@ -162,7 +167,7 @@ window.addEventListener('message',event=>{
   if(message.type==='progress') {reportProgress?.(message.progress);return;}
   if(message.type==='page-changed'){
     if(workflow?.state.busy){pageValidationPending=true;render();}
-    else if(workflow)void run(()=>workflow!.validatePage());
+    else if(workflow){workflow.invalidateScan();void run(()=>workflow!.validatePage());}
     return;
   }
   const task=pending.get(message.requestId);if(!task)return;

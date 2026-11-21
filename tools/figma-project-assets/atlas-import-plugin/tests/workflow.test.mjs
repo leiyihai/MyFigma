@@ -150,7 +150,10 @@ test('task entry rejects project changes and repeated imports while importing',a
     await running;
     assert.equal(page.children.length,1);
     assert.equal(page.children[0].children.length,2);
-    await assert.rejects(workflow.scan(),/不支持增量/);
+    await workflow.scan();
+    assert.deepEqual([workflow.state.plan.added,workflow.state.plan.updated,workflow.state.plan.removed,workflow.state.plan.unchanged],[0,0,0,2]);
+    await workflow.import();
+    assert.equal(page.children[0].children.length,2);
   }finally{await f.cleanup();}
 });
 

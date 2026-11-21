@@ -16,7 +16,8 @@ figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicPro
   const reply=(result:unknown,error?:string)=>figma.ui.postMessage({type:'result',requestId:message.requestId,result,error});
   try {
     if(message.type==='validate')reply(await platform.validate(message.project));
-    else if(message.type==='import') {await platform.importResources(message.scan,progress=>figma.ui.postMessage({type:'progress',progress}));reply(null);}
+    else if(message.type==='preview')reply(await platform.preview(message.scan));
+    else if(message.type==='import') {const plan=await platform.importResources(message.scan,progress=>figma.ui.postMessage({type:'progress',progress}));reply(plan);}
     else if(message.type==='pairing-load') {
       const stored=await figma.clientStorage.getAsync(pairingKey);
       reply(validPairing(stored)?stored:null);
