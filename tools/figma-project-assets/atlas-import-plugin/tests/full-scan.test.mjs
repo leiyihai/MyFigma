@@ -59,6 +59,8 @@ test('task entry imports nested atlas sprites and standalone images with whiteli
       'set:Static/buttons.json image:dup'
     ]);
     const standalone = sources.find(source => source.kind === 'standalone');
+    assert.ok(standalone.sync);
+    delete standalone.sync;
     assert.deepEqual(standalone, {
       schemaVersion: 1, projectId: 'g1008', kind: 'standalone',
       relativePath: 'Static/default_headshot.png', frameName: 'default_headshot',

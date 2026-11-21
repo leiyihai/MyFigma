@@ -91,25 +91,32 @@ type Candidate = { resource: Resource; source: Source; hash: string; layout?: La
 type PlanState = {
   plan: ImportPlan; adds: Candidate[]; updates: Candidate[]; removals: Existing[];
 };
-function parseStoredSource(component: ComponentNode, project: PublicProject): Source | undefined {
-  const raw = component.getPluginData(sourceKey);
-  if(!raw) return undefined;
+function validStoredSource(s: Partial<Source>, project: PublicProject): s is Source {
+  if(s.schemaVersion !== 1 || s.projectId !== project.id || (s.kind !== 'atlas' && s.kind !== 'standalone') ||
+     !relativePath(s.relativePath) || !safeName(s.frameName) || typeof s.identity !== 'string') return false;
+  if(s.kind === 'atlas') return s.identity === JSON.stringify([project.id,'atlas',s.relativePath,s.frameName]);
+  return s.relativePath.toLowerCase().endsWith('.png') &&
+    s.identity === JSON.stringify([project.id,'standalone',s.relativePath]);
+}
+function sourceRecord(component: ComponentNode): {source?: Partial<Source>; sync?: SyncState} {
   try {
-    const s = JSON.parse(raw) as Partial<Source>;
-    if(s.schemaVersion !== 1 || s.projectId !== project.id || (s.kind !== 'atlas' && s.kind !== 'standalone') ||
-       !relativePath(s.relativePath) || !safeName(s.frameName) || typeof s.identity !== 'string') return undefined;
-    if(s.kind === 'atlas' && s.identity !== JSON.stringify([project.id,'atlas',s.relativePath,s.frameName])) return undefined;
-    if(s.kind === 'standalone' && (!s.relativePath.toLowerCase().endsWith('.png') || s.identity !== JSON.stringify([project.id,'standalone',s.relativePath]))) return undefined;
-    return s as Source;
-  } catch { return undefined; }
+    const value = JSON.parse(component.getPluginData(sourceKey)) as {sync?: SyncState} & Partial<Source>;
+    return {source:value, sync:value.sync};
+  } catch { return {}; }
+}
+function parseStoredSource(component: ComponentNode, project: PublicProject): Source | undefined {
+  const source = sourceRecord(component).source;
+  return source && validStoredSource(source,project) ? source as Source : undefined;
 }
 function parseSync(component: ComponentNode, identity: string): SyncState | undefined {
-  try {
-    const sync = JSON.parse(component.getPluginData(syncKey)) as SyncState;
-    return sync && sync.schemaVersion === 1 && sync.identity === identity &&
-      typeof sync.contentHash === 'string' && sync.sourceSize && int(sync.sourceSize.w) && int(sync.sourceSize.h) &&
-      (sync.status === 'current' || sync.status === 'source-missing') ? sync : undefined;
-  } catch { return undefined; }
+  const fromSource = sourceRecord(component).sync;
+  let sync: SyncState | undefined = fromSource;
+  if(!sync) {
+    try { sync = JSON.parse(component.getPluginData(syncKey)) as SyncState; } catch { sync = undefined; }
+  }
+  return sync && sync.schemaVersion === 1 && sync.identity === identity &&
+    typeof sync.contentHash === 'string' && sync.sourceSize && int(sync.sourceSize.w) && int(sync.sourceSize.h) &&
+    (sync.status === 'current' || sync.status === 'source-missing') ? sync : undefined;
 }
 function hashParts(parts: string[]): string {
   // Stable, dependency-free content fingerprint. Feed parts directly instead
@@ -507,7 +514,8 @@ function refreshDisplayNames(page: PageNode, project: PublicProject, messages: s
 function writeSync(component: ComponentNode, item: Candidate, imageHash: string): void {
   const sync: SyncState = {schemaVersion:1,identity:item.source.identity,contentHash:item.hash,imageHash,
     sourceSize:{w:item.resource.width,h:item.resource.height},status:'current'};
-  component.setPluginData(syncKey,JSON.stringify(sync));
+  // One private record per new component. Legacy `atlas.sync.v1` remains a read fallback.
+  component.setPluginData(sourceKey,JSON.stringify({...item.source, sync}));
 }
 function writeRecord(component: ComponentNode, planned: Planned): void {
   if(planned.record) writeNineSliceRecord(component, serializeNineSliceRecord(planned.record));
@@ -516,7 +524,7 @@ function writeRecord(component: ComponentNode, planned: Planned): void {
 function markMissing(existing: Existing): void {
   const sync: SyncState = existing.sync || {schemaVersion:1,identity:existing.source.identity,contentHash:'',
     sourceSize:{w:existing.component.width,h:existing.component.height},status:'current'};
-  existing.component.setPluginData(syncKey,JSON.stringify({...sync,status:'source-missing'}));
+  existing.component.setPluginData(sourceKey,JSON.stringify({...existing.source, sync:{...sync,status:'source-missing'}}));
 }
 type InstanceSize = { mainId: string; width: number; height: number; node: InstanceNode };
 async function snapshotInstances(page: PageNode): Promise<InstanceSize[]> {
@@ -576,7 +584,6 @@ function applyComponent(api: Pick<PluginAPI,'createRectangle'>, component: Compo
     component.resize(item.resource.width,item.resource.height);
     component.fills = [{...image,scaleMode:'FILL'}];
   }
-  component.setPluginData(sourceKey,JSON.stringify(item.source));
   writeSync(component,item,image.imageHash || '');
   writeRecord(component,planned);
 }

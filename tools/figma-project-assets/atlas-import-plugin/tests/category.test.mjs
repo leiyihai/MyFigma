@@ -100,7 +100,7 @@ test('按名称、九宫格用法与尺寸比例归入分类 Frame，唯一主�
     const source = JSON.parse(dot.getPluginData('atlas.source'));
     assert.equal(source.frameName, 'dot');
     assert.equal(source.identity, JSON.stringify(['g8', 'atlas', 'Static/dot.json', 'dot']));
-    assert.equal(JSON.parse(dot.getPluginData('atlas.sync.v1')).identity, source.identity);
+    assert.equal(source.sync.identity, source.identity);
   } finally { await f.cleanup(); }
 });
 

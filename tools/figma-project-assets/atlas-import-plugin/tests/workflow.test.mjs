@@ -6,6 +6,11 @@ import { fixture, startHelper } from '../../local-helper/tests/fixture.mjs';
 import * as api from '../dist/api.mjs';
 import {figmaFixture} from './platform-fixture.mjs';
 
+function syncOf(node) {
+  const source=JSON.parse(node.data['atlas.source']);
+  return source.sync || JSON.parse(node.data['atlas.sync.v1'] || '{}');
+}
+
 async function ready(f,figma) {
   const workflow=new api.Workflow(new api.HelperClient(f.base,f.token),api.createFigmaPlatform(figma));
   await workflow.connect();
@@ -86,7 +91,7 @@ test('a failed item keeps earlier successes, records the failure and retries onl
     // 部分成果保留：已成功项仍在，未成功项没有组件也没有同步记录。
     assert.equal(page.children.length,1);
     assert.equal(page.children[0].children.length,1);
-    assert.equal(JSON.parse(page.children[0].children[0].data['atlas.sync.v1']).status,'current');
+    assert.equal(syncOf(page.children[0].children[0]).status,'current');
     // 保留的扫描结果直接重试；不需要重新扫描，也不会重复创建。
     assert.ok(workflow.state.scan);
     figma.createImage=original;
@@ -124,7 +129,7 @@ test('cancelling an import keeps completed items, records no success for the res
     assert.equal(workflow.state.progress.done,1);
     assert.equal(page.children[0].children.length,1);
     // 未完成项不记成功：只有真正写入的组件带当前同步记录。
-    for(const child of page.children[0].children) assert.equal(JSON.parse(child.data['atlas.sync.v1']).status,'current');
+    for(const child of page.children[0].children) assert.equal(syncOf(child).status,'current');
     // 保留扫描结果，重试只补齐剩余项且不重复创建。
     assert.ok(workflow.state.scan);
     await workflow.import();

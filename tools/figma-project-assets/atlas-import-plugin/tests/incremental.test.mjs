@@ -31,6 +31,11 @@ async function setup(changed = () => {}) {
   return { f, workflow, ...fixture };
 }
 
+function syncOf(node) {
+  const source = JSON.parse(node.data['atlas.source']);
+  return source.sync || JSON.parse(node.data['atlas.sync.v1'] || '{}');
+}
+
 function component(page, name) {
   // The display name is 分类/原名; same-name duplicates add the source path.
   const pattern = new RegExp('(^|/)' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '( ·|$)');
@@ -100,7 +105,7 @@ test('previews added and unchanged counts, updates in place, and marks source re
     const before = page.children.flatMap(node => node.children || []).length;
     await workflow.import();
     assert.equal(page.children.flatMap(node => node.children || []).length, before);
-    assert.equal(JSON.parse(originalRed.data['atlas.sync.v1']).status, 'source-missing');
+    assert.equal(syncOf(originalRed).status, 'source-missing');
   } finally { await f.cleanup(); }
 });
 
@@ -128,7 +133,7 @@ test('rename and cross-atlas movement become source removal plus a new identity'
     assert.equal(component(page, 'red'), oldRed);
     assert.ok(component(page, 'renamed'));
     assert.ok(component(page, 'green'));
-    assert.equal(JSON.parse(component(page, 'green').data['atlas.sync.v1']).status, 'source-missing');
+    assert.equal(syncOf(component(page, 'green')).status, 'source-missing');
   } finally { await f.cleanup(); }
 });
 
@@ -203,16 +208,16 @@ test('a cancelled import leaves pending source removals unmarked and retries ide
     assert.equal(current.state.phase, '已取消');
     assert.ok(component(page, 'blue'));
     // Cancelled items are neither success nor source deletion.
-    assert.equal(JSON.parse(red.data['atlas.sync.v1']).status, 'current');
-    assert.equal(JSON.parse(green.data['atlas.sync.v1']).status, 'current');
+    assert.equal(syncOf(red).status, 'current');
+    assert.equal(syncOf(green).status, 'current');
     // The kept scan reports the unfinished work instead of treating it as done.
     await current.scan();
     assert.deepEqual(pick(current.state.plan), { added: 0, updated: 0, removed: 2, unchanged: 1, blocked: 0 });
     await current.import();
     assert.equal(current.state.result.cancelled, false);
     assert.deepEqual(current.state.result.applied, { added: 0, updated: 0, removed: 2 });
-    assert.equal(JSON.parse(red.data['atlas.sync.v1']).status, 'source-missing');
-    assert.equal(JSON.parse(green.data['atlas.sync.v1']).status, 'source-missing');
+    assert.equal(syncOf(red).status, 'source-missing');
+    assert.equal(syncOf(green).status, 'source-missing');
     assert.equal(page.children.flatMap(node => node.children || []).length, 3);
     assert.deepEqual(page.children.flatMap(node => node.children || [])
       .map(node => JSON.parse(node.data['atlas.source']).identity).sort(), [
@@ -230,7 +235,7 @@ test('a failed update restores that component and the next run applies it', asyn
     await workflow.import();
     const red = component(page, 'red');
     const originalHash = red.fills[0].imageHash;
-    const originalSync = red.data['atlas.sync.v1'];
+    const originalSync = red.data['atlas.source'];
     await writePng(image(f.project), 3, 1, [
       0, 255, 0, 255,
       0, 0, 255, 255,
@@ -246,13 +251,13 @@ test('a failed update restores that component and the next run applies it', asyn
     assert.equal(workflow.state.phase, '部分失败');
     // The failed update must not look successful or corrupted.
     assert.equal(red.fills[0].imageHash, originalHash);
-    assert.equal(red.data['atlas.sync.v1'], originalSync);
+    assert.equal(red.data['atlas.source'], originalSync);
     figma.createImage = createImage;
     await workflow.import();
     assert.equal(workflow.state.result.failures.length, 0);
     assert.deepEqual(workflow.state.result.applied, { added: 0, updated: 2, removed: 0 });
     assert.notEqual(red.fills[0].imageHash, originalHash);
-    assert.equal(JSON.parse(red.data['atlas.sync.v1']).status, 'current');
+    assert.equal(syncOf(red).status, 'current');
   } finally { await f.cleanup(); }
 });
 
