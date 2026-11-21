@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{box-sizing:border-box}body{margin:0;padding:16px;background:var(--figma-color-bg,#fafafa);color:var(--figma-color-text,#222);font:12px/1.5 system-ui,sans-serif}h1{font-size:18px;margin:0 0 12px}h2{font-size:14px;margin:0 0 8px}section{border-bottom:1px solid #bbb;padding:12px 0}label{display:block;margin:8px 0}input:not([type=checkbox]),select{width:100%;margin-top:4px;padding:7px;background:var(--figma-color-bg,#fff);color:inherit;border:1px solid #888;border-radius:4px}button{padding:7px 10px;margin:4px 0;border:1px solid #888;border-radius:4px;background:var(--figma-color-bg-secondary,#eee);color:inherit;cursor:pointer}button:hover:not(:disabled){background:var(--figma-color-bg-hover,#ddd)}button:disabled{opacity:.5;cursor:not-allowed}.primary{font-weight:600;border:2px solid currentColor}.muted{color:var(--figma-color-text-secondary,#555)}[role=alert]{color:var(--figma-color-text-danger,#a20);white-space:pre-wrap;overflow-wrap:anywhere}dialog{width:min(410px,95vw);max-height:90vh;overflow:auto;background:var(--figma-color-bg,#fff);color:inherit;border:1px solid #888;border-radius:8px}dialog::backdrop{background:#0005}.row{display:flex;gap:8px;align-items:center;justify-content:space-between}.entry{border-bottom:1px solid #bbb;padding:8px 0;overflow-wrap:anywhere}.action{position:relative;display:inline-block}.tooltip{display:none;position:absolute;z-index:20;bottom:100%;left:0;min-width:180px;max-width:280px;background:#222;color:#fff;padding:7px;border-radius:4px;font-weight:400;pointer-events:none}.action:hover>.tooltip,.action:focus-within>.tooltip{display:block}progress{width:100%}#details{white-space:pre-wrap;overflow-wrap:anywhere;max-height:90px;overflow:auto}.small{font-size:11px}
+</style></head><body>
+<h1>项目图集导入</h1>
+<section aria-label="本机助手">
+<div class="row"><strong>本机助手</strong><span id="connection" data-testid="connection">未连接</span></div>
+<p class="muted small">先启动 figma-assets-helper，再从本机应用数据的 token 文件复制配对令牌。令牌仅保留在本窗口内存。</p>
+<label>助手地址<input id="address" value="http://127.0.0.1:38473" spellcheck="false"></label>
+<label>配对令牌<input id="token" type="password" autocomplete="off" spellcheck="false"></label>
+<button id="connect" title="连接已启动的本机助手；需要本机 token。连接失败时请检查启动状态和本地网络权限。">连接助手</button>
+</section>
+<section aria-label="游戏项目">
+<div class="row"><h2>游戏项目</h2><button id="manage" title="维护本机共享的游戏登记、资源目录和长期维护标记；任务执行中不可修改。">管理项目</button></div>
+<label>搜索名称或编号<input id="search" placeholder="留空仅显示长期维护游戏"></label>
+<label for="project">选择游戏</label><select id="project"><option value="">请选择游戏</option></select>
+<p id="selected" class="muted"></p>
+</section>
+<section aria-label="页面与资源">
+<div class="row"><h2>页面校验</h2><button id="validate" title="检查当前页是否为空白且项目绑定一致；不会修改页面。">校验当前页</button></div>
+<p id="page-status">请选择游戏后校验页面</p>
+<p class="muted small">仅支持登记目录直接包含的小型对象式 JSON + PNG 图集；暂归未分类。非空页受保护，本版本不做增量。</p>
+<button id="scan" title="扫描登记目录中的小型 JSON + PNG 图集并实际拆图；仅空白且绑定一致的页面可开始。">扫描资源</button>
+<p id="summary" data-testid="summary">尚未扫描</p><div id="details"></div>
+<button id="import" class="primary" title="仅在空白页导入扫描所得的散图普通主组件；绑定并重命名当前页，不上传整张图集。">导入主组件</button>
+</section>
+<section aria-label="任务状态"><div id="phase">未连接</div><progress id="bar" max="1" value="0"></progress><div id="progress" data-testid="progress">0 / 0</div><p id="error" role="alert"></p></section>
+<dialog id="management" aria-labelledby="management-title">
+<div class="row"><h2 id="management-title">管理游戏项目</h2><button id="close" title="关闭管理弹窗；尚未保存的输入不会写入助手。">关闭管理</button></div>
+<div id="project-list" data-testid="project-list"></div>
+<form id="registration">
+<label>游戏名称<input id="game-name" required maxlength="100"></label>
+<label>项目编号<input id="game-id" required pattern="[A-Za-z0-9_-]{1,64}" maxlength="64"></label>
+<label>资源目录<input id="game-path" required placeholder="直接包含 JSON 和 PNG 的本机目录"></label>
+<label><input id="maintained" type="checkbox" checked> 长期维护</label>
+<button type="button" id="save" title="在助手侧保存登记；所有本机 Figma 文件复用。项目编号是稳定身份，编辑时不可更改。">保存登记</button>
+<button type="button" id="new" title="清空编辑表单，登记另一个游戏；不删除已保存项目。">新建登记</button>
+</form>
+</dialog>
+<!-- SCRIPT -->
+</body></html>

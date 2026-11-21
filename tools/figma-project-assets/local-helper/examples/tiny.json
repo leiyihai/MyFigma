@@ -1,0 +1,34 @@
+{
+  "frames": {
+    "red": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 1,
+        "h": 1
+      },
+      "sourceSize": {
+        "w": 2,
+        "h": 2
+      },
+      "spriteSourceSize": {
+        "x": 1,
+        "y": 1
+      },
+      "trimmed": true,
+      "rotated": false
+    },
+    "green": {
+      "frame": {
+        "x": 1,
+        "y": 0,
+        "w": 1,
+        "h": 1
+      },
+      "rotated": false
+    }
+  },
+  "meta": {
+    "image": "tiny.png"
+  }
+}

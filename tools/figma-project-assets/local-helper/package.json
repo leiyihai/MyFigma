@@ -1,0 +1,13 @@
+{
+  "name": "figma-assets-helper-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "cargo build --locked",
+    "pretest": "cargo build --locked",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "pngjs": "^7.0.0"
+  }
+}
