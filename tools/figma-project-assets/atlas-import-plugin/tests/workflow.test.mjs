@@ -285,7 +285,7 @@ test('restarted helper reconnects after a disconnect and resumes scan and import
     assert.equal(resumed.state.scan.summary.sprites,2);
     await resumed.import();
     assert.equal(page.children.length,1);
-    assert.deepEqual(page.children[0].children.map(child=>child.name).sort(),['未分类/green · tiny.json','未分类/red · tiny.json']);
+    assert.deepEqual(page.children[0].children.map(child=>child.name).sort(),['未分类/green','未分类/red']);
   } finally {if(restarted) await restarted.stop(); await f.cleanup();}
 });
 
@@ -309,7 +309,7 @@ test('public task entry registers, searches all games, scans and imports cropped
     assert.equal(page.children.length,1);
     assert.equal(page.children[0].name,'未分类');
     assert.equal(page.children[0].children.length,2);
-    assert.deepEqual(page.children[0].children.map(c=>c.name).sort(),['未分类/green · tiny.json','未分类/red · tiny.json']);
+    assert.deepEqual(page.children[0].children.map(c=>c.name).sort(),['未分类/green','未分类/red']);
     assert.equal(images.length,2);
     assert.equal(page.children[0].children.find(c=>c.width===2).height,2);
     assert.equal(JSON.stringify(page).includes(JSON.stringify(f.project).slice(1,-1)),false);

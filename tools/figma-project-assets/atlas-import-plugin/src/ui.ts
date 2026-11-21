@@ -24,7 +24,8 @@ const platform:Platform={
     try{return await rpc<import('./api').ImportReport>('import',{scan});}
     finally{reportProgress=undefined;stop();}
   },
-  compare:project=>rpc('compare',{project})
+  compare:project=>rpc('compare',{project}),
+  tidy:project=>rpc('tidy',{project})
 };
 let workflow:Workflow|undefined;
 let uiError='';
@@ -96,6 +97,12 @@ function render() {
   const compare=s?.compare;
   const compareButton=el<HTMLButtonElement>('compare');
   compareButton.disabled=busy||!s?.selected;
+  const tidy=s?.tidy;
+  el<HTMLButtonElement>('tidy').disabled=busy||!s?.selected;
+  el('tidy-status').textContent=tidy?(tidy.frames
+    ? `已整理 ${tidy.frames} 个分类 Frame · 移动 ${tidy.moved} 个`
+    : tidy.messages[0]||'当前页没有可整理的分类 Frame')
+    :'只调整分类 Frame 位置，不重建主组件、不改九宫格约束。';
   el('compare-status').textContent=compare?(compare.created
     ? `已创建「${compare.pageName}」：${compare.groups} 个分组 · ${compare.added} 个实例`
     : `已更新「${compare.pageName}」：新增 ${compare.added} · 保留 ${compare.kept} · 移除 ${compare.removed}`)
@@ -187,6 +194,7 @@ el('scan').onclick=()=>void run(()=>workflow!.scan());
 el('import').onclick=()=>void run(()=>workflow!.import());
 el('cancel').onclick=()=>{workflow?.cancel();};
 el('compare').onclick=()=>void run(()=>workflow!.comparePage());
+el('tidy').onclick=()=>void run(()=>workflow!.tidy());
 el('registration').onsubmit=event=>event.preventDefault();
 el('save').onclick=()=>{if(!el<HTMLFormElement>('registration').reportValidity())return;void run(async()=>{
   const project:Project={id:input('game-id').value.trim(),name:input('game-name').value.trim(),path:input('game-path').value.trim(),maintained:input('maintained').checked};

@@ -1,6 +1,6 @@
 # 项目图集导入工具
 
-本批实现 GitHub [#1](https://github.com/leiyihai/MyFigma/issues/1)、[#2](https://github.com/leiyihai/MyFigma/issues/2)、[#3](https://github.com/leiyihai/MyFigma/issues/3)、[#4](https://github.com/leiyihai/MyFigma/issues/4)、[#5](https://github.com/leiyihai/MyFigma/issues/5)、[#6](https://github.com/leiyihai/MyFigma/issues/6)、[#10](https://github.com/leiyihai/MyFigma/issues/10) 与 [#11](https://github.com/leiyihai/MyFigma/issues/11)；已在用户授权的独立 Figma 测试文件完成小样客户端验收，仍不是完整资源管理版本。
+本批实现 GitHub [#1](https://github.com/leiyihai/MyFigma/issues/1)、[#2](https://github.com/leiyihai/MyFigma/issues/2)、[#3](https://github.com/leiyihai/MyFigma/issues/3)、[#4](https://github.com/leiyihai/MyFigma/issues/4)、[#5](https://github.com/leiyihai/MyFigma/issues/5)、[#6](https://github.com/leiyihai/MyFigma/issues/6)、[#8](https://github.com/leiyihai/MyFigma/issues/8)、[#10](https://github.com/leiyihai/MyFigma/issues/10) 与 [#11](https://github.com/leiyihai/MyFigma/issues/11)；已在用户授权的独立 Figma 测试文件完成小样客户端验收，仍不是完整资源管理版本。
 
 ## 组成与启动
 
@@ -13,7 +13,7 @@
 
 在两个插件目录分别执行 `npm ci` 和 `npm run build`。两个插件都导入各自根目录的 `manifest.json`；九宫格清单指向 `dist/` 下的构建产物。客户端要求有效开发插件身份时需自行注册。本次已在真实客户端验证两个开发插件加载及 localhost 配对连接。
 
-最小演示将助手的 `examples` 目录登记为资源目录，可得到红、绿两个独立素材。扫描支持登记游戏根（含 `res/imageset`）或直接 `imageset` 目录的递归范围，并额外导入未被打包的独立图片；普通主组件暂归未分类。登记游戏根时还会递归统计 `res/layout` 的图片引用与九宫格边距，导入插件据此生成唯一九宫格主组件。绑定一致的资源页可再次扫描并原位增量更新，源删除只标记、不删除组件。需要核对源图集时，可手动创建／更新只含主组件实例的对照页；默认导入不会创建该页。
+最小演示将助手的 `examples` 目录登记为资源目录，可得到红、绿两个独立素材。扫描支持登记游戏根（含 `res/imageset`）或直接 `imageset` 目录的递归范围，并额外导入未被打包的独立图片；导入后的主组件按名称规则、九宫格用法与尺寸比例归入按钮、九宫格底板、图标、背景、艺术字或未分类的自动换行分类 Frame，并可按需「重新整理」分类区域。登记游戏根时还会递归统计 `res/layout` 的图片引用与九宫格边距，导入插件据此生成唯一九宫格主组件。绑定一致的资源页可再次扫描并原位增量更新，源删除只标记、不删除组件。需要核对源图集时，可手动创建／更新只含主组件实例的对照页；默认导入不会创建该页。
 
 ## 验证
 
@@ -51,8 +51,10 @@
 - #5 取消、单项失败隔离与增量补齐已完成公开流程、真实助手子进程、浏览器交互及真实 Figma 小样：63 项导入中取消在 19/63，未完成项不记成功；再次导入只补齐 44 项，随后扫描未变 63。
 - #6 已实现布局九宫格统计、共用核心生成、普通组件原位升级和不自动降级；真实 Figma 导入 40×30 面板为 9 切片（边距 10/12/8/9），实例拉伸到 80×60 后角保持 10×12/8×9、中段拉伸；另将普通 20×20 组件在新增 5/6/7/8 用法后原位升级，组件 ID 不变并生成 9 切片。
 - #10 按需实例对照页已完成公开流程、浏览器及真实 Figma 验证：默认导入不创建；手动创建「自动验收示例（auto_acceptance）- 图集对照」页，生成 2 个源图集分组、3 个主组件实例；重复点击复用同一页。真实页面创建、自动布局分组和实例关联已通过，日常增量不主动同步该页。
-- #7 的原位编辑、人工覆盖、恢复项目参数及跨插件增量链路已完成插件入口、浏览器预览和导入 Workflow 回归；真实 Figma 中恢复后的实例关联与拉伸仍待串行客户端验收。自动或手动分类及真实项目性能验收属于后续 #8–#9、#12。
+- #7 的原位编辑、人工覆盖、恢复项目参数及跨插件增量链路已完成插件入口、浏览器预览和导入 Workflow 回归；真实 Figma 中恢复后的实例关联与拉伸仍待串行客户端验收。
+- #8 自动分类、分类 Frame 自动换行和重新整理已完成公开流程与浏览器验证；真实 Figma 的资源面板搜索/插入/交换、重新整理渲染及跨分类移动后的实例关联仍待集成验收。
+- 批量手动分类及真实项目性能验收属于后续 #9、#12。
 - 完整递归扫描／独立图片（#3）与 Windows 托盘助手（#11）已完成；真实鼠标托盘点击仍待人工验收。
 - 未操作测试文件以外的用户设计；未知图集格式、三个真实项目全量兼容与性能仍未验收。
 - 用户反馈的主面板排版、项目编号说明、编辑锁定态、免滚动及记住本机配对已完成；首次配对仍需手动复制令牌。
-- 原独立九宫格目录未覆盖；#1–#6、#10、#11 已关闭，#7–#9、#12 仍待推进。
+- 原独立九宫格目录未覆盖；#1–#6、#10、#11 已关闭，#7、#8 已实现待集成验收，#9、#12 仍待推进。

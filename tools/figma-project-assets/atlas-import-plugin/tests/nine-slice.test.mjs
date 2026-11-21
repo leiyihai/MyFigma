@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import {
@@ -19,9 +19,11 @@ let pluginCode;
 function nineSlicePluginCode() {
   if(pluginCode) return pluginCode;
   const built = join(nineSliceDir, 'dist', 'code.js');
-  // A combined suite may run this package first; build the sibling plugin from
-  // its own installed toolchain instead of requiring a previous manual build.
-  if(!existsSync(built)) execFileSync(process.execPath, ['build.mjs'], { cwd: nineSliceDir, stdio: 'ignore' });
+  const source = join(nineSliceDir, 'code.ts');
+  // A combined suite may run this package first or reuse a stale sibling build;
+  // rebuild when the entry source is newer than dist.
+  if(!existsSync(built) || !existsSync(source) || statSync(source).mtimeMs > statSync(built).mtimeMs)
+    execFileSync(process.execPath, ['build.mjs'], { cwd: nineSliceDir, stdio: 'ignore' });
   return pluginCode = readFileSync(built, 'utf8');
 }
 // Drive the real nine-slice plugin entry so the recovery is not a hand-written
@@ -72,7 +74,9 @@ async function writePanelLayout(f, margins = '10 10 10 10', extra = []) {
 }
 
 function component(page, name) {
-  return page.children.flatMap(node => node.children || []).find(node => node.name.includes('/' + name + ' ·'));
+  // The display name is 分类/原名; same-name duplicates add the source path.
+  const pattern = new RegExp('(^|/)' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '( ·|$)');
+  return page.children.flatMap(node => node.children || []).find(node => pattern.test(node.name));
 }
 function record(node) {
   return JSON.parse(node.data['myfigma.nineSlice.v1']);

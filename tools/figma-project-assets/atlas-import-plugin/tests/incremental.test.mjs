@@ -32,7 +32,9 @@ async function setup(changed = () => {}) {
 }
 
 function component(page, name) {
-  return page.children.flatMap(node => node.children || []).find(node => node.name.includes('/' + name + ' ·'));
+  // The display name is 分类/原名; same-name duplicates add the source path.
+  const pattern = new RegExp('(^|/)' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '( ·|$)');
+  return page.children.flatMap(node => node.children || []).find(node => pattern.test(node.name));
 }
 
 test('previews added and unchanged counts, updates in place, and marks source removal without deleting', async () => {

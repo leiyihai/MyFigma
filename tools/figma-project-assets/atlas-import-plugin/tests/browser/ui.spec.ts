@@ -24,6 +24,7 @@ test('management dialog, full search, real scan, task lock, progress and hover g
       if(m.type==='preview'){window.plan={schemaVersion:1,added:m.scan.resources.length,updated:0,removed:0,unchanged:0,blocked:0,removalSuppressed:false,messages:[]};reply(window.plan);}
       if(m.type==='import'){window.imported=m.scan;e.source.postMessage({pluginMessage:{type:'progress',progress:{done:1,total:2}}},'*');window.finish=cancelled=>reply({...window.plan,applied:{added:cancelled?1:window.plan.added,updated:0,removed:0},failures:[],cancelled:!!cancelled});}
       if(m.type==='compare'){window.compareCalls=(window.compareCalls||0)+1;reply({schemaVersion:1,pageName:'测试游戏（g2）- 图集对照',created:true,groups:2,added:2,removed:0,kept:0,messages:[]});}
+      if(m.type==='tidy'){window.tidyCalls=(window.tidyCalls||0)+1;reply({schemaVersion:1,frames:3,moved:2,messages:[]});}
     });
     </script>`);}
   });
@@ -36,6 +37,9 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await ui.getByRole('button',{name:'连接助手',exact:true}).click();
     await expect(ui.getByTestId('connection')).toHaveText('已连接');
     await expect(ui.getByRole('button',{name:'取消任务',exact:true})).toBeDisabled();
+    // 重新整理 needs a selected game and starts with an explicit scope note.
+    await expect(ui.getByRole('button',{name:'重新整理',exact:true})).toBeDisabled();
+    await expect(ui.getByTestId('tidy-status')).toContainText('不改九宫格约束');
     await ui.getByRole('button',{name:'管理项目',exact:true}).hover();
     const floating=ui.locator('#manage').locator('..').locator('.tooltip');
     await expect(floating).toBeVisible();
@@ -105,6 +109,7 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await expect(ui.locator('#project')).toBeDisabled();
     await expect(ui.getByRole('button',{name:'扫描资源',exact:true})).toBeDisabled();
     await expect(ui.getByRole('button',{name:'导入主组件',exact:true})).toBeDisabled();
+    await expect(ui.getByRole('button',{name:'重新整理',exact:true})).toBeDisabled();
     await expect(ui.getByTestId('progress')).toContainText('1 / 2');
     await expect(ui.getByRole('button',{name:'取消任务',exact:true})).toBeEnabled();
     await ui.getByRole('button',{name:'取消任务',exact:true}).hover();
@@ -133,6 +138,15 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await expect(ui.getByTestId('compare-status')).toContainText('测试游戏（g2）- 图集对照');
     await expect(ui.getByTestId('compare-status')).toContainText('2 个实例');
     expect(await page.evaluate(()=>(window as any).compareCalls)).toBe(1);
+    // 重新整理 explains its scope and only repositions category frames.
+    await expect(ui.getByTestId('tidy-status')).toContainText('不重建主组件');
+    await ui.getByRole('button',{name:'重新整理',exact:true}).hover();
+    await expect(ui.getByRole('tooltip')).toContainText('不改变九宫格切片');
+    await ui.getByRole('button',{name:'重新整理',exact:true}).click();
+    await expect(ui.getByTestId('tidy-status')).toContainText('已整理 3 个分类 Frame');
+    await expect(ui.getByTestId('tidy-status')).toContainText('移动 2 个');
+    await expect(ui.locator('#phase')).toHaveText('就绪');
+    expect(await page.evaluate(()=>(window as any).tidyCalls)).toBe(1);
     expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
     let releaseFailedScan!:()=>void;
     let failedScanStarted!:()=>void;
