@@ -15,3 +15,9 @@
 ## UI 任务入口
 
 对齐界面方案、制作 HTML 原型、新建或修改 Figma UI、检查设计稿或搭建 HTML 交互原型时，使用 `ui-design` 技能；入口为 [.agents/skills/ui-design/SKILL.md](.agents/skills/ui-design/SKILL.md)。
+
+## 工程任务入口
+
+创建或更新 Issue、发布规格、分流任务时，阅读 [Issue 跟踪约定](docs/agents/issue-tracker.md) 和 [分流标签](docs/agents/triage-labels.md)。
+
+开发图集导入工具时，遵循 [工具开发约定](tools/figma-project-assets/AGENTS.md)。
