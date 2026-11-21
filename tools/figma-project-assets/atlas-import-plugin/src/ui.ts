@@ -17,7 +17,8 @@ function rpc<T>(type:string,payload:object):Promise<T> {
 const platform:Platform={
   validate:project=>rpc('validate',{project}),
   preview:scan=>rpc('preview',{scan}),
-  async importResources(scan,progress){reportProgress=progress;try{return await rpc<import('./api').ImportPlan>('import',{scan});}finally{reportProgress=undefined;}}
+  async importResources(scan,progress){reportProgress=progress;try{return await rpc<import('./api').ImportPlan>('import',{scan});}finally{reportProgress=undefined;}},
+  compare:project=>rpc('compare',{project})
 };
 let workflow:Workflow|undefined;
 let uiError='';
@@ -78,7 +79,14 @@ function render() {
   const summary=s?.scan?.summary;
   const diff=plan?`新增 ${plan.added} · 更新 ${plan.updated} · 源缺失 ${plan.removed} · 未变 ${plan.unchanged}${plan.blocked?` · 跳过 ${plan.blocked}`:''}${plan.removalSuppressed?' · 扫描不完整，未标记源删除':''}`:'';
   el('summary').textContent=summary?`图集 ${summary.atlases} · 散图 ${summary.sprites} · 独立图片 ${summary.standalone} · 异常 ${summary.errors}${s?.scan?.complete?'':' · 扫描不完整'} · ${diff}`:plan?`上次操作 · ${diff}`:'尚未扫描';
-  const details=el('details');details.textContent=[...(s?.scan?.errors||[]),...(plan?.messages||[])].join('\n');details.classList.toggle('hidden',!details.textContent);
+  const compare=s?.compare;
+  const compareButton=el<HTMLButtonElement>('compare');
+  compareButton.disabled=busy||!s?.selected;
+  el('compare-status').textContent=compare?(compare.created
+    ? `已创建「${compare.pageName}」：${compare.groups} 个分组 · ${compare.added} 个实例`
+    : `已更新「${compare.pageName}」：新增 ${compare.added} · 保留 ${compare.kept} · 移除 ${compare.removed}`)
+    :'可选：按源图集生成实例对照页，默认不创建。';
+  const details=el('details');details.textContent=[...(s?.scan?.errors||[]),...(plan?.messages||[]),...(compare?.messages||[])].join('\n');details.classList.toggle('hidden',!details.textContent);
   const progress=s?.progress||{done:0,total:0};
   el('progress').textContent=`${progress.done} / ${progress.total}`;
   el<HTMLProgressElement>('bar').max=progress.total||1;el<HTMLProgressElement>('bar').value=progress.done;
@@ -155,6 +163,7 @@ el('project').onchange=()=>{const id=el<HTMLSelectElement>('project').value;if(w
 el('validate').onclick=()=>void run(()=>workflow!.validatePage());
 el('scan').onclick=()=>void run(()=>workflow!.scan());
 el('import').onclick=()=>void run(()=>workflow!.import());
+el('compare').onclick=()=>void run(()=>workflow!.comparePage());
 el('registration').onsubmit=event=>event.preventDefault();
 el('save').onclick=()=>{if(!el<HTMLFormElement>('registration').reportValidity())return;void run(async()=>{
   const project:Project={id:input('game-id').value.trim(),name:input('game-name').value.trim(),path:input('game-path').value.trim(),maintained:input('maintained').checked};
