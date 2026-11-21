@@ -65,6 +65,34 @@ test('failed Figma import rolls back only its own nodes and resets visible progr
   }finally{await f.cleanup();}
 });
 
+test('failed import preserves page names, bindings and unrelated nodes edited during import',async()=>{
+  const f=await fixture();
+  try {
+    const {api:figma,page}=figmaFixture();
+    let workflow;
+    const userBinding=JSON.stringify({schemaVersion:1,projectId:'user-project'});
+    const userNode={name:'同期新增内容'};
+    workflow=new api.Workflow(new api.HelperClient(f.base,f.token),api.createFigmaPlatform(figma),()=>{
+      if(workflow.state.progress.done===1) {
+        page.name='用户同期修改的名称';
+        page.setPluginData('atlas.binding',userBinding);
+        if(!page.children.includes(userNode))page.appendChild(userNode);
+      }
+    });
+    await workflow.connect();
+    await workflow.saveProject({id:'g2',name:'测试游戏',path:f.project,maintained:true});
+    await workflow.selectProject('g2');
+    await workflow.scan();
+    const createImage=figma.createImage;
+    let images=0;
+    figma.createImage=bytes=>{if(++images===2)throw new Error('Figma image rejected');return createImage(bytes);};
+    await assert.rejects(workflow.import(),/Figma image rejected/);
+    assert.equal(page.name,'用户同期修改的名称');
+    assert.equal(page.getPluginData('atlas.binding'),userBinding);
+    assert.deepEqual(page.children,[userNode]);
+  }finally{await f.cleanup();}
+});
+
 test('page guards protect unbound content, foreign binding, renamed pages and late page changes',async()=>{
   const f=await fixture();
   try {

@@ -19,6 +19,7 @@ const platform:Platform={
 };
 let workflow:Workflow|undefined;
 let uiError='';
+let pageValidationPending=false;
 const dialog=el<HTMLDialogElement>('management');
 function tooltip(button:HTMLButtonElement) {
   const text=button.title;if(!text)return;
@@ -41,10 +42,10 @@ function render() {
   for(const project of choices)options.add(new Option(`${project.name}（${project.id}）`,project.id));
   if(s?.selected)options.value=choices.some(p=>p.id===s.selected!.id)?s.selected.id:'';
   el('selected').textContent=s?.selected?`当前游戏：${s.selected.name}（${s.selected.id}）`:'';
-  el('page-status').textContent=s?.page?.message||'请选择游戏后校验页面';
+  el('page-status').textContent=pageValidationPending?'当前页已变化，任务结束后重新校验':s?.page?.message||'请选择游戏后校验页面';
   el<HTMLButtonElement>('validate').disabled=busy||!s?.selected;
-  el<HTMLButtonElement>('scan').disabled=busy||!connected||!s?.selected||s.page?.valid===false;
-  el<HTMLButtonElement>('import').disabled=busy||!s?.scan?.resources.length||s.page?.valid===false;
+  el<HTMLButtonElement>('scan').disabled=busy||pageValidationPending||!connected||!s?.selected||s.page?.valid===false;
+  el<HTMLButtonElement>('import').disabled=busy||pageValidationPending||!s?.scan?.resources.length||s.page?.valid===false;
   const summary=s?.scan?.summary;
   el('summary').textContent=summary?`图集 ${summary.atlases} · 散图 ${summary.sprites} · 异常 ${summary.errors} · 未扫描子目录 ${summary.skippedDirectories}`:'尚未扫描';
   el('details').textContent=s?.scan?.errors.join('\n')||'';
@@ -64,7 +65,16 @@ function render() {
   }
 }
 function resetForm() {el<HTMLFormElement>('registration').reset();delete input('game-id').dataset.editing;input('game-id').disabled=false;}
-async function run(action:()=>Promise<void>) {uiError='';try{await action();}catch(error){uiError=error instanceof Error?error.message:'操作失败';}render();}
+async function run(action:()=>Promise<void>) {
+  uiError='';
+  try{await action();}catch(error){uiError=error instanceof Error?error.message:'操作失败';}
+  if(pageValidationPending&&workflow&&!workflow.state.busy) {
+    pageValidationPending=false;
+    await run(()=>workflow!.validatePage());
+    return;
+  }
+  render();
+}
 el('connect').onclick=()=>void run(async()=>{
   if(workflow?.state.busy)return;
   workflow=new Workflow(new HelperClient(input('address').value.trim(),input('token').value.trim()),platform,render);
@@ -89,7 +99,11 @@ window.addEventListener('message',event=>{
   if(event.source!==parent)return;
   const message=event.data?.pluginMessage;if(!message)return;
   if(message.type==='progress') {reportProgress?.(message.progress);return;}
-  if(message.type==='page-changed'){if(workflow&&!workflow.state.busy)void run(()=>workflow!.validatePage());return;}
+  if(message.type==='page-changed'){
+    if(workflow?.state.busy){pageValidationPending=true;render();}
+    else if(workflow)void run(()=>workflow!.validatePage());
+    return;
+  }
   const task=pending.get(message.requestId);if(!task)return;
   clearTimeout(task.timer);pending.delete(message.requestId);
   if(message.error)task.reject(new Error(message.error));else task.resolve(message.result);

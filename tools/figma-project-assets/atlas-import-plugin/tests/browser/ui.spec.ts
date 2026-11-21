@@ -8,14 +8,14 @@ import {fixture} from '../../../local-helper/tests/fixture.mjs';
 test('management dialog, full search, real scan, task lock, progress and hover guidance',async({page})=>{
   const f=await fixture();
   const server=createServer(async(req,res)=>{
-    if(req.url==='/ui.html') {res.setHeader('Content-Type','text/html');res.end(await readFile(new URL('../../dist/ui.html',import.meta.url)));}
-    else {res.setHeader('Content-Type','text/html');res.end(`<iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:460px;height:750px"></iframe>
+    if(req.url==='/ui.html') {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(await readFile(new URL('../../dist/ui.html',import.meta.url)));}
+    else {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:460px;height:750px"></iframe>
     <script>
     window.imported=null;
     addEventListener('message',e=>{
       const m=e.data.pluginMessage;if(!m||!m.requestId)return;
       const reply=result=>e.source.postMessage({pluginMessage:{type:'result',requestId:m.requestId,result}},'*');
-      if(m.type==='validate')reply({valid:true,message:'空白页可导入'});
+      if(m.type==='validate')reply(window.currentPageInvalid?{valid:false,message:'非空且未绑定页面不可导入'}:{valid:true,message:'空白页可导入'});
       if(m.type==='import'){window.imported=m.scan;e.source.postMessage({pluginMessage:{type:'progress',progress:{done:1,total:2}}},'*');window.finish=()=>reply(null);}
     });
     </script>`);}
@@ -49,6 +49,27 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await expect(ui.getByLabel('选择游戏', {exact:true})).toContainText('临时游戏');
     await ui.getByLabel('搜索名称或编号').fill('');
     await ui.getByLabel('选择游戏', {exact:true}).selectOption('g2');
+    // Hold a real helper request so the page change occurs deterministically during scanning.
+    let releaseScan!:()=>void;
+    let scanStarted!:()=>void;
+    const held=new Promise<void>(resolve=>{releaseScan=resolve;});
+    const started=new Promise<void>(resolve=>{scanStarted=resolve;});
+    await page.route(f.base+'/v1/scan',async route=>{scanStarted();await held;await route.continue();});
+    await ui.getByRole('button',{name:'扫描资源',exact:true}).click();
+    await started;
+    await page.evaluate(()=>{
+      (window as any).currentPageInvalid=true;
+      document.querySelector('iframe')!.contentWindow!.postMessage({pluginMessage:{type:'page-changed'}},'*');
+    });
+    releaseScan();
+    await expect(ui.locator('#page-status')).toContainText('非空且未绑定');
+    await expect(ui.getByRole('button',{name:'导入主组件',exact:true})).toBeDisabled();
+    await page.unroute(f.base+'/v1/scan');
+    await page.evaluate(()=>{
+      (window as any).currentPageInvalid=false;
+      document.querySelector('iframe')!.contentWindow!.postMessage({pluginMessage:{type:'page-changed'}},'*');
+    });
+    await expect(ui.locator('#page-status')).toContainText('空白页可导入');
     await ui.getByRole('button',{name:'扫描资源',exact:true}).click();
     await expect(ui.getByTestId('summary')).toContainText('散图 2');
     await ui.getByRole('button',{name:'导入主组件',exact:true}).hover();

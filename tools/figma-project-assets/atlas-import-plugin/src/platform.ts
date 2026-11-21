@@ -33,6 +33,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFra
       busy = true;
       const page = api.currentPage;
       let frame: FrameNode | undefined;
+      let writtenName = '', writtenBinding = '';
       const oldName = page.name, oldBinding = page.getPluginData(bindingKey);
       try {
         if(scan.schemaVersion !== 1 || !scan.project || !/^[a-zA-Z0-9_-]{1,64}$/.test(scan.project.id) || typeof scan.project.name !== 'string' || !scan.project.name.trim() || scan.project.name.length > 200 || !Array.isArray(scan.resources) || !scan.resources.length || scan.resources.length > 64) throw new Error('扫描协议无效');
@@ -45,8 +46,10 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFra
         frame.primaryAxisSizingMode = 'FIXED'; frame.counterAxisSizingMode = 'AUTO';
         frame.itemSpacing = 16; frame.counterAxisSpacing = 16;
         frame.paddingTop = frame.paddingRight = frame.paddingBottom = frame.paddingLeft = 16;
-        page.name = pageName(scan.project);
-        page.setPluginData(bindingKey,JSON.stringify({schemaVersion:1,projectId:scan.project.id}));
+        writtenName = pageName(scan.project);
+        writtenBinding = JSON.stringify({schemaVersion:1,projectId:scan.project.id});
+        page.name = writtenName;
+        page.setPluginData(bindingKey,writtenBinding);
         progress({done:0,total:scan.resources.length});
         for(let i=0;i<scan.resources.length;i++) {
           if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已撤销本次导入');
@@ -63,7 +66,12 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFra
         }
         if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已撤销本次导入');
       } catch(error) {
-        if(frame) {frame.remove();page.name=oldName;page.setPluginData(bindingKey,oldBinding);}
+        if(frame) {
+          frame.remove();
+          // Roll back our writes only; preserve concurrent edits made by the user.
+          if(page.name === writtenName)page.name=oldName;
+          if(page.getPluginData(bindingKey) === writtenBinding)page.setPluginData(bindingKey,oldBinding);
+        }
         throw error;
       } finally {busy=false;}
     }

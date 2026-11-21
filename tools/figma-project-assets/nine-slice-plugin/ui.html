@@ -232,7 +232,7 @@
         syncGuidesFromInputs();
         saveSettings();
     }
-    function syncGuidesFromInputs() { if(state.imgW === 0) return; var t = parseInt(el('top').value) || 0, b = parseInt(el('bottom').value) || 0, l = parseInt(el('left').value) || 0, r = parseInt(el('right').value) || 0; var halfHit = 10 / state.zoom; el('g-top').style.top = (t - halfHit) + 'px'; el('g-bottom').style.top = (state.imgH - b - halfHit) + 'px'; el('g-left').style.left = (l - halfHit) + 'px'; el('g-right').style.left = (state.imgW - r - halfHit) + 'px'; }
+    function syncGuidesFromInputs() { if(state.imgW === 0) return; var t = Number(el('top').value) || 0, b = Number(el('bottom').value) || 0, l = Number(el('left').value) || 0, r = Number(el('right').value) || 0; var halfHit = 10 / state.zoom; el('g-top').style.top = (t - halfHit) + 'px'; el('g-bottom').style.top = (state.imgH - b - halfHit) + 'px'; el('g-left').style.left = (l - halfHit) + 'px'; el('g-right').style.left = (state.imgW - r - halfHit) + 'px'; }
 
     el('batchMode').onchange = () => { updateUIState(); saveSettings(); };
     el('overlap').onchange = saveSettings;
@@ -240,10 +240,13 @@
 
     function updateUIState() { var isBatch = el('batchMode').checked; el('batch-overlay').style.display = isBatch ? 'block' : 'none'; el('empty-hint').style.display = state.imgW === 0 ? 'block' : 'none'; }
 
+    function currentSettings() {
+      return {
+        top: Number(el('top').value), bottom: Number(el('bottom').value), left: Number(el('left').value), right: Number(el('right').value), all: Number(el('all').value), overlap: el('overlap').checked, keepOriginal: el('keepOriginal').checked, batchMode: el('batchMode').checked, lang: currentLang
+      };
+    }
     function saveSettings() {
-      parent.postMessage({ pluginMessage: {
-        type: 'save-only', top: Number(el('top').value), bottom: Number(el('bottom').value), left: Number(el('left').value), right: Number(el('right').value), all: Number(el('all').value), overlap: el('overlap').checked, keepOriginal: el('keepOriginal').checked, batchMode: el('batchMode').checked, lang: currentLang
-      }}, '*');
+      parent.postMessage({ pluginMessage: { type: 'save-only', ...currentSettings() }}, '*');
     }
 
     ['top','bottom','left','right','all'].forEach(id => {
@@ -253,9 +256,7 @@
     });
 
     function submit() {
-      parent.postMessage({ pluginMessage: {
-        type: 'generate', top: Number(el('top').value), bottom: Number(el('bottom').value), left: Number(el('left').value), right: Number(el('right').value), all: Number(el('all').value), overlap: el('overlap').checked, keepOriginal: el('keepOriginal').checked, batchMode: el('batchMode').checked, lang: currentLang
-      }}, '*');
+      parent.postMessage({ pluginMessage: { type: 'generate', ...currentSettings() }}, '*');
     }
   </script>
 </body>

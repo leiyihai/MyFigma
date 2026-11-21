@@ -68,6 +68,22 @@ test('user can zoom, pan, reset, set margins and submit original standalone opti
   }]);
 });
 
+test('fractional margins put every visible guide at the submitted slice boundary', async ({ page }) => {
+  await openPreview(page);
+  await page.locator('#all').fill('12.5');
+  for (const side of ['top', 'bottom', 'left', 'right']) {
+    await expect.poll(async () => page.locator('#g-' + side).evaluate((guide, side) => {
+      const image = document.getElementById('preview-img').getBoundingClientRect();
+      const line = guide.getBoundingClientRect();
+      const scale = image.width / 100;
+      if(side === 'top')return (line.y + line.height / 2 - image.y) / scale;
+      if(side === 'bottom')return (image.bottom - line.y - line.height / 2) / scale;
+      if(side === 'left')return (line.x + line.width / 2 - image.x) / scale;
+      return (image.right - line.x - line.width / 2) / scale;
+    }, side)).toBeCloseTo(12.5, 1);
+  }
+});
+
 test('a small selected image keeps the top guide draggable at fit-to-view zoom', async ({ page }) => {
   await openPreview(page);
   await page.locator('#all').fill('0');
