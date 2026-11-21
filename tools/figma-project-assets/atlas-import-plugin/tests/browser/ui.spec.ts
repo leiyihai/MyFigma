@@ -31,6 +31,11 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await ui.getByLabel('配对令牌').fill(f.token);
     await ui.getByRole('button',{name:'连接助手',exact:true}).click();
     await expect(ui.getByTestId('connection')).toHaveText('已连接');
+    await ui.getByRole('button',{name:'管理项目',exact:true}).hover();
+    const floating=ui.locator('#manage').locator('..').locator('.tooltip');
+    await expect(floating).toBeVisible();
+    const bounds=await floating.evaluate(el=>{const r=el.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:innerWidth,height:innerHeight};});
+    expect(bounds.left>=0&&bounds.top>=0&&bounds.right<=bounds.width&&bounds.bottom<=bounds.height).toBe(true);
     await ui.getByRole('button',{name:'管理项目',exact:true}).click();
     await expect(ui.getByRole('dialog')).toBeVisible();
     await ui.getByLabel('游戏名称', {exact:true}).fill('测试游戏');

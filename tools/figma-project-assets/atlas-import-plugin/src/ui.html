@@ -47,7 +47,7 @@ button.quiet{background:transparent;border-color:var(--figma-color-border,#ccc)}
 .hidden{display:none!important}
 progress{width:100%;height:6px;margin:5px 0 2px;accent-color:var(--figma-color-bg-brand,#0d99ff)}
 .action{position:relative;display:inline-block}
-.tooltip{display:none;position:absolute;z-index:30;bottom:calc(100% + 4px);left:0;min-width:190px;max-width:270px;background:#1f1f1f;color:#fff;padding:7px 8px;border-radius:5px;font-weight:400;line-height:1.45;pointer-events:none;box-shadow:0 4px 14px #0003}
+.tooltip{display:none;position:fixed;z-index:1000;left:0;top:0;min-width:190px;max-width:270px;background:#1f1f1f;color:#fff;padding:7px 8px;border-radius:5px;font-weight:400;line-height:1.45;pointer-events:none;box-shadow:0 4px 14px #0003}
 .action:hover>.tooltip,.action:focus-within>.tooltip{display:block}
 .help-wrap{position:relative;display:inline-flex;vertical-align:middle}
 .help{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;margin-left:4px;border:1px solid var(--figma-color-border-strong,#999);border-radius:50%;font:700 9px/1 system-ui;color:var(--figma-color-text-secondary,#666);cursor:help}
@@ -86,7 +86,7 @@ dialog::backdrop{background:#0006}
 <main class="app-main">
 <section class="card" aria-label="本机助手">
   <div class="card-head"><h2>本机助手</h2><span id="pairing-status" class="chip">首次配对后自动记住</span></div>
-  <p class="muted small" style="margin-bottom:7px">首次启动需从本机 token 文件复制令牌；之后将自动连接。</p>
+  <p class="muted small" style="margin-bottom:7px">首次启动需从本机 token 文件复制令牌；忘记后可在助手托盘菜单选择「显示配对令牌」，或查看 <code>%LOCALAPPDATA%\MyFigmaAssets\token</code>。</p>
   <div class="grid-2">
     <label><span>助手地址</span><input id="address" value="http://localhost:38473" spellcheck="false"></label>
     <label><span>配对令牌</span><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴 token 文件中的 64 位令牌"></label>
@@ -94,7 +94,7 @@ dialog::backdrop{background:#0006}
   <div class="inline" style="margin-top:7px">
     <button id="connect" title="连接已启动的本机助手；需要本机 token。连接失败时请检查启动状态和本地网络权限。">连接助手</button>
     <label class="check"><input id="remember" type="checkbox" checked> 记住本机配对</label>
-    <button id="forget" class="quiet" disabled title="清除本机插件保存的配对信息；不会停止助手或删除项目登记。">忘记配对</button>
+    <button id="forget" class="quiet" disabled title="清除本机插件保存的配对信息；不会停止助手或删除项目登记。清除后可在助手托盘菜单选择「显示配对令牌」，或查看 token 文件后重新粘贴。">忘记配对</button>
   </div>
 </section>
 

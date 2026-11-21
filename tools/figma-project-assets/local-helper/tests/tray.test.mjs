@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, realpath, copyFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawn } from 'node:child_process';
 import { helperDir, helperExecutable, startHelper, withTimeout } from './fixture.mjs';
 
 async function tempRoot(label) {
@@ -17,6 +18,25 @@ async function tempRoot(label) {
 async function assertPortClosed(base) {
   await assert.rejects(fetch(base + '/v1/health'), '已退出助手的端口必须拒绝新连接');
 }
+
+test('explicit show-token reads the existing token without starting a server', async () => {
+  const root = await tempRoot('show-token');
+  let helper;
+  try {
+    helper = await startHelper(join(root, 'data'), { tray: false });
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn(helperExecutable(), ['--data-dir', join(root, 'data'), '--show-token'], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '', stderr = '';
+      child.stdout.on('data', chunk => { stdout += chunk; });
+      child.stderr.on('data', chunk => { stderr += chunk; });
+      child.on('error', reject);
+      child.on('exit', code => resolve({ code, stdout, stderr }));
+    });
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, new RegExp('PAIRING TOKEN: ' + helper.token));
+    assert.equal(result.stderr, '');
+  } finally { if (helper) await helper.stop(); await rm(root, { recursive: true, force: true }); }
+});
 
 test('built helper runs from a copied artifact without a development server and closes its port after a graceful exit', async () => {
   const root = await tempRoot('artifact');

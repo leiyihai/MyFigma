@@ -11,12 +11,15 @@ function setup(sizes = [[100, 80]], options = {}) {
     fills: [{ type: 'IMAGE', imageHash: 'image' }],
     remove() { this.removed = true; }
   }));
-  function node() {
+  function node(type = 'RECTANGLE') {
     return {
-      children: [], removed: false,
+      type, children: [], removed: false,
+      data: {},
+      getPluginData(key) { return this.data[key] || ''; },
+      setPluginData(key, value) { this.data[key] = value; },
       resize(width, height) { this.width = width; this.height = height; },
       appendChild(child) { child.parent = this; this.children.push(child); },
-      remove() { this.removed = true; }
+      remove() { this.removed = true; if (this.parent && Array.isArray(this.parent.children)) this.parent.children = this.parent.children.filter(child => child !== this); }
     };
   }
   const figma = {
@@ -26,7 +29,7 @@ function setup(sizes = [[100, 80]], options = {}) {
     currentPage: { selection: sources },
     getImageByHash(hash) { return { getBytesAsync: options.getBytes || (async () => new Uint8Array([1])) }; },
     notify(text) { notices.push(text); }, viewport: { scrollAndZoomIntoView() {} },
-    createComponent() { const result = node(); created.push(result); return result; },
+    createComponent() { const result = node('COMPONENT'); created.push(result); return result; },
     createRectangle: node
   };
   vm.runInNewContext(fs.readFileSync('dist/code.js', 'utf8'), { figma, __html__: '', console });
@@ -120,6 +123,31 @@ test('new and legacy sessions default the three switches off, then persist delib
   await new Promise(setImmediate);
   const restoredInit = restored.messages.find(msg => msg.type === 'init-settings').settings;
   assert.deepEqual([restoredInit.overlap, restoredInit.keepOriginal, restoredInit.batchMode], [true, true, true]);
+});
+
+test('editing a generated component updates it in place and keeps one component', async () => {
+  const env = setup();
+  await env.figma.ui.onmessage(env.settings);
+  const component = env.created[0];
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ ...env.settings, left: 20, right: 5, top: 6, bottom: 7 });
+  assert.equal(env.created.length, 1);
+  assert.equal(component.children.length, 9);
+  const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.deepEqual(saved.margins, { left: 20, right: 5, top: 6, bottom: 7 });
+  assert.equal(component.children.find(child => child.name === '切片 2-1').width, 20);
+});
+
+test('editing a legacy component derives margins and writes the editable metadata', async () => {
+  const env = setup();
+  await env.figma.ui.onmessage(env.settings);
+  const component = env.created[0];
+  component.data = {};
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ ...env.settings, left: 12, right: 8, top: 9, bottom: 11 });
+  assert.equal(env.created.length, 1);
+  const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.deepEqual(saved.margins, { left: 12, right: 8, top: 9, bottom: 11 });
 });
 
 test('a late old image cannot overwrite a newer selection or cleared selection', async () => {

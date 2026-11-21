@@ -8,6 +8,7 @@ use std::path::Path;
 pub struct Tray<'a> {
     pub port: u16,
     pub data_dir: &'a Path,
+    pub token: &'a str,
     pub shutdown: Shutdown,
     /// 仅测试使用：把与托盘「退出」菜单相同的命令延迟发给托盘窗口。
     pub test_exit_after_ms: Option<u64>,
@@ -57,12 +58,14 @@ mod imp {
     const TEST_TIMER: usize = 1;
     const MENU_STATUS: usize = 1;
     const MENU_OPEN_DIRECTORY: usize = 2;
-    const MENU_EXIT: usize = 3;
+    const MENU_SHOW_TOKEN: usize = 3;
+    const MENU_EXIT: usize = 4;
     const ICON_ID: u32 = 1;
 
     struct Runtime {
         shutdown: Shutdown,
         data_dir: PathBuf,
+        token: String,
         port: u16,
     }
 
@@ -126,6 +129,13 @@ mod imp {
         }
     }
 
+    unsafe fn show_token() {
+        if let Some(runtime) = RUNTIME.get() {
+            // 只在用户显式请求时输出；正常启动日志不包含令牌。
+            println!("PAIRING TOKEN: {}", runtime.token);
+        }
+    }
+
     unsafe fn show_menu(hwnd: HWND) {
         unsafe {
             let menu = CreatePopupMenu();
@@ -137,6 +147,8 @@ mod imp {
             AppendMenuW(menu, MF_SEPARATOR, 0, null());
             let directory = wide("打开数据目录");
             AppendMenuW(menu, MF_STRING, MENU_OPEN_DIRECTORY, directory.as_ptr());
+            let token = wide("显示配对令牌");
+            AppendMenuW(menu, MF_STRING, MENU_SHOW_TOKEN, token.as_ptr());
             AppendMenuW(menu, MF_SEPARATOR, 0, null());
             let exit = wide("退出");
             AppendMenuW(menu, MF_STRING, MENU_EXIT, exit.as_ptr());
@@ -176,6 +188,7 @@ mod imp {
                     match wparam & 0xffff {
                         MENU_EXIT => request_exit(hwnd),
                         MENU_OPEN_DIRECTORY => open_data_directory(),
+                        MENU_SHOW_TOKEN => show_token(),
                         _ => {}
                     }
                     0
@@ -207,6 +220,7 @@ mod imp {
         let _ = RUNTIME.set(Runtime {
             shutdown: tray.shutdown,
             data_dir: tray.data_dir.to_path_buf(),
+            token: tray.token.to_owned(),
             port: tray.port,
         });
         unsafe {

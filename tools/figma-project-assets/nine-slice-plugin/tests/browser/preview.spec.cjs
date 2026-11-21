@@ -68,6 +68,20 @@ test('user can zoom, pan, reset, set margins and submit original standalone opti
   }]);
 });
 
+test('selecting an existing component enters update mode with its margins', async ({ page }) => {
+  await openPreview(page);
+  await page.evaluate(() => window.postMessage({ pluginMessage: {
+    type: 'update-preview', bytes: null,
+    edit: { margins: { left: 20, right: 8, top: 10, bottom: 12 }, overlap: false, target: 'component', name: '已有底板' }
+  } }, '*'));
+  await expect(page.locator('#main-btn')).toHaveText('更新九宫格组件');
+  await expect(page.locator('#edit-status')).toContainText('已有底板');
+  await expect(page.locator('#left')).toHaveValue('20');
+  await expect(page.locator('#top')).toHaveValue('10');
+  await expect(page.locator('#batchMode')).toBeDisabled();
+  await expect(page.locator('#keepOriginal')).toBeDisabled();
+});
+
 test('fractional margins put every visible guide at the submitted slice boundary', async ({ page }) => {
   await openPreview(page);
   await page.locator('#all').fill('12.5');

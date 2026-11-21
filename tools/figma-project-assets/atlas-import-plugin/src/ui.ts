@@ -24,14 +24,34 @@ let pageValidationPending=false;
 let remembered=false;
 let editingId:string|undefined;
 const dialog=el<HTMLDialogElement>('management');
+function placeTooltip(wrap:HTMLElement) {
+  const tip=wrap.querySelector<HTMLElement>('.tooltip');if(!tip)return;
+  const wasHidden=tip.style.display==='none'||getComputedStyle(tip).display==='none';
+  if(wasHidden)tip.style.display='block';
+  const anchor=wrap.getBoundingClientRect(),width=tip.offsetWidth,height=tip.offsetHeight,margin=8;
+  let left=Math.max(margin,Math.min(innerWidth-width-margin,anchor.left));
+  let top=anchor.top-height-6;
+  if(top<margin)top=Math.min(innerHeight-height-margin,anchor.bottom+6);
+  tip.style.left=`${left}px`;tip.style.top=`${top}px`;
+}
 function tooltip(button:HTMLButtonElement) {
   const text=button.title;if(!text)return;
   button.removeAttribute('title');
   const wrap=document.createElement('span');wrap.className='action';
   button.replaceWith(wrap);wrap.append(button);
   const tip=document.createElement('span');tip.className='tooltip';tip.setAttribute('role','tooltip');tip.textContent=text;wrap.append(tip);
+  wrap.addEventListener('mouseenter',()=>placeTooltip(wrap));
+  wrap.addEventListener('focusin',()=>placeTooltip(wrap));
+  const hide=()=>{tip.style.display='none';};
+  wrap.addEventListener('mouseleave',hide);wrap.addEventListener('focusout',hide);
 }
 document.querySelectorAll<HTMLButtonElement>('button').forEach(tooltip);
+document.querySelectorAll<HTMLElement>('.help-wrap').forEach(wrap=>{
+  wrap.addEventListener('mouseenter',()=>placeTooltip(wrap));
+  wrap.addEventListener('focusin',()=>placeTooltip(wrap));
+  const tip=wrap.querySelector<HTMLElement>('.tooltip');
+  if(tip){const hide=()=>{tip.style.display='none';};wrap.addEventListener('mouseleave',hide);wrap.addEventListener('focusout',hide);}
+});
 function render() {
   const s=workflow?.state,busy=!!s?.busy,connected=!!s?.connected;
   const connection=el('connection');connection.textContent=connected?'已连接':'未连接';connection.classList.toggle('connected',connected);

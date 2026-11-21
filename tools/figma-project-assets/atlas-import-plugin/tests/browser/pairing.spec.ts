@@ -34,6 +34,7 @@ test('a remembered pairing connects automatically and can be forgotten', async (
 
     await ui.getByRole('button', {name:'忘记配对', exact:true}).click();
     await expect(ui.locator('#pairing-status')).toHaveText('不会记住配对');
+    await expect(ui.locator('body')).toContainText('显示配对令牌');
     await expect(ui.getByLabel('记住本机配对', {exact:true})).not.toBeChecked();
     await expect(ui.getByLabel('配对令牌')).toHaveValue('');
     expect(await page.evaluate(() => (window as any).pairing)).toBeNull();

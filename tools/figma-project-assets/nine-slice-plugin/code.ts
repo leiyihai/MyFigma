@@ -1,5 +1,6 @@
 import { createNineSlicePlan } from '../packages/nine-slice/src/index';
-import { createNineSliceComponent } from '../packages/nine-slice/src/figma';
+import type { Margins } from '../packages/nine-slice/src/index';
+import { applyNineSliceComponent, createNineSliceComponent } from '../packages/nine-slice/src/figma';
 
 type Language = 'zh' | 'en' | 'ja' | 'ko' | 'ru' | 'de' | 'fr';
 type Settings = {
@@ -9,6 +10,9 @@ type Settings = {
 };
 type PluginMessage = Settings & { type: 'save-only' | 'generate' };
 type ImageNode = SceneNode & GeometryMixin;
+type SavedSlice = { schemaVersion: 1; margins: Margins; overlap: boolean; width: number; height: number };
+type EditableSlice = { component: ComponentNode; margins: Margins; overlap: boolean; fill: ImagePaint; width: number; height: number; target: 'component' | 'instance' };
+const NINE_SLICE_DATA = 'myfigma.nineSlice.v1';
 
 figma.showUI(__html__, { width: 360, height: 740, themeColors: true });
 let currentLang: Language = 'en';
@@ -37,27 +41,82 @@ function isImageNode(node: SceneNode): node is ImageNode {
 function imageFill(node: ImageNode): ImagePaint | undefined {
   return Array.isArray(node.fills) ? node.fills.find((fill): fill is ImagePaint => fill.type === 'IMAGE') : undefined;
 }
+function isSliceNode(node: SceneNode): node is RectangleNode {
+  return node.type === 'RECTANGLE' && /^切片 [1-3]-[1-3]$/.test(node.name);
+}
+function deriveMargins(component: ComponentNode): Margins {
+  const byName = new Map(component.children.filter(isSliceNode).map(node => [node.name, node]));
+  const centerX = byName.get('切片 1-2');
+  const centerY = byName.get('切片 2-1');
+  const right = byName.get('切片 1-3');
+  const bottom = byName.get('切片 3-1');
+  return {
+    left: centerX?.x ?? 0,
+    top: centerY?.y ?? 0,
+    right: right ? component.width - (right.x + right.width) : 0,
+    bottom: bottom ? component.height - (bottom.y + bottom.height) : 0
+  };
+}
+function savedMargins(component: ComponentNode): SavedSlice | undefined {
+  try {
+    const raw = component.getPluginData(NINE_SLICE_DATA);
+    if (!raw) return undefined;
+    const saved = JSON.parse(raw) as SavedSlice;
+    return saved.schemaVersion === 1 && saved.margins ? saved : undefined;
+  } catch {
+    return undefined;
+  }
+}
+function findEditable(node: SceneNode | undefined): EditableSlice | null {
+  if (!node) return null;
+  const component = node.type === 'COMPONENT' ? node : node.type === 'INSTANCE' ? node.mainComponent : null;
+  if (!component || !component.children.length || !component.children.every(isSliceNode)) return null;
+  const fills = component.children.map(child => imageFill(child)).filter((fill): fill is ImagePaint => !!fill);
+  if (!fills.length || new Set(fills.map(fill => fill.imageHash)).size !== 1) return null;
+  const saved = savedMargins(component);
+  const margins = saved?.margins ?? deriveMargins(component);
+  const overlap = saved?.overlap ?? false;
+  try {
+    createNineSlicePlan(component, margins, overlap);
+  } catch {
+    return null;
+  }
+  return { component, margins, overlap, fill: fills[0], width: component.width, height: component.height, target: node.type === 'INSTANCE' ? 'instance' : 'component' };
+}
+function rememberSlice(component: ComponentNode, settings: Settings, overlap: boolean): void {
+  const margins: Margins = { left: settings.left, top: settings.top, right: settings.right, bottom: settings.bottom };
+  try {
+    component.setPluginData(NINE_SLICE_DATA, JSON.stringify({ schemaVersion: 1, margins, overlap, width: component.width, height: component.height }));
+  } catch (error) {
+    console.error('保存九宫格信息失败', error);
+  }
+}
+function editPayload(edit: EditableSlice) {
+  return { margins: edit.margins, overlap: edit.overlap, target: edit.target, name: edit.component.name };
+}
 
 let previewVersion = 0;
 async function sendSelectionToUI() {
   const version = ++previewVersion;
   const node = figma.currentPage.selection[0];
+  const edit = findEditable(node);
+  const fill = edit?.fill ?? (node && isImageNode(node) ? imageFill(node) : undefined);
+  const width = edit?.width ?? (node && 'width' in node ? node.width : 0);
+  const height = edit?.height ?? (node && 'height' in node ? node.height : 0);
   try {
-    if (node && isImageNode(node)) {
-      const hash = imageFill(node)?.imageHash;
-      const image = hash ? figma.getImageByHash(hash) : null;
-      if (image) {
-        const bytes = await image.getBytesAsync();
-        if (version === previewVersion) {
-          figma.ui.postMessage({ type: 'update-preview', bytes, width: node.width, height: node.height });
-        }
-        return;
+    const hash = fill?.imageHash;
+    const image = hash ? figma.getImageByHash(hash) : null;
+    if (image) {
+      const bytes = await image.getBytesAsync();
+      if (version === previewVersion) {
+        figma.ui.postMessage({ type: 'update-preview', bytes, width, height, edit: edit ? editPayload(edit) : null });
       }
+      return;
     }
   } catch (error) {
     console.error('读取图片预览失败', error);
   }
-  if (version === previewVersion) figma.ui.postMessage({ type: 'update-preview', bytes: null });
+  if (version === previewVersion) figma.ui.postMessage({ type: 'update-preview', bytes: null, edit: edit ? editPayload(edit) : null });
 }
 
 async function initSettings() {
@@ -99,6 +158,7 @@ function generate(source: ImageNode, msg: Settings): ComponentNode {
     component.name = source.name;
     component.x = msg.keepOriginal ? source.x + source.width + 50 : source.x;
     component.y = source.y;
+    rememberSlice(component, msg, msg.overlap);
     return component;
   } catch (error) {
     component.remove();
@@ -116,6 +176,30 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
     console.error('保存设置失败', error);
   }
   if (msg.type !== 'generate' || generating) return;
+  const edit = findEditable(figma.currentPage.selection[0]);
+  if (edit) {
+    try {
+      createNineSlicePlan({ width: edit.width, height: edit.height }, msg, msg.overlap);
+    } catch {
+      figma.notify(currentLang === 'zh'
+        ? '边距必须为非负数，且左右之和小于宽度、上下之和小于高度。'
+        : 'Margins must be non-negative; their sums must be smaller than the component width and height.', { error: true });
+      return;
+    }
+    generating = true;
+    try {
+      applyNineSliceComponent(figma, edit.component, { width: edit.width, height: edit.height, fill: edit.fill }, msg, { overlap: msg.overlap });
+      rememberSlice(edit.component, msg, msg.overlap);
+      figma.viewport.scrollAndZoomIntoView([edit.component]);
+      notify('success');
+    } catch (error) {
+      console.error('更新九宫格失败', error);
+      figma.notify(currentLang === 'zh' ? '更新失败，请查看插件控制台。' : 'Update failed. Check the plugin console.', { error: true });
+    } finally {
+      generating = false;
+    }
+    return;
+  }
   const targets = figma.currentPage.selection.filter(isImageNode);
   if (targets.length === 0) { notify('no_img'); return; }
   const finalTargets = msg.batchMode ? targets : [targets[0]];

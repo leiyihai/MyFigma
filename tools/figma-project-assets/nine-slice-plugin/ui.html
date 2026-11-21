@@ -27,6 +27,7 @@
     .help-wrap:hover .tooltip { visibility: visible; opacity: 1; transform: translateY(-5px); }
     .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
     input[type="number"] { width: 60px; padding: 7px; border: 1px solid var(--border); border-radius: 7px; text-align: center; font-family: "JetBrains Mono", monospace; outline: none; font-size: 11px; }
+    .edit-status { display: none; margin: 0 0 8px; padding: 7px 9px; border: 1px solid #b8d8ff; background: #eef7ff; color: #084b8a; border-radius: 7px; font-size: 11px; line-height: 1.4; }
     button#main-btn { width: 100%; height: 46px; background: linear-gradient(135deg, #18a0fb 0%, #007aff 100%); color: #fff; border: none; border-radius: 10px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(24,160,251,0.3); }
     .switch { position: relative; width: 34px; height: 18px; }
     .switch input { display: none; }
@@ -89,6 +90,7 @@
     </div>
   </div>
 
+  <p id="edit-status" class="edit-status"></p>
   <button id="main-btn" onclick="submit()" data-t="generateBtn">生成九宫格组件</button>
 
   <div class="footer">
@@ -109,8 +111,8 @@
 
   <script>
     const i18n = {
-      zh: { code: "ZH", batchOverlay: "📦 批量模式已开启", emptyHint: "请在画布选中图片图层", controlHint: "鼠标中键拖拽平移 / 滚轮缩放", allLabel: "统一边距 (All)", topLabel: "上", bottomLabel: "下", leftLabel: "左", rightLabel: "右", keepOriginal: "保留原图", batchMode: "批量模式", batchTip: "同步处理多张图片。开启后，选中的所有图层将统一应用当前切片数值。", overlap: "消除缝隙", overlapTip: "修正渲染缝隙。开启后切片间将产生 1px 重叠以消除拼接黑线（透明图片慎用）。", generateBtn: "生成九宫格组件" },
-      en: { code: "EN", batchOverlay: "📦 Batch Mode Active", emptyHint: "Please select an image layer", controlHint: "Middle click to pan / Scroll to zoom", allLabel: "All Margins", topLabel: "Top", bottomLabel: "Bottom", leftLabel: "Left", rightLabel: "Right", keepOriginal: "Keep Original", batchMode: "Batch Mode", batchTip: "Sync multiple images. All selected layers will use the same slice values.", overlap: "Fix Gaps", overlapTip: "Fix rendering gaps. Creates a 1px overlap to eliminate lines.", generateBtn: "Generate 9-Slice" },
+      zh: { code: "ZH", updateBtn: "更新九宫格组件", editStatus: "正在编辑现有组件", editInstance: "选中实例，将更新主组件", updateHint: "按当前边距更新已有九宫格组件；保留原图与批量模式不适用于编辑", batchOverlay: "📦 批量模式已开启", emptyHint: "请在画布选中图片图层", controlHint: "鼠标中键拖拽平移 / 滚轮缩放", allLabel: "统一边距 (All)", topLabel: "上", bottomLabel: "下", leftLabel: "左", rightLabel: "右", keepOriginal: "保留原图", batchMode: "批量模式", batchTip: "同步处理多张图片。开启后，选中的所有图层将统一应用当前切片数值。", overlap: "消除缝隙", overlapTip: "修正渲染缝隙。开启后切片间将产生 1px 重叠以消除拼接黑线（透明图片慎用）。", generateBtn: "生成九宫格组件" },
+      en: { code: "EN", updateBtn: "Update 9-Slice", editStatus: "Editing existing component", editInstance: "Instance selected; its main component will update", updateHint: "Update the existing 9-slice with these margins; Keep Original and Batch do not apply", batchOverlay: "📦 Batch Mode Active", emptyHint: "Please select an image layer", controlHint: "Middle click to pan / Scroll to zoom", allLabel: "All Margins", topLabel: "Top", bottomLabel: "Bottom", leftLabel: "Left", rightLabel: "Right", keepOriginal: "Keep Original", batchMode: "Batch Mode", batchTip: "Sync multiple images. All selected layers will use the same slice values.", overlap: "Fix Gaps", overlapTip: "Fix rendering gaps. Creates a 1px overlap to eliminate lines.", generateBtn: "Generate 9-Slice" },
       ja: { code: "JP", batchOverlay: "📦 一括モード有効", emptyHint: "画像レイヤーを選択してください", controlHint: "中ボタンでパン / スクロールでズーム", allLabel: "一括余白", topLabel: "上", bottomLabel: "下", leftLabel: "左", rightLabel: "右", keepOriginal: "元画像を保持", batchMode: "一括モード", batchTip: "複数の画像を同期します。", overlap: "隙間を補正", overlapTip: "1pxの重なりを作り、境界線を消去します。", generateBtn: "コンポーネント作成" },
       ko: { code: "KO", batchOverlay: "📦 일괄 모드 활성화", emptyHint: "이미지 레이어를 선택하세요", controlHint: "중앙 클릭으로 이동 / 스크롤로 확대", allLabel: "전체 여백", topLabel: "상", bottomLabel: "하", leftLabel: "좌", rightLabel: "우", keepOriginal: "원본 유지", batchMode: "일괄 모드", batchTip: "모든 레이어에 동일한 수치가 적용됩니다.", overlap: "간격 수정", overlapTip: "1px 중첩을 생성하여 선을 제거합니다.", generateBtn: "구성 요소 생성" },
       ru: { code: "RU", batchOverlay: "📦 Пакетный режим", emptyHint: "Выберите слой с изображением", controlHint: "Колесо: масштаб / Кнопка: панорама", allLabel: "Все отступы", topLabel: "Верх", bottomLabel: "Низ", leftLabel: "Лев", rightLabel: "Прав", keepOriginal: "Оригинал", batchMode: "Пакетный", batchTip: "Применить ко всем слоям.", overlap: "Без швов", overlapTip: "Устраняет линии на стыках.", generateBtn: "Создать компонент" },
@@ -155,7 +157,31 @@
         if (i18n[lang][key]) el.innerText = i18n[lang][key];
       });
       document.getElementById('lang-list').classList.remove('show');
+      renderEditState();
       saveSettings();
+    }
+
+    function editText(key) {
+      return (i18n[currentLang] && i18n[currentLang][key]) || i18n.en[key];
+    }
+
+    function renderEditState() {
+      var status = el('edit-status'), button = el('main-btn');
+      if (!editState) {
+        status.style.display = 'none';
+        status.textContent = '';
+        button.innerText = i18n[currentLang].generateBtn;
+        el('batchMode').disabled = false;
+        el('keepOriginal').disabled = false;
+        button.title = (currentLang === 'zh' ? '将选中图片转换为九宫格组件；批量时应用到所有选中图片，关闭保留原图会删除原图' : 'Convert selected images to 9-slice components; batch applies to all selected images. Disabling Keep Original deletes sources.');
+        return;
+      }
+      status.style.display = 'block';
+      status.textContent = editText('editStatus') + '：' + editState.name + (editState.target === 'instance' ? '（' + editText('editInstance') + '）' : '');
+      button.innerText = editText('updateBtn');
+      el('batchMode').disabled = true;
+      el('keepOriginal').disabled = true;
+      button.title = editText('updateHint');
     }
 
     window.addEventListener('click', (e) => {
@@ -165,6 +191,7 @@
     });
 
     var state = { zoom: 1, x: 0, y: 0, imgW: 0, imgH: 0, isPanMode: false };
+    var editState = null;
     var el = function(id) { return document.getElementById(id); };
     var container = el('canvas-container');
     var viewport = el('viewport');
@@ -178,15 +205,27 @@
       if (msg.type === 'init-settings') {
         var s = msg.settings;
         // 首次或重载时，边距数值初始化（如果之前保存过则读，否则默认0）
-        ['top','bottom','left','right','all'].forEach(k => { el(k).value = s[k] !== undefined ? s[k] : 0; });
-        el('overlap').checked = s.overlap;
-        el('batchMode').checked = s.batchMode;
-        el('keepOriginal').checked = (s.keepOriginal !== undefined) ? s.keepOriginal : false;
+        if (!editState) {
+          ['top','bottom','left','right','all'].forEach(k => { el(k).value = s[k] !== undefined ? s[k] : 0; });
+          el('overlap').checked = s.overlap;
+          el('batchMode').checked = s.batchMode;
+          el('keepOriginal').checked = (s.keepOriginal !== undefined) ? s.keepOriginal : false;
+        }
         setLang(s.lang || 'auto');
         updateUIState();
         syncGuidesFromInputs();
       }
       if (msg.type === 'update-preview') {
+        editState = msg.edit || null;
+        if (editState) {
+          ['top','bottom','left','right'].forEach(k => { el(k).value = editState.margins[k]; });
+          el('overlap').checked = !!editState.overlap;
+          el('batchMode').checked = false;
+          el('keepOriginal').checked = false;
+          syncGuidesFromInputs();
+        }
+        renderEditState();
+        updateUIState();
         if (msg.bytes) {
           el('empty-hint').style.display = 'none';
           viewport.style.display = 'block';
@@ -239,7 +278,7 @@
     el('overlap').onchange = saveSettings;
     el('keepOriginal').onchange = saveSettings;
 
-    function updateUIState() { var isBatch = el('batchMode').checked; el('batch-overlay').style.display = isBatch ? 'block' : 'none'; el('empty-hint').style.display = state.imgW === 0 ? 'block' : 'none'; }
+    function updateUIState() { var isBatch = el('batchMode').checked && !editState; el('batch-overlay').style.display = isBatch ? 'block' : 'none'; el('empty-hint').style.display = state.imgW === 0 ? 'block' : 'none'; }
 
     function currentSettings() {
       return {

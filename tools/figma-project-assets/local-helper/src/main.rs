@@ -260,6 +260,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .map(|p| p.join("MyFigmaAssets"));
     let mut port = 38473u16;
     let mut show_tray = true;
+    let mut show_token = false;
     let mut test_exit_after_ms = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -268,6 +269,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "--port" => port = args.next().ok_or("missing port")?.parse()?,
             // 仅测试/CI：跳过托盘，直接等待退出请求。
             "--no-tray" => show_tray = false,
+            "--show-token" => show_token = true,
             // 仅测试：延迟触发与托盘「退出」相同的退出路径。
             "--test-exit-after-ms" => {
                 test_exit_after_ms = Some(args.next().ok_or("missing exit delay")?.parse()?)
@@ -277,6 +279,11 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let data = data.ok_or("LOCALAPPDATA unavailable")?;
     let app = App::open(data.clone())?;
+    if show_token {
+        println!("PAIRING TOKEN: {}", app.token);
+        return Ok(());
+    }
+    let token = app.token.clone();
     let server = Server::http((std::net::Ipv4Addr::LOCALHOST, port))?;
     let actual_port = server
         .server_addr()
@@ -293,6 +300,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         tray::run(tray::Tray {
             port: actual_port,
             data_dir: &data,
+            token: &token,
             shutdown: shutdown.clone(),
             test_exit_after_ms,
         })
