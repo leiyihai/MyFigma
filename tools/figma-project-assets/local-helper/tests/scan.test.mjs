@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { access, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { startHelper } from './fixture.mjs';
@@ -159,6 +159,44 @@ test('trimmed frames in nested atlases restore original size, transparent paddin
   } finally { await f.cleanup(); }
 });
 
+test('a valid atlas with a non-conventional sheet does not hide an unreferenced same-stem image', async () => {
+  const f = await projectFixture();
+  try {
+    const imageset = join(f.project, 'res', 'imageset', 'Static');
+    await writePng(join(imageset, 'sheet', 'panel.png'), 1, 1, solid(1, 1, [1, 1, 1, 255]));
+    await writeAtlas(join(imageset, 'panel.json'), {
+      image: 'sheet/panel.png', size: { w: 1, h: 1 },
+      frames: { panel: { frame: { x: 0, y: 0, w: 1, h: 1 } } }
+    });
+    await writePng(join(imageset, 'panel.png'), 1, 1, solid(1, 1, [2, 2, 2, 255]));
+    await register(f);
+    const result = await scan(f);
+    assert.equal(result.complete, true);
+    assert.deepEqual(result.resources.map(r => r.source.kind), ['atlas', 'standalone']);
+    assert.equal(result.resources.find(r => r.source.kind === 'standalone').source.relativePath,
+      'Static/panel.png');
+  } finally { await f.cleanup(); }
+});
+
+test('deep or unreadable directories report an error without discarding root atlases', async () => {
+  const f = await projectFixture();
+  try {
+    const imageset = join(f.project, 'res', 'imageset');
+    await writePng(join(imageset, 'root.png'), 1, 1, solid(1, 1, [3, 3, 3, 255]));
+    await writeAtlas(join(imageset, 'root.json'), {
+      image: 'root.png', size: { w: 1, h: 1 },
+      frames: { root: { frame: { x: 0, y: 0, w: 1, h: 1 } } }
+    });
+    await mkdir(join(imageset, ...Array.from({ length: 34 }, (_, index) => 'd' + index)), { recursive: true });
+    await register(f);
+    const result = await scan(f);
+    assert.equal(result.complete, false);
+    assert.equal(result.truncated, false);
+    assert.equal(result.resources.length, 1);
+    assert.match(result.errors.join('\n'), /层级超过 32 层/);
+  } finally { await f.cleanup(); }
+});
+
 test('broken, missing and unsupported sources are reported with their location and skipped', async () => {
   const f = await projectFixture();
   try {
@@ -229,6 +267,7 @@ test('atlases with more than the old frame counts are imported whole and over-li
       assert.equal(limited.truncated, true);
       assert.match(limited.errors.join('\n'), /超过单次扫描上限/);
       assert.equal(limited.summary.resources, limited.resources.length);
+      assert.equal(limited.summary.atlasFrames, limited.resources.length);
       assert.ok(limited.resources.length >= 10000, 'scan keeps what it restored instead of silently clipping');
     } finally { await huge.cleanup(); }
   } finally { await f.cleanup(); }

@@ -220,14 +220,12 @@ fn collect(root: &Path) -> Found {
             found
                 .errors
                 .push(format!("目录 {label}：层级超过 32 层，已跳过"));
-            found.truncated = true;
             continue;
         }
         let entries = match fs::read_dir(&directory) {
             Ok(entries) => entries,
             Err(_) => {
                 found.errors.push(format!("目录 {label}：不可读"));
-                found.truncated = true;
                 continue;
             }
         };
@@ -242,12 +240,10 @@ fn collect(root: &Path) -> Found {
             found.entries += 1;
             let Ok(entry) = entry else {
                 found.errors.push(format!("目录 {label}：存在不可读条目"));
-                found.truncated = true;
                 continue;
             };
             let Ok(file_type) = entry.file_type() else {
                 found.errors.push(format!("目录 {label}：存在不可读条目"));
-                found.truncated = true;
                 continue;
             };
             let path = entry.path();
@@ -297,14 +293,35 @@ struct ScanState {
 fn read_atlas(project: &Project, root: &Path, path: &Path, state: &mut ScanState) -> Result<usize> {
     let relative = relative_path(root, path)?;
     let bytes = small_file(&within(root, path)?, MAX_JSON_BYTES)?;
-    let doc: Value = serde_json::from_slice(&bytes).map_err(|_| "JSON 格式无效")?;
-    let frames = doc["frames"].as_object().ok_or("需要对象式 frames")?;
     let default_image = path
         .with_extension("png")
         .file_name()
         .and_then(|value| value.to_str())
         .ok_or("图集名无效")?
         .to_string();
+    let doc: Value = match serde_json::from_slice(&bytes) {
+        Ok(doc) => doc,
+        Err(_) => {
+            // A broken atlas still owns its conventional same-name sheet.
+            if let Ok(sheet) = path.with_extension("png").canonicalize()
+                && sheet.starts_with(root)
+            {
+                state.claimed.insert(sheet);
+            }
+            return Err("JSON 格式无效");
+        }
+    };
+    let frames = match doc["frames"].as_object() {
+        Some(frames) => frames,
+        None => {
+            if let Ok(sheet) = path.with_extension("png").canonicalize()
+                && sheet.starts_with(root)
+            {
+                state.claimed.insert(sheet);
+            }
+            return Err("需要对象式 frames");
+        }
+    };
     let image_name = doc["meta"]["image"].as_str().unwrap_or(&default_image);
     if !safe_name(image_name) || !image_name.to_ascii_lowercase().ends_with(".png") {
         return Err("图集图片必须位于项目扫描范围内");
@@ -313,7 +330,9 @@ fn read_atlas(project: &Project, root: &Path, path: &Path, state: &mut ScanState
     let resolved = within(root, &image_path).map_err(|_| "图集图片必须位于项目扫描范围内")?;
     state.claimed.insert(resolved.clone());
     let atlas = decode_png(small_file(&resolved, MAX_IMAGE_BYTES)?)?;
+    let mut processed = 0usize;
     for (name, frame) in frames {
+        processed += 1;
         match restore(project, &relative, name, frame, &atlas) {
             Ok(resource) => {
                 let width = resource["width"].as_u64().unwrap_or_default();
@@ -324,7 +343,7 @@ fn read_atlas(project: &Project, root: &Path, path: &Path, state: &mut ScanState
                         .errors
                         .push(format!("图集 {relative}：{limit}，扫描结果不完整"));
                     state.truncated = true;
-                    return Ok(frames.len());
+                    return Ok(processed.saturating_sub(1));
                 }
                 state.pixels += width * height;
                 state.resources.push(resource);
@@ -364,15 +383,6 @@ pub fn scan(data: &Path, project: &Project) -> Result<Value> {
         truncated: found.truncated,
         ..ScanState::default()
     };
-    // A sheet is consumed by the atlas JSON next to it even when that JSON is
-    // broken, so a failed parse can never turn a packed sheet into a standalone.
-    for path in &found.atlases {
-        if let Ok(sheet) = path.with_extension("png").canonicalize()
-            && sheet.starts_with(&scope)
-        {
-            state.claimed.insert(sheet);
-        }
-    }
     for path in &found.atlases {
         if state.truncated {
             break;
@@ -380,6 +390,12 @@ pub fn scan(data: &Path, project: &Project) -> Result<Value> {
         match read_atlas(project, &scope, path, &mut state) {
             Ok(frames) => state.atlas_frames += frames,
             Err(error) => {
+                // An invalid atlas still owns its conventional same-name sheet.
+                if let Ok(sheet) = path.with_extension("png").canonicalize()
+                    && sheet.starts_with(&scope)
+                {
+                    state.claimed.insert(sheet);
+                }
                 let relative =
                     relative_path(&scope, path).unwrap_or_else(|_| "未知图集".to_string());
                 state.errors.push(format!("图集 {relative}：{error}"));
