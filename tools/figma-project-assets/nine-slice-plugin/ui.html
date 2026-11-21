@@ -327,6 +327,7 @@
     function submit() {
       parent.postMessage({ pluginMessage: { type: 'generate', ...currentSettings() }}, '*');
     }
+    parent.postMessage({ pluginMessage: { type: 'ui-ready' } }, '*');
   </script>
 </body>
 </html>

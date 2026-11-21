@@ -8,7 +8,7 @@ type Settings = {
   overlap: boolean; keepOriginal: boolean; batchMode: boolean;
   lang: Language | 'auto'; settingsVersion: number;
 };
-type PluginMessage = Settings & { type: 'save-only' | 'generate' };
+type PluginMessage = (Settings & { type: 'save-only' | 'generate' }) | { type: 'ui-ready' };
 type ImageNode = SceneNode & GeometryMixin;
 type SavedSlice = { schemaVersion: 1; margins: Margins; overlap: boolean; width: number; height: number };
 type EditableSlice = { component: ComponentNode; margins: Margins; overlap: boolean; fill: ImagePaint; width: number; height: number; target: 'component' | 'instance' };
@@ -106,7 +106,15 @@ async function sendSelectionToUI() {
   const version = ++previewVersion;
   const node = figma.currentPage.selection[0];
   const edit = findEditable(node);
-  const instanceComponent = node?.type === 'INSTANCE' ? node.mainComponent : null;
+  let instanceComponent: ComponentNode | null = null;
+  if (node?.type === 'INSTANCE') {
+    try {
+      instanceComponent = await node.getMainComponentAsync();
+    } catch (error) {
+      console.error('读取实例主组件失败', error);
+    }
+  }
+  if (version !== previewVersion) return;
   const instanceEdit = instanceComponent ? findEditable(instanceComponent) : null;
   const view = edit ?? instanceEdit;
   const payload = edit ? editPayload(edit, true) : instanceEdit ? editPayload(instanceEdit, false) : null;
@@ -178,6 +186,7 @@ function generate(source: ImageNode, msg: Settings): ComponentNode {
 
 let generating = false;
 figma.ui.onmessage = async (msg: PluginMessage) => {
+  if (msg?.type === 'ui-ready') { void sendSelectionToUI(); return; }
   if (!msg || (msg.type !== 'save-only' && msg.type !== 'generate')) return;
   if (isLanguage(msg.lang)) currentLang = msg.lang;
   try {

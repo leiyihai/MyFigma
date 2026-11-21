@@ -163,6 +163,25 @@ test('a failed component update leaves the previous slices intact', async () => 
   assert.ok(env.notices.some(text => text.includes('更新失败')));
 });
 
+test('selecting an instance prompts for its main component instead of editing it', async () => {
+  const env = setup();
+  await env.figma.ui.onmessage(env.settings);
+  const component = env.created[0];
+  const instance = {
+    type: 'INSTANCE', name: '底板实例', width: 120, height: 90, fills: [], children: [],
+    async getMainComponentAsync() { return component; }
+  };
+  env.figma.currentPage.selection = [instance];
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(preview.edit.editable, false);
+  assert.equal(preview.edit.name, component.name);
+  await env.figma.ui.onmessage({ ...env.settings, left: 25 });
+  assert.equal(component.children.length, 9);
+  assert.equal(JSON.parse(component.data['myfigma.nineSlice.v1']).margins.left, 10);
+});
+
 test('editing a legacy component derives margins and writes the editable metadata', async () => {
   const env = setup();
   await env.figma.ui.onmessage(env.settings);
