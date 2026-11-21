@@ -7,7 +7,7 @@ import { figmaFixture } from './platform-fixture.mjs';
 
 test('built main script loads in an import-rejecting sandbox, stores pairing locally, and handles validate/import', async () => {
   const code = await readFile(new URL('../dist/code.js', import.meta.url), 'utf8');
-  const { api: figma, page } = figmaFixture();
+  const { api: figma, page, root } = figmaFixture();
   const replies = [];
   const events = new Map();
   let shownHtml,shownOptions;
@@ -62,6 +62,15 @@ test('built main script loads in an import-rejecting sandbox, stores pairing loc
     assert.equal(page.name, '测试游戏（g2）- 分类资源');
     assert.equal(page.children[0].children.length, 2);
     assert.equal(replies.filter(reply => reply.type === 'progress').at(-1).progress.done, 2);
+    await figma.ui.onmessage({ type: 'compare', requestId: 3, project: { id: 'g2', name: '测试游戏' } });
+    const compared = replies.find(reply => reply.requestId === 3);
+    assert.equal(compared.error, undefined);
+    assert.equal(compared.result.created, true);
+    assert.equal(compared.result.added, 2);
+    assert.equal(compared.result.groups, 1);
+    assert.equal(root.children.length, 2);
+    assert.equal(root.children[1].name, '测试游戏（g2）- 图集对照');
+    assert.equal(page.children[0].children.length, 2);
     events.get('currentpagechange')();
     assert.equal(replies.at(-1).type, 'page-changed');
   } finally { await f.cleanup(); }

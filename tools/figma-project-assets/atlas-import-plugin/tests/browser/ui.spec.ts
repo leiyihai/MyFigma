@@ -23,6 +23,7 @@ test('management dialog, full search, real scan, task lock, progress and hover g
       if(m.type==='validate')reply(window.currentPageInvalid?{valid:false,message:'非空且未绑定页面不可导入'}:{valid:true,message:'空白页可导入'});
       if(m.type==='preview'){window.plan={schemaVersion:1,added:m.scan.resources.length,updated:0,removed:0,unchanged:0,blocked:0,removalSuppressed:false,messages:[]};reply(window.plan);}
       if(m.type==='import'){window.imported=m.scan;e.source.postMessage({pluginMessage:{type:'progress',progress:{done:1,total:2}}},'*');window.finish=cancelled=>reply({...window.plan,applied:{added:cancelled?1:window.plan.added,updated:0,removed:0},failures:[],cancelled:!!cancelled});}
+      if(m.type==='compare'){window.compareCalls=(window.compareCalls||0)+1;reply({schemaVersion:1,pageName:'测试游戏（g2）- 图集对照',created:true,groups:2,added:2,removed:0,kept:0,messages:[]});}
     });
     </script>`);}
   });
@@ -123,6 +124,16 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await page.evaluate(()=>{(window as any).finish(false);});
     await expect(ui.locator('#phase')).toHaveText('就绪');
     await expect(ui.getByTestId('summary')).toContainText('上次操作');
+    // The optional comparison page stays absent through scan/import until requested.
+    expect(await page.evaluate(()=>(window as any).compareCalls||0)).toBe(0);
+    await expect(ui.getByTestId('compare-status')).toContainText('默认不创建');
+    await ui.getByRole('button',{name:'创建 / 更新对照页',exact:true}).hover();
+    await expect(ui.getByRole('tooltip')).toContainText('文件负担');
+    await ui.getByRole('button',{name:'创建 / 更新对照页',exact:true}).click();
+    await expect(ui.getByTestId('compare-status')).toContainText('测试游戏（g2）- 图集对照');
+    await expect(ui.getByTestId('compare-status')).toContainText('2 个实例');
+    expect(await page.evaluate(()=>(window as any).compareCalls)).toBe(1);
+    expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
     let releaseFailedScan!:()=>void;
     let failedScanStarted!:()=>void;
     const failedHeld=new Promise<void>(resolve=>{releaseFailedScan=resolve;});

@@ -23,7 +23,8 @@ const platform:Platform={
     const stop=cancellation?.onCancel(()=>{void rpc('cancel',{}).catch(()=>{});})||(()=>{});
     try{return await rpc<import('./api').ImportReport>('import',{scan});}
     finally{reportProgress=undefined;stop();}
-  }
+  },
+  compare:project=>rpc('compare',{project})
 };
 let workflow:Workflow|undefined;
 let uiError='';
@@ -92,9 +93,16 @@ function render() {
     ?` · 布局引用 ${summary.layoutReferences||0} · 九宫格 ${summary.layoutNineSlice||0}${summary.layoutIgnored?` · 公共引用忽略 ${summary.layoutIgnored}`:''}`:'';
   let summaryText=summary?`图集 ${summary.atlases} · 散图 ${summary.sprites} · 独立图片 ${summary.standalone} · 异常 ${summary.errors}${layout}${s?.scan?.complete?'':' · 扫描不完整'} · ${diff}`:plan?`上次操作 · ${diff}`:'尚未扫描';
   if(resultLine)summaryText+=` · ${resultLine}`;
+  const compare=s?.compare;
+  const compareButton=el<HTMLButtonElement>('compare');
+  compareButton.disabled=busy||!s?.selected;
+  el('compare-status').textContent=compare?(compare.created
+    ? `已创建「${compare.pageName}」：${compare.groups} 个分组 · ${compare.added} 个实例`
+    : `已更新「${compare.pageName}」：新增 ${compare.added} · 保留 ${compare.kept} · 移除 ${compare.removed}`)
+    :'可选：按源图集生成实例对照页，默认不创建。';
   el('summary').textContent=summaryText;
   const details=el<HTMLDetailsElement>('details');
-  const detailLines=[...(s?.scan?.errors||[]),...(plan?.messages||[]),...(result?.failures||[]).map(failure=>`失败 ${failure.name}：${failure.reason}`)];
+  const detailLines=[...(s?.scan?.errors||[]),...(plan?.messages||[]),...(result?.failures||[]).map(failure=>`失败 ${failure.name}：${failure.reason}`),...(compare?.messages||[])];
   el('details-body').textContent=detailLines.join('\n');
   el('details-summary').textContent=`异常与失败详情（${detailLines.length}）`;
   details.classList.toggle('hidden',!detailLines.length);
@@ -178,6 +186,7 @@ el('validate').onclick=()=>void run(()=>workflow!.validatePage());
 el('scan').onclick=()=>void run(()=>workflow!.scan());
 el('import').onclick=()=>void run(()=>workflow!.import());
 el('cancel').onclick=()=>{workflow?.cancel();};
+el('compare').onclick=()=>void run(()=>workflow!.comparePage());
 el('registration').onsubmit=event=>event.preventDefault();
 el('save').onclick=()=>{if(!el<HTMLFormElement>('registration').reportValidity())return;void run(async()=>{
   const project:Project={id:input('game-id').value.trim(),name:input('game-name').value.trim(),path:input('game-path').value.trim(),maintained:input('maintained').checked};

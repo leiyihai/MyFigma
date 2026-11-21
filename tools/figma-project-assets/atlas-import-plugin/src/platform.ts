@@ -11,6 +11,9 @@ const bindingKey = 'atlas.binding';
 const sourceKey = 'atlas.source';
 const syncKey = 'atlas.sync.v1';
 const categoryKey = 'atlas.category';
+const compareKey = 'atlas.compare';
+const compareGroupKey = 'atlas.compare.group';
+const compareItemKey = 'atlas.compare.item';
 function pageName(project: PublicProject): string { return `${project.name}（${project.id}）- 分类资源`; }
 function validate(page: PageNode, project: PublicProject) {
   let binding: {schemaVersion?:number;projectId?:string} | undefined;
@@ -458,7 +461,158 @@ async function loadPage(page: PageNode): Promise<void> {
   // dynamic-page documents require explicit loading before findAll().
   if(typeof page.loadAsync === 'function') await page.loadAsync();
 }
-export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFrame'|'createComponent'|'createRectangle'|'createImage'|'base64Decode'>): Platform {
+type CompareBinding = { schemaVersion: 1; projectId: string };
+type CompareItem = { identity: string; key: string; name: string; component: ComponentNode };
+function comparePageName(project: PublicProject): string { return `${project.name}（${project.id}）- 图集对照`; }
+function parseCompareBinding(raw: string): CompareBinding | undefined {
+  try {
+    const value = JSON.parse(raw) as Partial<CompareBinding> | null;
+    return value && value.schemaVersion === 1 && typeof value.projectId === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(value.projectId)
+      ? {schemaVersion:1,projectId:value.projectId} : undefined;
+  } catch { return undefined; }
+}
+function managedComparePage(root: DocumentNode, project: PublicProject): PageNode | undefined {
+  // A page is ours only through its binding; display names never grant ownership.
+  let corrupt: string | undefined;
+  for(const node of root.children) {
+    if(node.type !== 'PAGE') continue;
+    const raw = node.getPluginData(compareKey);
+    if(!raw) continue;
+    const binding = parseCompareBinding(raw);
+    if(!binding) { corrupt = corrupt || node.name; continue; }
+    if(binding.projectId === project.id) return node;
+  }
+  if(corrupt) throw new Error(`对照页「${corrupt}」的绑定已损坏，请删除或修复后重试`);
+  return undefined;
+}
+function createComparePage(root: DocumentNode, project: PublicProject, api: Pick<PluginAPI,'createPage'>): PageNode {
+  const page = api.createPage();
+  const wanted = comparePageName(project);
+  // Figma allows duplicate page names, but a tool suffix keeps an unbound user
+  // page visibly separate instead of implying we took it over.
+  const taken = root.children.some(node => node.type === 'PAGE' && node.name === wanted);
+  page.name = taken ? `${wanted}（工具创建）` : wanted;
+  page.setPluginData(compareKey, JSON.stringify({schemaVersion:1,projectId:project.id}));
+  return page;
+}
+function resourcePages(root: DocumentNode, project: PublicProject): PageNode[] {
+  const pages: PageNode[] = [];
+  for(const node of root.children) {
+    if(node.type !== 'PAGE') continue;
+    const raw = node.getPluginData(bindingKey);
+    if(!raw) continue;
+    try {
+      const binding = JSON.parse(raw) as {schemaVersion?:number;projectId?:string};
+      if(binding && binding.schemaVersion === 1 && binding.projectId === project.id) pages.push(node);
+    } catch { /* import guards report damaged bindings; comparison only reads valid ones */ }
+  }
+  return pages;
+}
+async function projectComponents(root: DocumentNode, project: PublicProject): Promise<Existing[]> {
+  // Sources live on main components; the comparison page itself is never a data source.
+  const result = new Map<string, Existing>();
+  for(const page of resourcePages(root, project)) {
+    await loadPage(page);
+    const parsed = existingComponents(page, project);
+    if(parsed.corrupt.length) throw new Error('存在来源记录损坏的组件，已停止生成对照页；请修复或移除后重试：' + parsed.corrupt.join('、'));
+    for(const item of parsed.items) {
+      if(!item.source.identity) continue;
+      const known = result.get(item.source.identity);
+      if(!known || (known.blocked && !item.blocked)) result.set(item.source.identity, item);
+    }
+  }
+  return [...result.values()];
+}
+function compareItems(existing: Existing[]): Map<string, CompareItem> {
+  const items = new Map<string, CompareItem>();
+  for(const item of existing) {
+    if(items.has(item.source.identity)) continue;
+    const atlas = item.source.kind === 'atlas';
+    items.set(item.source.identity, {
+      identity: item.source.identity,
+      // Group by the recorded source atlas, not by display name or category frame.
+      key: atlas ? `atlas:${item.source.relativePath}` : 'standalone',
+      name: atlas ? `图集：${item.source.relativePath}` : '独立图片',
+      component: item.component
+    });
+  }
+  return items;
+}
+function existingCompareInstances(page: PageNode): Map<string, InstanceNode[]> {
+  const found = new Map<string, InstanceNode[]>();
+  for(const node of page.findAll(candidate => candidate.type === 'INSTANCE') as InstanceNode[]) {
+    const identity = node.getPluginData(compareItemKey);
+    if(!identity) continue;
+    const list = found.get(identity) || [];
+    list.push(node); found.set(identity, list);
+  }
+  return found;
+}
+type CompareCounts = { added: number; removed: number; kept: number; groups: number; messages: string[] };
+function syncComparePage(page: PageNode, items: Map<string, CompareItem>, api: Pick<PluginAPI,'createFrame'>,
+  created: { instances: InstanceNode[]; frames: FrameNode[] }): CompareCounts {
+  const messages: string[] = [];
+  const existing = existingCompareInstances(page);
+  let removed = 0, kept = 0, added = 0;
+  // Keep one instance per source identity; stale or duplicated tool instances go away.
+  for(const [identity, instances] of existing) {
+    const keep = items.has(identity) ? instances[0] : undefined;
+    for(const instance of instances) {
+      if(instance === keep) continue;
+      instance.remove(); removed++;
+    }
+    if(keep) kept++;
+  }
+  const keys = [...new Set([...items.values()].map(item => item.key))].sort();
+  const names = new Map<string, string>();
+  for(const item of items.values()) names.set(item.key, item.name);
+  for(const node of [...page.children]) {
+    if(node.type !== 'FRAME') continue;
+    const key = node.getPluginData(compareGroupKey);
+    if(!key || keys.includes(key)) continue;
+    if(node.children.length === 0) { node.remove(); continue; }
+    messages.push(`对照页分组「${node.name}」仍有用户内容，已保留`);
+  }
+  const frames = new Map<string, FrameNode>();
+  for(const key of keys) {
+    let frame = page.children.find(node => node.type === 'FRAME' && node.getPluginData(compareGroupKey) === key) as FrameNode | undefined;
+    if(!frame) {
+      frame = api.createFrame();
+      page.appendChild(frame);
+      frame.name = names.get(key) || key;
+      frame.fills = [];
+      frame.resize(1200,100); frame.layoutMode = 'HORIZONTAL'; frame.layoutWrap = 'WRAP';
+      frame.primaryAxisSizingMode = 'FIXED'; frame.counterAxisSizingMode = 'AUTO';
+      frame.itemSpacing = 16; frame.counterAxisSpacing = 16;
+      frame.paddingTop = frame.paddingRight = frame.paddingBottom = frame.paddingLeft = 16;
+      frame.setPluginData(compareGroupKey, key);
+      created.frames.push(frame);
+    }
+    frames.set(key, frame);
+  }
+  for(const [identity, item] of items) {
+    const frame = frames.get(item.key)!;
+    const instance = existing.get(identity)?.[0];
+    if(instance) {
+      if(instance.parent !== frame) frame.appendChild(instance);
+      continue;
+    }
+    const copy = item.component.createInstance();
+    frame.appendChild(copy);
+    copy.setPluginData(compareItemKey, identity);
+    created.instances.push(copy);
+    added++;
+  }
+  // Stack group frames top to bottom after their contents define the height.
+  let y = 0;
+  for(const key of keys) {
+    const frame = frames.get(key)!;
+    frame.x = 0; frame.y = y;
+    y += (frame.height || 0) + 24;
+  }
+  return {added, removed, kept, groups: keys.length, messages};
+}
+export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'createPage'|'createFrame'|'createComponent'|'createRectangle'|'createImage'|'base64Decode'>): Platform {
   let busy = false;
   return {
     async validate(project) {return validate(api.currentPage,project);},
@@ -581,6 +735,30 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFra
           restoreBinding();
         }
         restoreInstances(instances,updatedIds);
+        throw error;
+      } finally {busy=false;}
+    },
+    async compare(project) {
+      if(busy) throw new Error('导入任务正在执行');
+      if(!project || typeof project.id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(project.id) ||
+         typeof project.name !== 'string' || !project.name.trim() || project.name.length > 200) throw new Error('项目信息无效');
+      busy = true;
+      const created: {instances: InstanceNode[]; frames: FrameNode[]} = {instances:[], frames:[]};
+      let createdPage: PageNode | undefined;
+      try {
+        const items = compareItems(await projectComponents(api.root, project));
+        if(!items.size) throw new Error('当前文件还没有该项目的主组件，请先导入主组件');
+        let page = managedComparePage(api.root, project);
+        if(!page) { page = createComparePage(api.root, project, api); createdPage = page; }
+        await loadPage(page);
+        const counts = syncComparePage(page, items, api, created);
+        return {schemaVersion:1, pageName:page.name, created:!!createdPage, groups:counts.groups,
+          added:counts.added, removed:counts.removed, kept:counts.kept, messages:counts.messages};
+      } catch(error) {
+        // Only this call's nodes are removed; existing instances and user edits stay.
+        for(const instance of created.instances) instance.remove();
+        for(const frame of created.frames) frame.remove();
+        if(createdPage) createdPage.remove();
         throw error;
       } finally {busy=false;}
     }
