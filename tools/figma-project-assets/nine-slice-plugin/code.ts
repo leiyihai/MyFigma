@@ -1,5 +1,5 @@
-import { createNineSlicePlan } from '../../../packages/nine-slice/src/index';
-import { createNineSliceComponent } from '../../../packages/nine-slice/src/figma';
+import { createNineSlicePlan } from '../packages/nine-slice/src/index';
+import { createNineSliceComponent } from '../packages/nine-slice/src/figma';
 
 type Language = 'zh' | 'en' | 'ja' | 'ko' | 'ru' | 'de' | 'fr';
 type Settings = {

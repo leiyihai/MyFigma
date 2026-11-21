@@ -33,7 +33,7 @@ npm run test:browser -- --grep 'small selected'
 
 ### 共享核心小切片
 
-`cd packages/nine-slice && npm test`：
+`cd tools/figma-project-assets/packages/nine-slice && npm test`：
 
 1. 先用公共入口与空规划实现得到红灯：实际 `[]`，期望已知 100×80、四边 10/12/20/8 的九片几何及约束；实现后通过。
 2. 非法边距测试先失败 `Missing expected exception (RangeError)`；加入校验后通过。

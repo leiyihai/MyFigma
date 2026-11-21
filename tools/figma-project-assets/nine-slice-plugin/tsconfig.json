@@ -11,6 +11,6 @@
   },
   "include": [
     "code.ts",
-    "../../../packages/nine-slice/src/**/*.ts"
+    "../packages/nine-slice/src/**/*.ts"
   ]
 }
