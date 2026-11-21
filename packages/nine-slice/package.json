@@ -1,0 +1,25 @@
+{
+  "name": "@myfigma/nine-slice",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./figma": {
+      "types": "./dist/figma.d.ts",
+      "default": "./dist/figma.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "1.121.0",
+    "typescript": "5.9.3"
+  }
+}

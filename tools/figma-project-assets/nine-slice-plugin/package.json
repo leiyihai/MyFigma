@@ -1,0 +1,16 @@
+{
+  "name": "myfigma-nine-slice-plugin",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test tests/*.test.cjs && playwright test",
+    "test:browser": "npm run build && playwright test"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "1.121.0",
+    "@playwright/test": "1.56.1",
+    "esbuild": "0.25.12",
+    "typescript": "5.9.3"
+  }
+}
