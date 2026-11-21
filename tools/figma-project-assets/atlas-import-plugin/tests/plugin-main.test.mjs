@@ -5,13 +5,13 @@ import { readFile } from 'node:fs/promises';
 import { fixture } from '../../local-helper/tests/fixture.mjs';
 import { figmaFixture } from './platform-fixture.mjs';
 
-test('built main script loads in an import-rejecting sandbox and handles validate and import messages', async () => {
+test('built main script loads in an import-rejecting sandbox, stores pairing locally, and handles validate/import', async () => {
   const code = await readFile(new URL('../dist/code.js', import.meta.url), 'utf8');
   const { api: figma, page } = figmaFixture();
   const replies = [];
   const events = new Map();
-  let shownHtml;
-  figma.showUI = html => { shownHtml = html; };
+  let shownHtml,shownOptions;
+  figma.showUI = (html,options) => { shownHtml = html; shownOptions = options; };
   figma.ui = { postMessage: message => replies.push(message) };
   figma.on = (name, handler) => events.set(name, handler);
   // Use a real secure evaluator, not a regex pretending to be the Figma runtime.
@@ -19,6 +19,22 @@ test('built main script loads in an import-rejecting sandbox and handles validat
   const sandbox = new globalThis.Compartment({ figma, __html__: '<p>plugin UI</p>', setTimeout });
   sandbox.evaluate(code);
   assert.equal(shownHtml, '<p>plugin UI</p>');
+  assert.equal(shownOptions.width, 520);
+  assert.equal(shownOptions.height, 720);
+  const pairing={schemaVersion:1,address:'http://localhost:38473',token:'a'.repeat(64)};
+  await figma.ui.onmessage({type:'pairing-load',requestId:10});
+  assert.equal(replies.find(reply=>reply.requestId===10).result,null);
+  await figma.ui.onmessage({type:'pairing-save',requestId:11,pairing});
+  assert.equal(replies.find(reply=>reply.requestId===11).result,true);
+  await figma.ui.onmessage({type:'pairing-load',requestId:12});
+  assert.deepEqual(replies.find(reply=>reply.requestId===12).result,pairing);
+  assert.equal(JSON.stringify(page).includes(pairing.token),false);
+  await figma.ui.onmessage({type:'pairing-save',requestId:13,pairing:{...pairing,token:'bad'}});
+  assert.match(replies.find(reply=>reply.requestId===13).error,/无效/);
+  await figma.ui.onmessage({type:'pairing-clear',requestId:14});
+  assert.equal(replies.find(reply=>reply.requestId===14).result,true);
+  await figma.ui.onmessage({type:'pairing-load',requestId:15});
+  assert.equal(replies.find(reply=>reply.requestId===15).result,null);
   await figma.ui.onmessage({ type: 'validate', requestId: 1, project: { id: 'g2', name: '测试游戏' } });
   assert.equal(replies.find(reply => reply.requestId === 1).result.valid, true);
 

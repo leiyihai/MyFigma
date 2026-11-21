@@ -9,12 +9,15 @@ test('management dialog, full search, real scan, task lock, progress and hover g
   const f=await fixture();
   const server=createServer(async(req,res)=>{
     if(req.url==='/ui.html') {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(await readFile(new URL('../../dist/ui.html',import.meta.url)));}
-    else {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:460px;height:750px"></iframe>
+    else {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:520px;height:720px"></iframe>
     <script>
-    window.imported=null;
+    window.imported=null;window.pairing=null;
     addEventListener('message',e=>{
       const m=e.data.pluginMessage;if(!m||!m.requestId)return;
       const reply=result=>e.source.postMessage({pluginMessage:{type:'result',requestId:m.requestId,result}},'*');
+      if(m.type==='pairing-load'){reply(window.pairing);return;}
+      if(m.type==='pairing-save'){window.pairing=m.pairing;reply(true);return;}
+      if(m.type==='pairing-clear'){window.pairing=null;reply(true);return;}
       if(m.type==='validate')reply(window.currentPageInvalid?{valid:false,message:'非空且未绑定页面不可导入'}:{valid:true,message:'空白页可导入'});
       if(m.type==='import'){window.imported=m.scan;e.source.postMessage({pluginMessage:{type:'progress',progress:{done:1,total:2}}},'*');window.finish=()=>reply(null);}
     });
@@ -42,13 +45,26 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await ui.getByLabel('长期维护', {exact:true}).uncheck();
     await ui.getByRole('button',{name:'保存登记',exact:true}).click();
     await expect(ui.getByTestId('project-list')).toContainText('临时游戏');
+    await expect(ui.getByTestId('project-list')).toContainText(f.project);
+    expect(await ui.locator('#management').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
+    await ui.getByRole('note',{name:'项目编号说明'}).hover();
+    await expect(ui.locator('#game-id-help').locator('..').locator('.tooltip')).toContainText('保存后不可修改');
+    await ui.getByRole('button',{name:'编辑',exact:true}).first().click();
+    await expect(ui.getByLabel('项目编号', {exact:true})).toBeDisabled();
+    await expect(ui.locator('#game-id-note')).toContainText('编号已锁定');
+    await expect(ui.locator('#game-id')).toHaveCSS('border-top-style','dashed');
+    await ui.getByRole('button',{name:'新建登记',exact:true}).click();
+    await expect(ui.getByLabel('项目编号', {exact:true})).toBeEnabled();
     await ui.getByRole('button',{name:'关闭管理',exact:true}).click();
-    await expect(ui.getByLabel('选择游戏', {exact:true}).locator('option')).toHaveCount(2);
+    await expect(ui.locator('#project option')).toHaveCount(2);
+    await expect(ui.getByLabel('记住本机配对', {exact:true})).toBeChecked();
+    expect(await page.evaluate(()=>(window as any).pairing?.token)).toBe(f.token);
+    expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
     await ui.getByLabel('搜索名称或编号').fill('g3');
-    await expect(ui.getByLabel('选择游戏', {exact:true}).locator('option')).toHaveCount(2);
-    await expect(ui.getByLabel('选择游戏', {exact:true})).toContainText('临时游戏');
+    await expect(ui.locator('#project option')).toHaveCount(2);
+    await expect(ui.locator('#project')).toContainText('临时游戏');
     await ui.getByLabel('搜索名称或编号').fill('');
-    await ui.getByLabel('选择游戏', {exact:true}).selectOption('g2');
+    await ui.locator('#project').selectOption('g2');
     // Hold a real helper request so the page change occurs deterministically during scanning.
     let releaseScan!:()=>void;
     let scanStarted!:()=>void;
@@ -75,12 +91,12 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await ui.getByRole('button',{name:'导入主组件',exact:true}).hover();
     await expect(ui.getByRole('tooltip')).toContainText('仅在空白页');
     await ui.getByRole('button',{name:'导入主组件',exact:true}).click();
-    await expect(ui.getByLabel('选择游戏', {exact:true})).toBeDisabled();
+    await expect(ui.locator('#project')).toBeDisabled();
     await expect(ui.getByRole('button',{name:'扫描资源',exact:true})).toBeDisabled();
     await expect(ui.getByRole('button',{name:'导入主组件',exact:true})).toBeDisabled();
     await expect(ui.getByTestId('progress')).toContainText('1 / 2');
     await page.evaluate(()=>{(window as any).finish();});
-    await expect(ui.getByLabel('选择游戏', {exact:true})).toBeEnabled();
+    await expect(ui.locator('#project')).toBeEnabled();
     expect(await page.evaluate(()=>(window as any).imported.resources.length)).toBe(2);
     expect(await page.evaluate(()=>'path' in (window as any).imported.project)).toBe(false);
     let releaseFailedScan!:()=>void;

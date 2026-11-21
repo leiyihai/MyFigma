@@ -1,42 +1,154 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-*{box-sizing:border-box}body{margin:0;padding:16px;background:var(--figma-color-bg,#fafafa);color:var(--figma-color-text,#222);font:12px/1.5 system-ui,sans-serif}h1{font-size:18px;margin:0 0 12px}h2{font-size:14px;margin:0 0 8px}section{border-bottom:1px solid #bbb;padding:12px 0}label{display:block;margin:8px 0}input:not([type=checkbox]),select{width:100%;margin-top:4px;padding:7px;background:var(--figma-color-bg,#fff);color:inherit;border:1px solid #888;border-radius:4px}button{padding:7px 10px;margin:4px 0;border:1px solid #888;border-radius:4px;background:var(--figma-color-bg-secondary,#eee);color:inherit;cursor:pointer}button:hover:not(:disabled){background:var(--figma-color-bg-hover,#ddd)}button:disabled{opacity:.5;cursor:not-allowed}.primary{font-weight:600;border:2px solid currentColor}.muted{color:var(--figma-color-text-secondary,#555)}[role=alert]{color:var(--figma-color-text-danger,#a20);white-space:pre-wrap;overflow-wrap:anywhere}dialog{width:min(410px,95vw);max-height:90vh;overflow:auto;background:var(--figma-color-bg,#fff);color:inherit;border:1px solid #888;border-radius:8px}dialog::backdrop{background:#0005}.row{display:flex;gap:8px;align-items:center;justify-content:space-between}.entry{border-bottom:1px solid #bbb;padding:8px 0;overflow-wrap:anywhere}.action{position:relative;display:inline-block}.tooltip{display:none;position:absolute;z-index:20;bottom:100%;left:0;min-width:180px;max-width:280px;background:#222;color:#fff;padding:7px;border-radius:4px;font-weight:400;pointer-events:none}.action:hover>.tooltip,.action:focus-within>.tooltip{display:block}progress{width:100%}#details{white-space:pre-wrap;overflow-wrap:anywhere;max-height:90px;overflow:auto}.small{font-size:11px}
+:root{color-scheme:light dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;padding:12px;overflow:hidden;display:flex;flex-direction:column;gap:8px;background:var(--figma-color-bg,#fafafa);color:var(--figma-color-text,#222);font:12px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+h1,h2,h3,p{margin:0}
+h1{font-size:19px;letter-spacing:-.02em;line-height:1.2}
+h2{font-size:12px;font-weight:650;letter-spacing:.01em}
+h3{font-size:13px}
+.app-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 2px}
+.kicker{font:600 9px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.14em;color:var(--figma-color-text-secondary,#666);margin-bottom:4px}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid var(--figma-color-border,#d9d9d9);border-radius:99px;font-size:11px;color:var(--figma-color-text-secondary,#555);white-space:nowrap}
+.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:#9b9b9b}
+.badge.connected{color:var(--figma-color-text-success,#0a7a43);border-color:var(--figma-color-border-success,#9ed8b8)}
+.badge.connected::before{background:var(--figma-color-icon-success,#14ae5c)}
+.app-main{display:flex;flex-direction:column;gap:8px;min-height:0;overflow:hidden}
+.card{border:1px solid var(--figma-color-border,#dedede);border-radius:9px;background:var(--figma-color-bg,#fff);padding:10px 11px;min-width:0}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px}
+.chip{font-size:10px;padding:2px 6px;border-radius:99px;background:var(--figma-color-bg-secondary,#f0f0f0);color:var(--figma-color-text-secondary,#666);white-space:nowrap}
+.muted{color:var(--figma-color-text-secondary,#666)}
+.small{font-size:11px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.grid-project{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:8px}
+label{display:block;min-width:0}
+label>span{display:block;margin-bottom:3px;font-size:11px;color:var(--figma-color-text-secondary,#555)}
+input:not([type=checkbox]),select{width:100%;min-width:0;padding:6px 7px;background:var(--figma-color-bg,#fff);color:inherit;border:1px solid var(--figma-color-border-strong,#999);border-radius:5px;font:inherit}
+input:not([type=checkbox]):focus,select:focus,button:focus-visible,.help:focus-visible{outline:2px solid var(--figma-color-border-brand,#0d99ff);outline-offset:1px}
+input:disabled,select:disabled{background:repeating-linear-gradient(135deg,var(--figma-color-bg-secondary,#f1f1f1),var(--figma-color-bg-secondary,#f1f1f1) 5px,var(--figma-color-bg,#fff) 5px,var(--figma-color-bg,#fff) 10px);color:var(--figma-color-text-secondary,#777);border-style:dashed;cursor:not-allowed;opacity:1}
+button{padding:6px 9px;border:1px solid var(--figma-color-border-strong,#999);border-radius:5px;background:var(--figma-color-bg-secondary,#eee);color:inherit;font:inherit;cursor:pointer;white-space:nowrap}
+button:hover:not(:disabled){background:var(--figma-color-bg-hover,#e0e0e0)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--figma-color-bg-brand,#0d99ff);border-color:var(--figma-color-border-brand,#0d99ff);color:#fff;font-weight:650}
+button.primary:hover:not(:disabled){background:var(--figma-color-bg-brand-hover,#007be5)}
+button.quiet{background:transparent;border-color:var(--figma-color-border,#ccc)}
+.inline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.inline>button{margin-left:auto}
+.check{display:inline-flex;align-items:center;gap:5px;color:var(--figma-color-text-secondary,#555);font-size:11px}
+.actions{display:flex;align-items:center;gap:8px;margin-top:7px}
+.actions .primary{flex:1}
+.status-line{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
+.summary-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px}
+#summary{font-size:11px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#details{white-space:pre-wrap;overflow-wrap:anywhere;max-height:44px;overflow:auto;font-size:11px;color:var(--figma-color-text-danger,#a20);margin-top:4px}
+#error{white-space:pre-wrap;overflow-wrap:anywhere;max-height:46px;overflow:auto;color:var(--figma-color-text-danger,#a20);font-size:11px;margin-top:3px}
+.hidden{display:none!important}
+progress{width:100%;height:6px;margin:5px 0 2px;accent-color:var(--figma-color-bg-brand,#0d99ff)}
+.action{position:relative;display:inline-block}
+.tooltip{display:none;position:absolute;z-index:30;bottom:calc(100% + 4px);left:0;min-width:190px;max-width:270px;background:#1f1f1f;color:#fff;padding:7px 8px;border-radius:5px;font-weight:400;line-height:1.45;pointer-events:none;box-shadow:0 4px 14px #0003}
+.action:hover>.tooltip,.action:focus-within>.tooltip{display:block}
+.help-wrap{position:relative;display:inline-flex;vertical-align:middle}
+.help{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;margin-left:4px;border:1px solid var(--figma-color-border-strong,#999);border-radius:50%;font:700 9px/1 system-ui;color:var(--figma-color-text-secondary,#666);cursor:help}
+.help-wrap:hover .tooltip,.help-wrap:focus-within .tooltip{display:block}
+.field-row{display:flex;align-items:center;gap:2px;margin-bottom:3px}
+.field-row>span:first-child{font-size:11px;color:var(--figma-color-text-secondary,#555)}
+.field-note{margin-top:3px;font-size:10px;line-height:1.35;color:var(--figma-color-text-secondary,#777)}
+.field-note.locked{color:var(--figma-color-text-warning,#8a5a00)}
+dialog{width:calc(100vw - 16px);height:calc(100vh - 16px);max-width:none;max-height:none;padding:0;overflow:hidden;background:var(--figma-color-bg,#fff);color:inherit;border:1px solid var(--figma-color-border-strong,#999);border-radius:9px}
+dialog::backdrop{background:#0006}
+.dialog-shell{height:100%;display:flex;flex-direction:column;min-height:0}
+.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-bottom:1px solid var(--figma-color-border,#ddd)}
+.dialog-grid{display:grid;grid-template-columns:190px minmax(0,1fr);min-height:0;flex:1}
+.project-pane{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--figma-color-border,#ddd);padding:9px}
+#project-list{overflow-y:auto;overflow-x:hidden;min-height:0;padding-right:2px}
+.entry{border:1px solid var(--figma-color-border,#ddd);border-radius:6px;padding:7px;margin-bottom:6px;background:var(--figma-color-bg,#fff);min-width:0}
+.entry.active{border-color:var(--figma-color-border-brand,#0d99ff);box-shadow:0 0 0 1px var(--figma-color-border-brand,#0d99ff)}
+.entry-name{font-weight:650;font-size:11px;line-height:1.35;overflow-wrap:anywhere}
+.entry-path{font:10px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--figma-color-text-secondary,#777);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.entry-meta{display:flex;align-items:center;justify-content:space-between;gap:4px;margin-top:4px}
+.entry-actions{display:flex;gap:3px}
+.entry-actions button{padding:2px 5px;font-size:10px}
+.empty{padding:14px 8px;text-align:center;color:var(--figma-color-text-secondary,#777);font-size:11px}
+.edit-pane{display:flex;flex-direction:column;min-height:0;padding:10px 11px;overflow:hidden}
+.edit-pane form{display:flex;flex-direction:column;gap:7px;min-height:0;height:100%}
+.form-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.form-head h3{font-size:12px}
+.form-actions{display:flex;gap:7px;margin-top:auto;padding-top:4px}
+.form-actions .primary{flex:1}
 </style></head><body>
-<h1>项目图集导入</h1>
-<section aria-label="本机助手">
-<div class="row"><strong>本机助手</strong><span id="connection" data-testid="connection">未连接</span></div>
-<p class="muted small">先启动 figma-assets-helper，再从本机应用数据的 token 文件复制配对令牌。令牌仅保留在本窗口内存。</p>
-<label>助手地址<input id="address" value="http://localhost:38473" spellcheck="false"></label>
-<label>配对令牌<input id="token" type="password" autocomplete="off" spellcheck="false"></label>
-<button id="connect" title="连接已启动的本机助手；需要本机 token。连接失败时请检查启动状态和本地网络权限。">连接助手</button>
+<header class="app-header">
+  <div><p class="kicker">LOCAL ATLAS TOOL</p><h1>项目图集导入</h1></div>
+  <span id="connection" data-testid="connection" class="badge">未连接</span>
+</header>
+
+<main class="app-main">
+<section class="card" aria-label="本机助手">
+  <div class="card-head"><h2>本机助手</h2><span id="pairing-status" class="chip">首次配对后自动记住</span></div>
+  <p class="muted small" style="margin-bottom:7px">首次启动需从本机 token 文件复制令牌；之后将自动连接。</p>
+  <div class="grid-2">
+    <label><span>助手地址</span><input id="address" value="http://localhost:38473" spellcheck="false"></label>
+    <label><span>配对令牌</span><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴 token 文件中的 64 位令牌"></label>
+  </div>
+  <div class="inline" style="margin-top:7px">
+    <button id="connect" title="连接已启动的本机助手；需要本机 token。连接失败时请检查启动状态和本地网络权限。">连接助手</button>
+    <label class="check"><input id="remember" type="checkbox" checked> 记住本机配对</label>
+    <button id="forget" class="quiet" disabled title="清除本机插件保存的配对信息；不会停止助手或删除项目登记。">忘记配对</button>
+  </div>
 </section>
-<section aria-label="游戏项目">
-<div class="row"><h2>游戏项目</h2><button id="manage" title="维护本机共享的游戏登记、资源目录和长期维护标记；任务执行中不可修改。">管理项目</button></div>
-<label>搜索名称或编号<input id="search" placeholder="留空仅显示长期维护游戏"></label>
-<label for="project">选择游戏</label><select id="project"><option value="">请选择游戏</option></select>
-<p id="selected" class="muted"></p>
+
+<section class="card" aria-label="游戏项目">
+  <div class="card-head"><h2>游戏项目</h2><button id="manage" title="维护本机共享的游戏登记、资源目录和长期维护标记；任务执行中不可修改。">管理项目</button></div>
+  <div class="grid-project">
+    <label><span>搜索名称或编号</span><input id="search" placeholder="留空仅显示长期维护游戏"></label>
+    <label for="project"><span>选择游戏</span><select id="project"><option value="">请选择游戏</option></select></label>
+  </div>
+  <p id="selected" class="muted small" style="margin-top:5px"></p>
 </section>
-<section aria-label="页面与资源">
-<div class="row"><h2>页面校验</h2><button id="validate" title="检查当前页是否为空白且项目绑定一致；不会修改页面。">校验当前页</button></div>
-<p id="page-status">请选择游戏后校验页面</p>
-<p class="muted small">仅支持登记目录直接包含的小型对象式 JSON + PNG 图集；暂归未分类。非空页受保护，本版本不做增量。</p>
-<button id="scan" title="扫描登记目录中的小型 JSON + PNG 图集并实际拆图；仅空白且绑定一致的页面可开始。">扫描资源</button>
-<p id="summary" data-testid="summary">尚未扫描</p><div id="details"></div>
-<button id="import" class="primary" title="仅在空白页导入扫描所得的散图普通主组件；绑定并重命名当前页，不上传整张图集。">导入主组件</button>
+
+<section class="card" aria-label="页面与资源">
+  <div class="card-head"><h2>页面校验</h2><button id="validate" title="检查当前页是否为空白且项目绑定一致；不会修改页面。">校验当前页</button></div>
+  <p id="page-status" class="small">请选择游戏后校验页面</p>
+  <p class="muted small" style="margin-top:3px">仅支持登记目录直接包含的小型对象式 JSON + PNG 图集；暂归未分类。非空页受保护，本版本不做增量。</p>
+  <div class="summary-row"><span id="summary" data-testid="summary">尚未扫描</span><button id="scan" title="扫描登记目录中的小型 JSON + PNG 图集并实际拆图；仅空白且绑定一致的页面可开始。">扫描资源</button></div>
+  <div id="details" class="hidden"></div>
+  <div class="actions"><button id="import" class="primary" title="仅在空白页导入扫描所得的散图普通主组件；绑定并重命名当前页，不上传整张图集。">导入主组件</button></div>
 </section>
-<section aria-label="任务状态"><div id="phase">未连接</div><progress id="bar" max="1" value="0"></progress><div id="progress" data-testid="progress">0 / 0</div><p id="error" role="alert"></p></section>
+
+<section class="card" aria-label="任务状态">
+  <div class="status-line"><span id="phase">未连接</span><span id="progress" data-testid="progress" class="muted small">0 / 0</span></div>
+  <progress id="bar" max="1" value="0"></progress>
+  <p id="error" role="alert"></p>
+</section>
+</main>
+
 <dialog id="management" aria-labelledby="management-title">
-<div class="row"><h2 id="management-title">管理游戏项目</h2><button id="close" title="关闭管理弹窗；尚未保存的输入不会写入助手。">关闭管理</button></div>
-<div id="project-list" data-testid="project-list"></div>
-<form id="registration">
-<label>游戏名称<input id="game-name" required maxlength="100"></label>
-<label>项目编号<input id="game-id" required pattern="[A-Za-z0-9_-]{1,64}" maxlength="64"></label>
-<label>资源目录<input id="game-path" required placeholder="直接包含 JSON 和 PNG 的本机目录"></label>
-<label><input id="maintained" type="checkbox" checked> 长期维护</label>
-<button type="button" id="save" title="在助手侧保存登记；所有本机 Figma 文件复用。项目编号是稳定身份，编辑时不可更改。">保存登记</button>
-<button type="button" id="new" title="清空编辑表单，登记另一个游戏；不删除已保存项目。">新建登记</button>
-</form>
+  <div class="dialog-shell">
+    <div class="dialog-head"><h2 id="management-title">管理游戏项目</h2><button id="close" title="关闭管理弹窗；尚未保存的输入不会写入助手。">关闭管理</button></div>
+    <div class="dialog-grid">
+      <aside class="project-pane" aria-label="已登记项目">
+        <div class="status-line"><h3>已登记</h3><span id="project-count" class="chip">0 个</span></div>
+        <div id="project-list" data-testid="project-list"></div>
+      </aside>
+      <div class="edit-pane">
+        <form id="registration">
+          <div class="form-head"><h3 id="form-title">新建登记</h3><button type="button" id="new" title="清空编辑表单，登记另一个游戏；不删除已保存项目。">新建登记</button></div>
+          <label><span>游戏名称</span><input id="game-name" required maxlength="100"></label>
+          <div>
+            <div class="field-row"><label for="game-id"><span>项目编号</span></label><span class="help-wrap"><span id="game-id-help" class="help" tabindex="0" role="note" aria-label="项目编号说明" title="项目编号用于识别游戏和资源身份，例如 g1008。保存后不可修改；填错请删除登记后重新添加。">?</span><span class="tooltip" role="tooltip">项目编号用于识别游戏和资源身份，例如 g1008。保存后不可修改；填错请删除登记后重新添加。</span></span></div>
+            <input id="game-id" required pattern="[A-Za-z0-9_-]{1,64}" maxlength="64" aria-describedby="game-id-note">
+            <p id="game-id-note" class="field-note">用于识别游戏与资源身份，保存后不可修改。</p>
+          </div>
+          <label><span>资源目录</span><input id="game-path" required placeholder="直接包含 JSON 和 PNG 的本机目录"></label>
+          <label class="check"><input id="maintained" type="checkbox" checked> 长期维护</label>
+          <div class="form-actions">
+            <button type="button" id="save" class="primary" title="在助手侧保存登记；所有本机 Figma 文件复用。项目编号是稳定身份，编辑时不可更改。">保存登记</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
 </dialog>
 <!-- SCRIPT -->
 </body></html>

@@ -18,6 +18,7 @@ export interface Platform {
 }
 
 class HelperConnectionError extends Error {}
+export class HelperAuthError extends HelperConnectionError {}
 export class HelperClient {
   constructor(private base: string, private token: string) {
     if (!/^http:\/\/(?:localhost|127\.0\.0\.1):\d{1,5}$/.test(base)) throw new Error('仅允许本机 localhost 或 127.0.0.1 HTTP 助手');
@@ -31,7 +32,7 @@ export class HelperClient {
       }, body: body === undefined ? undefined : JSON.stringify(body), cache:'no-store', credentials:'omit', redirect:'error',
       signal: AbortSignal.timeout(30000)});
     } catch { throw new HelperConnectionError('助手未连接：请启动 figma-assets-helper，检查浏览器本地网络权限后重新连接'); }
-    if (response.status === 401) throw new HelperConnectionError('配对失败：请从本机 token 文件重新复制令牌');
+    if (response.status === 401) throw new HelperAuthError('配对失败：请从本机 token 文件重新复制令牌');
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
       throw new Error(typeof error.error === 'string' ? error.error : '助手请求失败');

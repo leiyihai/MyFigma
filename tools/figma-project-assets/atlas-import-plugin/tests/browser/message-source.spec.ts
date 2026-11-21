@@ -23,8 +23,11 @@ for(const origin of ['https://www.figma.com','https://untrusted.example']) {
       <script>addEventListener('message',e=>{
         const m=e.data?.pluginMessage;
         if(!m?.requestId||e.source!==frames[0])return;
+        if(m.type==='pairing-load'){frames[0].frames[0].postMessage({pluginMessage:{type:'result',requestId:m.requestId,result:null}},'*');return;}
+        if(m.type==='pairing-save'||m.type==='pairing-clear'){frames[0].frames[0].postMessage({pluginMessage:{type:'result',requestId:m.requestId,result:true}},'*');return;}
         if(m.type==='validate'){
           window.validationRequest=m.requestId;
+          window.validationCount=(window.validationCount||0)+1;
           frames[0].frames[0].postMessage({pluginMessage:{type:'result',requestId:m.requestId,result:{valid:true,message:'顶层宿主校验完成'}}},'*');
         }
       });</script>`}));
@@ -34,7 +37,7 @@ for(const origin of ['https://www.figma.com','https://untrusted.example']) {
     await ui.locator('#connect').click();
     await expect(ui.locator('#connection')).toHaveText('已连接');
     await ui.locator('#project').selectOption('g2');
-    await expect.poll(()=>page.evaluate(()=>(window as any).validationRequest)).toBe(1);
+    await expect.poll(()=>page.evaluate(()=>(window as any).validationCount)).toBe(1);
     if(origin==='https://www.figma.com') {
       await expect(ui.locator('#page-status')).toHaveText('顶层宿主校验完成');
       await expect(ui.locator('#phase')).toHaveText('就绪');
