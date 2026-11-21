@@ -44,17 +44,22 @@ function imageFill(node: ImageNode): ImagePaint | undefined {
 function isSliceNode(node: SceneNode): node is RectangleNode {
   return node.type === 'RECTANGLE' && /^切片 [1-3]-[1-3]$/.test(node.name);
 }
-function deriveMargins(component: ComponentNode): Margins {
+function deriveSlice(component: ComponentNode): { margins: Margins; overlap: boolean } {
   const byName = new Map(component.children.filter(isSliceNode).map(node => [node.name, node]));
+  const children = [...byName.values()];
+  const overlap = children.some(child => !Number.isInteger(child.x) || !Number.isInteger(child.y));
   const centerX = byName.get('切片 1-2');
   const centerY = byName.get('切片 2-1');
   const right = byName.get('切片 1-3');
   const bottom = byName.get('切片 3-1');
   return {
-    left: centerX?.x ?? 0,
-    top: centerY?.y ?? 0,
-    right: right ? component.width - (right.x + right.width) : 0,
-    bottom: bottom ? component.height - (bottom.y + bottom.height) : 0
+    overlap,
+    margins: {
+      left: centerX ? centerX.x + (overlap ? 0.5 : 0) : 0,
+      top: centerY?.y ?? 0,
+      right: right ? right.width - (overlap ? 0.5 : 0) : 0,
+      bottom: bottom?.height ?? 0
+    }
   };
 }
 function savedMargins(component: ComponentNode): SavedSlice | undefined {
@@ -69,19 +74,20 @@ function savedMargins(component: ComponentNode): SavedSlice | undefined {
 }
 function findEditable(node: SceneNode | undefined): EditableSlice | null {
   if (!node) return null;
-  const component = node.type === 'COMPONENT' ? node : node.type === 'INSTANCE' ? node.mainComponent : null;
+  const component = node.type === 'COMPONENT' ? node : null;
   if (!component || !component.children.length || !component.children.every(isSliceNode)) return null;
   const fills = component.children.map(child => imageFill(child)).filter((fill): fill is ImagePaint => !!fill);
   if (!fills.length || new Set(fills.map(fill => fill.imageHash)).size !== 1) return null;
   const saved = savedMargins(component);
-  const margins = saved?.margins ?? deriveMargins(component);
-  const overlap = saved?.overlap ?? false;
+  const derived = deriveSlice(component);
+  const margins = saved?.margins ?? derived.margins;
+  const overlap = saved?.overlap ?? derived.overlap;
   try {
     createNineSlicePlan(component, margins, overlap);
   } catch {
     return null;
   }
-  return { component, margins, overlap, fill: fills[0], width: component.width, height: component.height, target: node.type === 'INSTANCE' ? 'instance' : 'component' };
+  return { component, margins, overlap, fill: fills[0], width: component.width, height: component.height, target: 'component' };
 }
 function rememberSlice(component: ComponentNode, settings: Settings, overlap: boolean): void {
   const margins: Margins = { left: settings.left, top: settings.top, right: settings.right, bottom: settings.bottom };
@@ -91,8 +97,8 @@ function rememberSlice(component: ComponentNode, settings: Settings, overlap: bo
     console.error('保存九宫格信息失败', error);
   }
 }
-function editPayload(edit: EditableSlice) {
-  return { margins: edit.margins, overlap: edit.overlap, target: edit.target, name: edit.component.name };
+function editPayload(edit: EditableSlice, editable: boolean) {
+  return { margins: edit.margins, overlap: edit.overlap, target: edit.target, name: edit.component.name, editable };
 }
 
 let previewVersion = 0;
@@ -100,23 +106,27 @@ async function sendSelectionToUI() {
   const version = ++previewVersion;
   const node = figma.currentPage.selection[0];
   const edit = findEditable(node);
-  const fill = edit?.fill ?? (node && isImageNode(node) ? imageFill(node) : undefined);
-  const width = edit?.width ?? (node && 'width' in node ? node.width : 0);
-  const height = edit?.height ?? (node && 'height' in node ? node.height : 0);
+  const instanceComponent = node?.type === 'INSTANCE' ? node.mainComponent : null;
+  const instanceEdit = instanceComponent ? findEditable(instanceComponent) : null;
+  const view = edit ?? instanceEdit;
+  const payload = edit ? editPayload(edit, true) : instanceEdit ? editPayload(instanceEdit, false) : null;
+  const fill = view?.fill ?? (node && isImageNode(node) ? imageFill(node) : undefined);
+  const width = view?.width ?? (node && 'width' in node ? node.width : 0);
+  const height = view?.height ?? (node && 'height' in node ? node.height : 0);
   try {
     const hash = fill?.imageHash;
     const image = hash ? figma.getImageByHash(hash) : null;
     if (image) {
       const bytes = await image.getBytesAsync();
       if (version === previewVersion) {
-        figma.ui.postMessage({ type: 'update-preview', bytes, width, height, edit: edit ? editPayload(edit) : null });
+        figma.ui.postMessage({ type: 'update-preview', bytes, width, height, edit: payload });
       }
       return;
     }
   } catch (error) {
     console.error('读取图片预览失败', error);
   }
-  if (version === previewVersion) figma.ui.postMessage({ type: 'update-preview', bytes: null, edit: edit ? editPayload(edit) : null });
+  if (version === previewVersion) figma.ui.postMessage({ type: 'update-preview', bytes: null, edit: payload });
 }
 
 async function initSettings() {

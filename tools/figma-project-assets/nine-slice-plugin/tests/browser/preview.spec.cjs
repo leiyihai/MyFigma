@@ -80,6 +80,27 @@ test('selecting an existing component enters update mode with its margins', asyn
   await expect(page.locator('#top')).toHaveValue('10');
   await expect(page.locator('#batchMode')).toBeDisabled();
   await expect(page.locator('#keepOriginal')).toBeDisabled();
+
+  await page.evaluate(() => window.postMessage({ pluginMessage: {
+    type: 'update-preview', bytes: null,
+    edit: { margins: { left: 20, right: 8, top: 10, bottom: 12 }, overlap: false, target: 'instance', name: '底板实例', editable: false }
+  } }, '*'));
+  await expect(page.locator('#main-btn')).toBeDisabled();
+  await expect(page.locator('#main-btn')).toHaveText('请选中主组件后编辑');
+  await expect(page.locator('#edit-status')).toContainText('请定位主组件');
+});
+
+test('help tooltip stays inside the narrow plugin viewport', async ({ page }) => {
+  await openPreview(page);
+  const help = page.locator('.help-icon').first();
+  await help.hover();
+  const tooltip = page.locator('.help-wrap').first().locator('.tooltip');
+  await expect(tooltip).toBeVisible();
+  const bounds = await tooltip.evaluate(el => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: innerWidth, height: innerHeight };
+  });
+  expect(bounds.left >= 0 && bounds.top >= 0 && bounds.right <= bounds.width && bounds.bottom <= bounds.height).toBe(true);
 });
 
 test('fractional margins put every visible guide at the submitted slice boundary', async ({ page }) => {

@@ -138,6 +138,31 @@ test('editing a generated component updates it in place and keeps one component'
   assert.equal(component.children.find(child => child.name === '切片 2-1').width, 20);
 });
 
+test('editing a legacy overlap component preserves overlap and derives margins', async () => {
+  const env = setup();
+  const settings = { ...env.settings, overlap: true };
+  await env.figma.ui.onmessage(settings);
+  const component = env.created[0];
+  component.data = {};
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ ...settings, left: 14, right: 6, top: 8, bottom: 9 });
+  const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.deepEqual(saved.margins, { left: 14, right: 6, top: 8, bottom: 9 });
+  assert.equal(saved.overlap, true);
+});
+
+test('a failed component update leaves the previous slices intact', async () => {
+  const env = setup();
+  await env.figma.ui.onmessage(env.settings);
+  const component = env.created[0];
+  env.figma.currentPage.selection = [component];
+  env.figma.createRectangle = () => { throw new Error('Simulated update failure'); };
+  await env.figma.ui.onmessage({ ...env.settings, left: 18 });
+  assert.equal(component.children.length, 9);
+  assert.equal(component.children.some(child => child.removed), false);
+  assert.ok(env.notices.some(text => text.includes('更新失败')));
+});
+
 test('editing a legacy component derives margins and writes the editable metadata', async () => {
   const env = setup();
   await env.figma.ui.onmessage(env.settings);
