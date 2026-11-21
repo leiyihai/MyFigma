@@ -294,7 +294,7 @@ function componentPage(component: ComponentNode): PageNode | undefined {
 }
 function automaticCategory(component: ComponentNode, source: Source): CategoryName {
   return classify({frameName:source.frameName,width:component.width,height:component.height,
-    nineSlice:!!readNineSliceRecord(component) || component.children.length > 0});
+    nineSlice:!!readNineSliceRecord(component)});
 }
 function plannedCategory(item: Candidate): CategoryName {
   const manual = item.existing ? manualCategory(item.existing.component) : undefined;
@@ -381,9 +381,6 @@ function isUnchanged(existing: Existing, item: Candidate, planned: Planned): boo
      existing.sync.sourceSize.w !== item.resource.width || existing.sync.sourceSize.h !== item.resource.height ||
      existing.component.width !== item.resource.width || existing.component.height !== item.resource.height) return false;
   if(existing.shape !== planned.shape) return false;
-  // A manual category (or a hand-moved component) is a document change that a
-  // normal content-identical scan still needs to correct.
-  if(currentCategory(existing.component) !== plannedCategory(item)) return false;
   if(planned.shape === 'image') return true;
   const record = existing.record;
   return !!record && sameMargins(record.current, planned.margins) && record.overlap === planned.overlap &&
@@ -971,8 +968,9 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         const source = parseStoredSource(component, project);
         const host = componentPage(component);
         if(!source || !host || !validate(host, project).valid) { ignored++; continue; }
-        const category = manualCategory(component) || currentCategory(component) || automaticCategory(component, source);
-        const member = {id:component.id,name:component.name,category,manual:!!manualCategory(component),viaInstance};
+        const manual = manualCategory(component);
+        const category = manual || currentCategory(component) || automaticCategory(component, source);
+        const member = {id:component.id,name:component.name,category,manual:!!manual,viaInstance};
         const previous = found.get(component.id);
         if(!previous) found.set(component.id, member);
         else if(viaInstance) previous.viaInstance = true;
@@ -991,7 +989,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
       let layouts: CategoryLayout[] = [];
       const messages: string[] = [];
       try {
-        const jobs: Array<{component:ComponentNode;page:PageNode;target:CategoryName}> = [];
+        const jobs: Array<{component:ComponentNode;page:PageNode;target:CategoryName;targetFrame?:FrameNode;previous:string}> = [];
         for(const id of [...new Set(ids)]) {
           const node = await api.getNodeByIdAsync(id);
           if(!node || node.type !== 'COMPONENT') { messages.push(`${id}：不是主组件，已跳过`); continue; }
@@ -1002,28 +1000,30 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
             messages.push(`${component.name}：不是本项目资源页中的工具主组件，已跳过`);
             continue;
           }
-          if(category === 'auto') component.setPluginData(manualCategoryKey,'');
-          else component.setPluginData(manualCategoryKey,category);
           const target = category === 'auto' ? automaticCategory(component, source) : category;
-          jobs.push({component,page:host,target});
+          jobs.push({component,page:host,target,previous:component.getPluginData(manualCategoryKey)});
         }
         if(!jobs.length) throw new Error('当前选择中没有可修改的本工具主组件');
-        const frames = new Map<string,FrameNode>();
+        const frames = new Set<FrameNode>();
         for(const job of jobs) {
-          const target = ensureCategoryFrame(job.page,api,job.target,createdFrames);
-          frames.set(`${job.page.id}\u0000${target.id}`,target);
+          job.targetFrame = ensureCategoryFrame(job.page,api,job.target,createdFrames);
+          frames.add(job.targetFrame);
         }
-        layouts = pauseCategoryLayouts(frames.values());
-        let moved = 0;
+        layouts = pauseCategoryLayouts(frames);
+        let moved = 0, updated = 0;
         for(const job of jobs) {
-          const target = job.page.children.find(node=>node.type === 'FRAME' &&
-            frameCategory(node as FrameNode) === job.target) as FrameNode | undefined;
-          if(!target) { messages.push(`${job.component.name}：分类 Frame 不存在，已跳过`); continue; }
-          if(job.component.parent !== target) { target.appendChild(job.component); moved++; }
+          try {
+            if(job.component.parent !== job.targetFrame) { job.targetFrame!.appendChild(job.component); moved++; }
+            job.component.setPluginData(manualCategoryKey,category === 'auto' ? '' : job.target);
+            updated++;
+          } catch(error) {
+            job.component.setPluginData(manualCategoryKey,job.previous);
+            messages.push(`${job.component.name}：${error instanceof Error ? error.message : '分类移动失败'}`);
+          }
         }
         restoreCategoryLayouts(layouts); layouts = [];
         for(const page of new Set(jobs.map(job=>job.page))) refreshDisplayNames(page,project,messages);
-        return {schemaVersion:1,action:category === 'auto' ? 'auto' : 'manual',updated:jobs.length,moved,messages};
+        return {schemaVersion:1,action:category === 'auto' ? 'auto' : 'manual',updated,moved,messages};
       } finally {
         restoreCategoryLayouts(layouts);
         busy = false;

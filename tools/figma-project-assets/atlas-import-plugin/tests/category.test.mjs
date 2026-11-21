@@ -338,15 +338,20 @@ test('批量人工分类保留身份和实例，源更新后仍保留，恢复�
     plain.name = '用户自己的组件';
     page.selection = [button, instance, icon, plain];
 
-    const selected = await platform.selection(project);
+    await workflow.loadSelection();
+    const selected = workflow.state.selection;
+    assert.equal(selected.members.length, 2);
+    assert.equal(selected.mixed, true);
     assert.equal(selected.mixed, true);
     assert.equal(selected.ignored, 1);
     assert.deepEqual(selected.members.map(member => member.category).sort(), ['按钮', '图标'].sort());
     assert.equal(selected.members.find(member => member.id === button.id).viaInstance, true);
 
-    const applied = await platform.setCategory(project, selected.members.map(member => member.id), '艺术字');
-    assert.deepEqual([applied.action, applied.updated], ['manual', 2]);
-    assert.equal(applied.moved, 2);
+    const applied = (await workflow.setCategory('艺术字'), workflow.state.selection);
+    assert.equal(workflow.state.phase, '就绪');
+    assert.equal(workflow.state.selection.members.length, 2);
+    assert.equal(workflow.state.selection.mixed, false);
+    assert.equal(workflow.state.selection.members[0].manual, true);
     assert.equal(button.parent.name, '艺术字');
     assert.equal(icon.parent.name, '艺术字');
     assert.equal(button.name, '艺术字/btn_ok');
@@ -367,11 +372,11 @@ test('批量人工分类保留身份和实例，源更新后仍保留，恢复�
     assert.equal(button.name, '艺术字/btn_ok');
     assert.equal(button.getPluginData('atlas.category.manual'), '艺术字');
     assert.equal(JSON.parse(button.getPluginData('atlas.source')).identity, identity);
-    assert.equal(instance.getMainComponentAsync && (await instance.getMainComponentAsync()), button);
+    assert.equal(await instance.getMainComponentAsync(), button);
 
     // Restore auto classification uses the current rules and removes the override.
-    const restored = await platform.setCategory(project, [button.id, icon.id], 'auto');
-    assert.deepEqual([restored.action, restored.updated], ['auto', 2]);
+    await workflow.setCategory('auto');
+    assert.equal(workflow.state.selection.members.every(member => !member.manual), true);
     assert.equal(button.getPluginData('atlas.category.manual'), '');
     assert.equal(icon.getPluginData('atlas.category.manual'), '');
     assert.equal(button.parent.name, '按钮');
@@ -397,8 +402,10 @@ test('批量分类同类重名补充来源，混合无关对象只跳过不改�
     foreign.name = '外部组件';
     page.selection = [...homes, foreign];
 
-    const result = await platform.setCategory(project, homes.map(node => node.id).concat(foreign.id), '背景');
-    assert.equal(result.updated, 2);
+    await workflow.loadSelection();
+    await workflow.setCategory('背景');
+    const result = await platform.setCategory(project, [homes[0].id, foreign.id], '背景');
+    assert.equal(result.updated, 1);
     assert.match(result.messages.join('\n'), /外部组件.*跳过/);
     assert.deepEqual(homes.map(node => node.name).sort(), [
       '背景/icon_home · Static/icons_a.json',

@@ -125,7 +125,7 @@ export class HelperClient {
 }
 export interface State {
   connected: boolean; busy: boolean; phase: string; error: string;
-  selected?: PublicProject; page?: PageStatus; scan?: Scan; plan?: ImportPlan; result?: ImportReport; compare?: CompareResult; tidy?: TidyResult; progress: Progress;
+  selected?: PublicProject; page?: PageStatus; scan?: Scan; plan?: ImportPlan; result?: ImportReport; compare?: CompareResult; tidy?: TidyResult; selection?: SelectionState; progress: Progress;
 }
 export class Workflow {
   readonly state: State = {connected:false,busy:false,phase:'未连接',error:'',progress:{done:0,total:0}};
@@ -161,7 +161,7 @@ export class Workflow {
   }
   async connect(): Promise<void> {
     await this.task('连接中',async () => {
-      this.state.connected = false; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined;
+      this.state.connected = false; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined;
       await this.helper.health(); this.projects = await this.helper.projects(); this.state.connected = true;
     });
   }
@@ -182,7 +182,7 @@ export class Workflow {
   }
   async selectProject(id: string): Promise<void> {
     await this.task('页面校验',async () => {
-      this.state.compare = undefined; this.state.tidy = undefined;
+      this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined;
       if(!id) {this.state.selected=undefined;this.state.scan=undefined;this.state.plan=undefined;this.state.result=undefined;this.state.page=undefined;this.state.progress={done:0,total:0};return;}
       const project = this.projects.find(p=>p.id===id);
       if (!project) throw new Error('请选择已登记的游戏');
@@ -193,6 +193,22 @@ export class Workflow {
   invalidateScan(): void {this.state.scan=undefined;this.state.plan=undefined;this.state.result=undefined;this.state.compare=undefined;this.state.tidy=undefined;this.state.progress={done:0,total:0};}
   async validatePage(): Promise<void> {
     await this.task('页面校验',async () => {if (this.state.selected) this.state.page = await this.platform.validate(this.state.selected);});
+  }
+  async loadSelection(): Promise<void> {
+    if(!this.state.selected || this.state.busy) { this.state.selection = undefined; return; }
+    this.state.selection = await this.platform.selection(this.state.selected);
+    this.changed();
+  }
+  async setCategory(category: CategoryName | 'auto'): Promise<void> {
+    await this.task('应用分类',async () => {
+      const project = this.state.selected;
+      const selection = this.state.selection;
+      if(!project) throw new Error('请选择游戏');
+      if(!selection?.members.length) throw new Error('当前选择中没有可修改的本工具主组件');
+      await this.platform.setCategory(project,selection.members.map(member=>member.id),category);
+      this.invalidateScan();
+      this.state.selection = await this.platform.selection(project);
+    });
   }
   async scan(): Promise<void> {
     await this.task('扫描中',async cancellation => {
