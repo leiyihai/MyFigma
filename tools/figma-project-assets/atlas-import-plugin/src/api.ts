@@ -14,7 +14,7 @@ export interface PageStatus { valid: boolean; message: string }
 export interface Progress { done: number; total: number }
 export interface Platform {
   validate(project: PublicProject): Promise<PageStatus>;
-  import(scan: Scan, progress: (value: Progress) => void): Promise<void>;
+  importResources(scan: Scan, progress: (value: Progress) => void): Promise<void>;
 }
 
 class HelperConnectionError extends Error {}
@@ -115,7 +115,7 @@ export class Workflow {
       if(!scan || !scan.resources.length || scan.project.id !== this.state.selected?.id) throw new Error('请先扫描当前游戏');
       this.state.page = await this.platform.validate(scan.project);
       if(!this.state.page.valid) throw new Error(this.state.page.message);
-      try {await this.platform.import(scan,progress=>{this.state.progress=progress;this.changed();});}
+      try {await this.platform.importResources(scan,progress=>{this.state.progress=progress;this.changed();});}
       catch(error) {this.state.progress={done:0,total:scan.resources.length};throw error;}
       this.state.scan = undefined;
       this.state.page = await this.platform.validate(scan.project);

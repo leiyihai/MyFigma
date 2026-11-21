@@ -7,7 +7,7 @@ figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicPro
   const reply=(result:unknown,error?:string)=>figma.ui.postMessage({type:'result',requestId:message.requestId,result,error});
   try {
     if(message.type==='validate')reply(await platform.validate(message.project));
-    else if(message.type==='import') {await platform.import(message.scan,progress=>figma.ui.postMessage({type:'progress',progress}));reply(null);}
+    else if(message.type==='import') {await platform.importResources(message.scan,progress=>figma.ui.postMessage({type:'progress',progress}));reply(null);}
     else reply(null,'未知插件任务');
   } catch(error) {reply(null,error instanceof Error?error.message:'Figma 任务失败');}
 };

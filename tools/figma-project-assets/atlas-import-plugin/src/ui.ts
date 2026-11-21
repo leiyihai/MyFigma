@@ -15,7 +15,7 @@ function rpc<T>(type:string,payload:object):Promise<T> {
 }
 const platform:Platform={
   validate:project=>rpc('validate',{project}),
-  async import(scan,progress){reportProgress=progress;try{await rpc('import',{scan});}finally{reportProgress=undefined;}}
+  async importResources(scan,progress){reportProgress=progress;try{await rpc('import',{scan});}finally{reportProgress=undefined;}}
 };
 let workflow:Workflow|undefined;
 let uiError='';

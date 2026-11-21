@@ -28,6 +28,12 @@ npm run build
 
 manifest 与构建 UI 地址一致性、localhost 实际配对连接、Host 冒用拦截及浏览器登记导入均已自动验证；这些测试不是 Figma 原生 manifest 校验器。修改后仍需在 Figma 重新加载 manifest、关闭旧助手并启动新构建，再用默认 localhost 地址配对。
 
+## 主线程沙箱兼容
+
+手动加载曾报 `SyntaxError: possible import expression rejected`。构建产物虽然已 bundle，但平台接口名 `async import(...)` 触发了安全沙箱的导入表达式检查；已改为 `importResources(...)`，消息类型仍为 `import`，用户操作不变。
+
+新增 SES 安全求值器开发依赖，直接加载实际 `dist/code.js`，先捕获 `SES_IMPORT_REJECTED`，修复后验证打开 UI、页面校验、真实助手扫描结果导入及进度消息。SES 是回归用安全求值器，不宣称它等同于 Figma 原生运行时，也不替代平台渲染验收。实际 Figma 仍需重新运行开发插件确认。
+
 ## 边界和安全
 
 - HTTP/配对/登记/源格式及身份决策详见助手 README。默认请求仅由 UI 发往 `http://localhost:38473`（助手只监听 IPv4 loopback；CLI 测试也支持精确数字回环地址），拒绝 HTTP 重定向；令牌不发往 Figma 主线程、document、clientStorage、URL 或日志。
@@ -47,7 +53,7 @@ npm run test:all
 npm audit --audit-level=low
 ```
 
-`test:all` 包含类型检查、9 个 Node 任务链路/连接安全测试、1 个 Playwright 浏览器交互测试。可分别运行 `npm test` / `npm run test:browser`。浏览器配置使用本机已有 Chrome（`channel: chrome`）；无 Chrome 时可安装经授权的浏览器或显式调整本目录测试配置。本次尝试下载 Playwright Chromium 超时，未将下载成功计为验收；实际浏览器验证使用系统 Chrome。
+`test:all` 包含类型检查、10 个 Node 任务链路/连接安全及主线程沙箱加载测试、1 个 Playwright 浏览器交互测试。可分别运行 `npm test` / `npm run test:browser`。浏览器配置使用本机已有 Chrome（`channel: chrome`）；无 Chrome 时可安装经授权的浏览器或显式调整本目录测试配置。本次尝试下载 Playwright Chromium 超时，未将下载成功计为验收；实际浏览器验证使用系统 Chrome。
 
 ### 已验证（不是 Figma 真实渲染验收）
 
@@ -74,4 +80,4 @@ npm audit --audit-level=low
 
 没有执行三个实际游戏项目的兼容/性能验收（本期只覆盖小型简单图集）。独立双轴审查与主分支集成测试已完成，真实 Figma 验收仍须单独执行。所有改动仅位于本目录与 `local-helper`，不修改根 package、gitignore、AGENTS 或共享 schema。
 
-开发依赖：TypeScript、esbuild、Figma plugin typings、Playwright；运行时无 Node/Web 框架依赖。构建/测试产物均由本目录 `.gitignore` 排除。
+开发依赖：TypeScript、esbuild、Figma plugin typings、Playwright、SES（仅测试安全求值）；运行时无 Node/Web 框架依赖。构建/测试产物均由本目录 `.gitignore` 排除。

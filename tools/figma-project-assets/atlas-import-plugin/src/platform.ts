@@ -28,7 +28,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFra
   let busy = false;
   return {
     async validate(project) {return validate(api.currentPage,project);},
-    async import(scan: Scan, progress) {
+    async importResources(scan: Scan, progress) {
       if(busy) throw new Error('导入任务正在执行');
       busy = true;
       const page = api.currentPage;
