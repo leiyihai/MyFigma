@@ -171,7 +171,8 @@
 
     var previewURL = null;
     window.onmessage = function(e) {
-      if (e.source !== parent) return;
+      const fromFigmaHost = e.source === top && e.origin === 'https://www.figma.com';
+      if (e.source !== parent && !fromFigmaHost) return;
       var msg = e.data && e.data.pluginMessage;
       if (!msg) return;
       if (msg.type === 'init-settings') {

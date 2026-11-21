@@ -32,7 +32,13 @@ manifest 与构建 UI 地址一致性、localhost 实际配对连接、Host 冒�
 
 手动加载曾报 `SyntaxError: possible import expression rejected`。构建产物虽然已 bundle，但平台接口名 `async import(...)` 触发了安全沙箱的导入表达式检查；已改为 `importResources(...)`，消息类型仍为 `import`，用户操作不变。
 
-新增 SES 安全求值器开发依赖，直接加载实际 `dist/code.js`，先捕获 `SES_IMPORT_REJECTED`，修复后验证打开 UI、页面校验、真实助手扫描结果导入及进度消息。SES 是回归用安全求值器，不宣称它等同于 Figma 原生运行时，也不替代平台渲染验收。实际 Figma 仍需重新运行开发插件确认。
+新增 SES 安全求值器开发依赖，直接加载实际 `dist/code.js`，先捕获 `SES_IMPORT_REJECTED`，修复后验证打开 UI、页面校验、真实助手扫描结果导入及进度消息。SES 是回归用安全求值器，不宣称它等同于 Figma 原生运行时，也不替代平台渲染验收。随后已在授权的独立 Figma 文件确认真实加载和示例导入。
+
+## 嵌套窗口消息兼容
+
+真实客户端复现页面校验约 60 秒后提示响应超时。仅记录消息类型、requestId 和窗口关系，确认 Figma 早已返回结果：来源为顶层窗口，origin 为 `https://www.figma.com`，但不是 UI 的直接父窗口。旧来源检查误将回复丢弃，并非助手扫描慢。
+
+现同时接受直接父窗口及来源严格为 Figma 顶层窗口的消息；陌生顶层域名仍拒绝。浏览器回归使用与实际一致的嵌套结构，分别验证可信 Figma 顶层可完成校验、陌生顶层不能伪造回复。该拓扑测试仅模拟外部助手 HTTP 边界；其他集成测试仍启动真实 Rust 助手。
 
 ## 边界和安全
 
@@ -53,7 +59,7 @@ npm run test:all
 npm audit --audit-level=low
 ```
 
-`test:all` 包含类型检查、10 个 Node 任务链路/连接安全及主线程沙箱加载测试、1 个 Playwright 浏览器交互测试。可分别运行 `npm test` / `npm run test:browser`。浏览器配置使用本机已有 Chrome（`channel: chrome`）；无 Chrome 时可安装经授权的浏览器或显式调整本目录测试配置。本次尝试下载 Playwright Chromium 超时，未将下载成功计为验收；实际浏览器验证使用系统 Chrome。
+`test:all` 包含类型检查、10 个 Node 任务链路/连接安全及主线程沙箱加载测试、3 个 Playwright 浏览器交互测试。可分别运行 `npm test` / `npm run test:browser`。浏览器配置使用本机已有 Chrome（`channel: chrome`）；无 Chrome 时可安装经授权的浏览器或显式调整本目录测试配置。本次尝试下载 Playwright Chromium 超时，未将下载成功计为验收；实际浏览器验证使用系统 Chrome。
 
 ### 已验证（不是 Figma 真实渲染验收）
 
@@ -74,10 +80,12 @@ npm audit --audit-level=low
 | HTTP 重定向 | `Missing expected rejection`，连接错误跟随了另一个端点 | 拒绝重定向，目标端点未收到请求 |
 | 清空项目 | 抛出「请选择已登记的游戏」，未清除旧目标 | 清空选择/扫描/页面状态通过 |
 
-### 未验证与集成注意
+### 真实客户端验收与剩余边界
 
-没有隔离安全的真实 Figma 目标，因此**没有导入任何用户设计，也未验证实际 Figma manifest 导入、桌面/网页 loopback 权限、真实图像渲染、Auto Layout 换行、资源检索/实例交换**。类型检查和平台替身不代替这些验收。后续应在新建的专用文件中用 `examples` 样本核对 2 张主组件、透明像素、组件身份、页面保护与布局。
+用户授权独立空白测试文件后，使用 Playwright 连接真实客户端，实际执行加载、localhost 配对、登记、页面校验、扫描和导入。修复消息来源后，页面校验立即返回；两张小样散图扫描约 0.12 秒、导入约 0.37 秒，仅为一次小样记录。
 
-没有执行三个实际游戏项目的兼容/性能验收（本期只覆盖小型简单图集）。独立双轴审查与主分支集成测试已完成，真实 Figma 验收仍须单独执行。所有改动仅位于本目录与 `local-helper`，不修改根 package、gitignore、AGENTS 或共享 schema。
+通过 Figwright 读回 1×1 与 2×2 主组件、自动布局及实例关联，并从 Figma 提取原始图片填充，核对绿色和透明留白红色 PNG 的全部像素。原生资源面板搜索插入实例及实例交换通过；非空未绑定页、错误页名保护和测试矩形保留通过。测试内容仅写入该独立文件，不操作其他设计稿。
+
+没有执行三个实际游戏项目的兼容/性能验收，不将该小样结果扩展为完整图集支持、增量支持或所有环境的网络兼容保证。
 
 开发依赖：TypeScript、esbuild、Figma plugin typings、Playwright、SES（仅测试安全求值）；运行时无 Node/Web 框架依赖。构建/测试产物均由本目录 `.gitignore` 排除。

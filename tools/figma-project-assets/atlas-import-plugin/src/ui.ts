@@ -99,7 +99,8 @@ el('save').onclick=()=>{if(!el<HTMLFormElement>('registration').reportValidity()
   await workflow!.saveProject(project);resetForm();
 });};
 window.addEventListener('message',event=>{
-  if(event.source!==parent)return;
+  const fromFigmaHost=event.source===top&&event.origin==='https://www.figma.com';
+  if(event.source!==parent&&!fromFigmaHost)return;
   const message=event.data?.pluginMessage;if(!message)return;
   if(message.type==='progress') {reportProgress?.(message.progress);return;}
   if(message.type==='page-changed'){
