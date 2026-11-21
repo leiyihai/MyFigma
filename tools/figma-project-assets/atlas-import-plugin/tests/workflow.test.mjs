@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
-import { fixture } from '../../local-helper/tests/fixture.mjs';
+import { fixture, startHelper } from '../../local-helper/tests/fixture.mjs';
 import * as api from '../dist/api.mjs';
 import {figmaFixture} from './platform-fixture.mjs';
 
@@ -169,6 +169,32 @@ test('lost helper connection clears stale import results and reports restart gui
     assert.equal(workflow.state.scan,undefined);
     assert.equal(workflow.state.busy,false);
   } finally {await f.cleanup();}
+});
+
+test('restarted helper reconnects after a disconnect and resumes scan and import through the task entry',async()=>{
+  const f=await fixture();
+  let restarted;
+  try {
+    const {api:figma,page}=figmaFixture();
+    const workflow=new api.Workflow(new api.HelperClient(f.base,f.token),api.createFigmaPlatform(figma));
+    await workflow.connect();
+    await workflow.saveProject({id:'g2',name:'测试游戏',path:f.project,maintained:true});
+    await workflow.selectProject('g2');
+    await f.stop();
+    // 退出助手后的提示必须指向托盘状态，而不是让用户找开发服务器。
+    await assert.rejects(workflow.scan(),/托盘/);
+    assert.equal(workflow.state.connected,false);
+    restarted=await startHelper(f.data);
+    const resumed=new api.Workflow(new api.HelperClient(restarted.base,restarted.token),api.createFigmaPlatform(figma));
+    await resumed.connect();
+    assert.deepEqual(resumed.allProjects().map(project=>project.id),['g2']);
+    await resumed.selectProject('g2');
+    await resumed.scan();
+    assert.equal(resumed.state.scan.summary.sprites,2);
+    await resumed.import();
+    assert.equal(page.children.length,1);
+    assert.deepEqual(page.children[0].children.map(child=>child.name).sort(),['未分类/green · tiny.json','未分类/red · tiny.json']);
+  } finally {if(restarted) await restarted.stop(); await f.cleanup();}
 });
 
 test('public task entry registers, searches all games, scans and imports cropped main components', async () => {
