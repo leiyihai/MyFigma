@@ -111,20 +111,28 @@ function parseSync(component: ComponentNode, identity: string): SyncState | unde
       (sync.status === 'current' || sync.status === 'source-missing') ? sync : undefined;
   } catch { return undefined; }
 }
-function hashText(value: string): string {
-  // Stable, dependency-free content fingerprint. This is change detection, not
-  // a cryptographic signature; dimensions and source metadata are included.
-  let fnv = 2166136261, djb2 = 5381;
-  for(let i=0;i<value.length;i++) {
-    const code = value.charCodeAt(i);
-    fnv = Math.imul(fnv ^ code, 16777619) >>> 0;
-    djb2 = ((djb2 << 5) + djb2 + code) >>> 0;
+function hashParts(parts: string[]): string {
+  // Stable, dependency-free content fingerprint. Feed parts directly instead
+  // of concatenating large base64 strings; this is change detection, not crypto.
+  let fnv = 2166136261, djb2 = 5381, length = 0;
+  for(const part of parts) {
+    length += part.length;
+    for(let i=0;i<part.length;i++) {
+      const code = part.charCodeAt(i);
+      fnv = Math.imul(fnv ^ code, 16777619) >>> 0;
+      djb2 = ((djb2 << 5) + djb2 + code) >>> 0;
+    }
   }
-  return `${value.length}:${fnv.toString(16)}:${djb2.toString(16)}`;
+  return `${length}:${fnv.toString(16)}:${djb2.toString(16)}`;
 }
+const contentHashCache = new WeakMap<Resource,string>();
 function contentHash(resource: Resource, source: Source): string {
-  return hashText(resource.png + '|' + resource.width + 'x' + resource.height + '|' +
-    JSON.stringify([source.kind, source.relativePath, source.frameName, source.crop, source.offset]));
+  const cached = contentHashCache.get(resource);
+  if(cached) return cached;
+  const hash = hashParts([resource.png, `|${resource.width}x${resource.height}|` +
+    JSON.stringify([source.kind, source.relativePath, source.frameName, source.crop, source.offset])]);
+  contentHashCache.set(resource,hash);
+  return hash;
 }
 function imageFillOf(node: ComponentNode, shape: ComponentShape | undefined): ImagePaint | undefined {
   const fills = Array.isArray(node.fills) ? node.fills : [];
@@ -789,11 +797,17 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
           page.name = writtenName;
           page.setPluginData(bindingKey,writtenBinding);
         }
-        let done = 0;
-        // Yield between items so a cancel message can stop scheduling and the UI can repaint.
+        let done = 0, lastProgress = 0;
+        // A single progress message per item dominates large imports. Throttle
+        // UI updates and yield only periodically so cancellation still works.
         const step = async () => {
-          progress({done:++done,total});
-          await new Promise(resolve=>setTimeout(resolve,0));
+          done++;
+          const now = Date.now();
+          if(done === total || now - lastProgress >= 100) {
+            progress({done,total});
+            lastProgress = now;
+          }
+          if(done % 20 === 0) await new Promise(resolve=>setTimeout(resolve,0));
         };
         for(const item of state.updates) {
           if(cancellation.cancelled) { report.cancelled = true; break; }
@@ -846,7 +860,17 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
           }
           await step();
         }
-        if(report.applied.added+report.applied.updated > 0) refreshDisplayNames(page,scan.project,report.messages);
+        const nameKeys = new Map<string,number>();
+        for(const item of [...state.adds,...state.updates]) {
+          const key = plannedCategory(item) + '\u0000' + item.source.frameName;
+          nameKeys.set(key,(nameKeys.get(key)||0)+1);
+        }
+        // On a fresh page with unique category/name pairs, creation already
+        // produced final names; avoid a second full-page rename pass.
+        const hadManagedComponents = plan.unchanged + plan.updated + plan.removed + plan.blocked > 0;
+        const needsNameRefresh = hadManagedComponents || state.updates.length > 0 ||
+          [...nameKeys.values()].some(count=>count > 1);
+        if(report.applied.added+report.applied.updated > 0 && needsNameRefresh) refreshDisplayNames(page,scan.project,report.messages);
         dropEmptyFrames();
         restoreInstances(instances,updatedIds);
         if(report.cancelled) {
