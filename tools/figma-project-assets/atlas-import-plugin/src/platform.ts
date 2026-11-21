@@ -1,4 +1,5 @@
-import type { ImportPlan, Platform, Progress, PublicProject, Resource, Scan, Source } from './api';
+import type { ImportPlan, ImportReport, Platform, Progress, PublicProject, Resource, Scan, Source } from './api';
+import { Cancellation } from './api';
 const bindingKey = 'atlas.binding';
 const sourceKey = 'atlas.source';
 const syncKey = 'atlas.sync.v1';
@@ -245,12 +246,28 @@ function updateComponent(component: ComponentNode, item: Candidate, image: Image
 function createComponent(api: Pick<PluginAPI,'createComponent'>, target: FrameNode, item: Candidate, image: ImagePaint): ComponentNode {
   const component = api.createComponent();
   target.appendChild(component);
-  component.name = `未分类/${item.source.frameName} · ${item.source.relativePath}`;
-  component.resize(item.resource.width,item.resource.height);
-  component.fills = [{...image,scaleMode:'FILL'}];
-  component.setPluginData(sourceKey,JSON.stringify(item.source));
-  writeSync(component,item,image.imageHash || '');
-  return component;
+  try {
+    component.name = `未分类/${item.source.frameName} · ${item.source.relativePath}`;
+    component.resize(item.resource.width,item.resource.height);
+    component.fills = [{...image,scaleMode:'FILL'}];
+    component.setPluginData(sourceKey,JSON.stringify(item.source));
+    writeSync(component,item,image.imageHash || '');
+    return component;
+  } catch(error) {
+    // A half-created component must not stay behind looking successful.
+    component.remove();
+    throw error;
+  }
+}
+function describeCandidate(item: Candidate): string { return `未分类/${item.source.frameName} · ${item.source.relativePath}`; }
+type ComponentSnapshot = {component: ComponentNode; width: number; height: number; fills: Paint[]; source: string; sync: string};
+function restoreComponent(snapshot: ComponentSnapshot): void {
+  try {
+    snapshot.component.resize(snapshot.width,snapshot.height);
+    snapshot.component.fills = snapshot.fills;
+    snapshot.component.setPluginData(sourceKey,snapshot.source);
+    snapshot.component.setPluginData(syncKey,snapshot.sync);
+  } catch { /* keep isolating one item even if Figma rejects its restore */ }
 }
 async function loadPage(page: PageNode): Promise<void> {
   // dynamic-page documents require explicit loading before findAll().
@@ -266,7 +283,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFra
       await loadPage(page);
       return buildPlan(scan,page).plan;
     },
-    async importResources(scan, progress) {
+    async importResources(scan, progress, cancellation = new Cancellation()) {
       if(busy) throw new Error('导入任务正在执行');
       busy = true;
       const page = api.currentPage;
@@ -275,10 +292,21 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFra
       let createdFrame = false;
       let writtenName = '', writtenBinding = '';
       const created: ComponentNode[] = [];
-      const updated: Array<{component: ComponentNode; width: number; height: number; fills: Paint[]; source: string; sync: string}> = [];
-      const marked: Array<{component: ComponentNode; sync: string}> = [];
       let instances: InstanceSize[] = [];
       let updatedIds = new Set<string>();
+      const report: ImportReport = {schemaVersion:1,added:0,updated:0,removed:0,unchanged:0,blocked:0,
+        removalSuppressed:false,messages:[],applied:{added:0,updated:0,removed:0},failures:[],cancelled:false};
+      const fail = (name: string, error: unknown) => {
+        report.failures.push({name,reason:error instanceof Error ? error.message : '单项导入失败'});
+      };
+      const restoreBinding = () => {
+        // Roll back only our own page-level writes; keep concurrent user edits.
+        if(page.name === writtenName) page.name = oldName;
+        if(page.getPluginData(bindingKey) === writtenBinding) page.setPluginData(bindingKey, oldBinding);
+      };
+      const dropEmptyFrame = () => {
+        if(createdFrame && frame && !frame.children.length) { frame.remove(); createdFrame = false; }
+      };
       try {
         await loadPage(page);
         if(api.currentPage.id !== page.id) throw new Error('当前页已改变，请重新扫描');
@@ -286,6 +314,9 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFra
         if(!status.valid) throw new Error(status.message);
         const state = buildPlan(scan,page);
         const plan = state.plan;
+        report.added = plan.added; report.updated = plan.updated; report.removed = plan.removed;
+        report.unchanged = plan.unchanged; report.blocked = plan.blocked;
+        report.removalSuppressed = plan.removalSuppressed; report.messages = [...plan.messages];
         updatedIds = new Set(state.updates.map(item => item.existing!.component.id));
         const total = state.adds.length + state.updates.length + state.removals.length;
         progress({done:0,total});
@@ -297,53 +328,76 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFra
           page.setPluginData(bindingKey,writtenBinding);
         }
         let done = 0;
-        for(const item of state.updates) {
-          if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已撤销本次导入');
-          const component = item.existing?.component;
-          if(!component) throw new Error('待更新组件已消失');
-          updated.push({component,width:component.width,height:component.height,fills:Array.isArray(component.fills) ? [...component.fills] : [],
-            source:component.getPluginData(sourceKey),sync:component.getPluginData(syncKey)});
-          const image = api.createImage(api.base64Decode(item.resource.png));
-          updateComponent(component,item,{type:'IMAGE',imageHash:image.hash,scaleMode:'FILL'});
+        // Yield between items so a cancel message can stop scheduling and the UI can repaint.
+        const step = async () => {
           progress({done:++done,total});
           await new Promise(resolve=>setTimeout(resolve,0));
+        };
+        for(const item of state.updates) {
+          if(cancellation.cancelled) { report.cancelled = true; break; }
+          if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已停止导入，已完成的项会保留');
+          const component = item.existing?.component;
+          if(!component) { fail(describeCandidate(item),new Error('待更新组件已消失')); await step(); continue; }
+          const snapshot: ComponentSnapshot = {component,width:component.width,height:component.height,
+            fills:Array.isArray(component.fills) ? [...component.fills] : [],
+            source:component.getPluginData(sourceKey),sync:component.getPluginData(syncKey)};
+          try {
+            const image = api.createImage(api.base64Decode(item.resource.png));
+            updateComponent(component,item,{type:'IMAGE',imageHash:image.hash,scaleMode:'FILL'});
+            report.applied.updated++;
+          } catch(error) {
+            // Isolate the failure: restore this item so the next run detects it again.
+            restoreComponent(snapshot);
+            fail(component.name,error);
+          }
+          await step();
         }
-        if(state.adds.length) {
+        if(!report.cancelled && state.adds.length) {
           const found = categoryFrame(page);
           frame = found || ensureCategoryFrame(page,api);
           createdFrame = !found;
+          for(const item of state.adds) {
+            if(cancellation.cancelled) { report.cancelled = true; break; }
+            if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已停止导入，已完成的项会保留');
+            try {
+              const image = api.createImage(api.base64Decode(item.resource.png));
+              created.push(createComponent(api,frame!,item,{type:'IMAGE',imageHash:image.hash,scaleMode:'FILL'}));
+              report.applied.added++;
+            } catch(error) {
+              fail(describeCandidate(item),error);
+            }
+            await step();
+          }
         }
-        for(const item of state.adds) {
-          if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已撤销本次导入');
-          const image = api.createImage(api.base64Decode(item.resource.png));
-          const component = createComponent(api,frame!,item,{type:'IMAGE',imageHash:image.hash,scaleMode:'FILL'});
-          created.push(component);
-          progress({done:++done,total});
-          await new Promise(resolve=>setTimeout(resolve,0));
+        if(!report.cancelled) for(const item of state.removals) {
+          if(cancellation.cancelled) { report.cancelled = true; break; }
+          if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已停止导入，已完成的项会保留');
+          const sync = item.component.getPluginData(syncKey);
+          try {
+            markMissing(item);
+            report.applied.removed++;
+          } catch(error) {
+            item.component.setPluginData(syncKey,sync);
+            fail(item.component.name,error);
+          }
+          await step();
         }
-        for(const item of state.removals) {
-          if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已撤销本次导入');
-          marked.push({component:item.component,sync:item.component.getPluginData(syncKey)});
-          markMissing(item);
-          progress({done:++done,total});
-          await new Promise(resolve=>setTimeout(resolve,0));
+        restoreInstances(instances,updatedIds);
+        if(report.cancelled) {
+          // Cancelled items are neither success nor source deletions; a retry fills them.
+          report.messages = [...report.messages,'任务已取消：已完成项保留，未完成项未记成功，可再次运行补齐'];
+          dropEmptyFrame();
+          if(report.applied.added+report.applied.updated+report.applied.removed === 0) restoreBinding();
         }
-        restoreInstances(instances, updatedIds);
-        return plan;
+        return report;
       } catch(error) {
-        for(const snapshot of updated) {
-          snapshot.component.resize(snapshot.width,snapshot.height);
-          snapshot.component.fills = snapshot.fills;
-          snapshot.component.setPluginData(sourceKey,snapshot.source);
-          snapshot.component.setPluginData(syncKey,snapshot.sync);
+        // No whole-task atomic rollback: completed items stay valid and retryable.
+        if(report.applied.added+report.applied.updated+report.applied.removed === 0) {
+          for(const component of created) component.remove();
+          if(createdFrame && frame) frame.remove();
+          restoreBinding();
         }
-        for(const snapshot of marked) snapshot.component.setPluginData(syncKey,snapshot.sync);
-        restoreInstances(instances, updatedIds);
-        for(const component of created) component.remove();
-        if(createdFrame && frame) frame.remove();
-        // Roll back our writes only; preserve concurrent edits made by the user.
-        if(page.name === writtenName)page.name=oldName;
-        if(page.getPluginData(bindingKey) === writtenBinding)page.setPluginData(bindingKey,oldBinding);
+        restoreInstances(instances,updatedIds);
         throw error;
       } finally {busy=false;}
     }

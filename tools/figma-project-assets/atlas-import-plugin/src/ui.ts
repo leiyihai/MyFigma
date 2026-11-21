@@ -17,7 +17,13 @@ function rpc<T>(type:string,payload:object):Promise<T> {
 const platform:Platform={
   validate:project=>rpc('validate',{project}),
   preview:scan=>rpc('preview',{scan}),
-  async importResources(scan,progress){reportProgress=progress;try{return await rpc<import('./api').ImportPlan>('import',{scan});}finally{reportProgress=undefined;}}
+  async importResources(scan,progress,cancellation){
+    reportProgress=progress;
+    // The figure import runs in the plugin main thread; forward cancellation there.
+    const stop=cancellation?.onCancel(()=>{void rpc('cancel',{}).catch(()=>{});})||(()=>{});
+    try{return await rpc<import('./api').ImportReport>('import',{scan});}
+    finally{reportProgress=undefined;stop();}
+  }
 };
 let workflow:Workflow|undefined;
 let uiError='';
@@ -75,13 +81,27 @@ function render() {
   const plan=s?.plan;
   const actionable=!!plan&&plan.added+plan.updated+plan.removed>0;
   el<HTMLButtonElement>('import').disabled=busy||pageValidationPending||!s?.scan||s.page?.valid===false||!actionable;
+  // Only scan and import are cancellable; other tasks keep the button disabled.
+  el<HTMLButtonElement>('cancel').disabled=!busy||(s?.phase!=='扫描中'&&s?.phase!=='导入中');
+  const result=s?.result;
+  const applied=result?result.applied.added+result.applied.updated+result.applied.removed:0;
+  const resultLine=result?`上次导入 · 成功 ${applied} · 失败 ${result.failures.length}${result.cancelled?' · 已取消':''}`:'';
   const summary=s?.scan?.summary;
   const diff=plan?`新增 ${plan.added} · 更新 ${plan.updated} · 源缺失 ${plan.removed} · 未变 ${plan.unchanged}${plan.blocked?` · 跳过 ${plan.blocked}`:''}${plan.removalSuppressed?' · 扫描不完整，未标记源删除':''}`:'';
-  el('summary').textContent=summary?`图集 ${summary.atlases} · 散图 ${summary.sprites} · 独立图片 ${summary.standalone} · 异常 ${summary.errors}${s?.scan?.complete?'':' · 扫描不完整'} · ${diff}`:plan?`上次操作 · ${diff}`:'尚未扫描';
-  const details=el('details');details.textContent=[...(s?.scan?.errors||[]),...(plan?.messages||[])].join('\n');details.classList.toggle('hidden',!details.textContent);
+  let summaryText=summary?`图集 ${summary.atlases} · 散图 ${summary.sprites} · 独立图片 ${summary.standalone} · 异常 ${summary.errors}${s?.scan?.complete?'':' · 扫描不完整'} · ${diff}`:plan?`上次操作 · ${diff}`:'尚未扫描';
+  if(resultLine)summaryText+=` · ${resultLine}`;
+  el('summary').textContent=summaryText;
+  const details=el<HTMLDetailsElement>('details');
+  const detailLines=[...(s?.scan?.errors||[]),...(plan?.messages||[]),...(result?.failures||[]).map(failure=>`失败 ${failure.name}：${failure.reason}`)];
+  el('details-body').textContent=detailLines.join('\n');
+  el('details-summary').textContent=`异常与失败详情（${detailLines.length}）`;
+  details.classList.toggle('hidden',!detailLines.length);
+  if(!detailLines.length)details.open=false;
+  else if(s?.phase==='部分失败')details.open=true;
   const progress=s?.progress||{done:0,total:0};
-  el('progress').textContent=`${progress.done} / ${progress.total}`;
-  el<HTMLProgressElement>('bar').max=progress.total||1;el<HTMLProgressElement>('bar').value=progress.done;
+  el('progress').textContent=busy&&!progress.total?'进行中':`${progress.done} / ${progress.total}`;
+  const bar=el<HTMLProgressElement>('bar');bar.max=progress.total||1;
+  if(busy&&!progress.total)bar.removeAttribute('value');else bar.value=progress.done;
 
   const editing=editingId!==undefined;
   for(const id of ['save','new','close','game-name','game-path','maintained']) (el(id) as HTMLInputElement).disabled=busy;
@@ -155,6 +175,7 @@ el('project').onchange=()=>{const id=el<HTMLSelectElement>('project').value;if(w
 el('validate').onclick=()=>void run(()=>workflow!.validatePage());
 el('scan').onclick=()=>void run(()=>workflow!.scan());
 el('import').onclick=()=>void run(()=>workflow!.import());
+el('cancel').onclick=()=>{workflow?.cancel();};
 el('registration').onsubmit=event=>event.preventDefault();
 el('save').onclick=()=>{if(!el<HTMLFormElement>('registration').reportValidity())return;void run(async()=>{
   const project:Project={id:input('game-id').value.trim(),name:input('game-name').value.trim(),path:input('game-path').value.trim(),maintained:input('maintained').checked};

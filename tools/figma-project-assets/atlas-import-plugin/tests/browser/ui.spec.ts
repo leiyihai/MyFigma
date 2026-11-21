@@ -13,14 +13,16 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     <script>
     window.imported=null;window.pairing=null;
     addEventListener('message',e=>{
-      const m=e.data.pluginMessage;if(!m||!m.requestId)return;
+      const m=e.data.pluginMessage;if(!m)return;
       const reply=result=>e.source.postMessage({pluginMessage:{type:'result',requestId:m.requestId,result}},'*');
+      if(m.type==='cancel'){window.cancelRequests=(window.cancelRequests||0)+1;if(m.requestId)reply(true);return;}
+      if(!m.requestId)return;
       if(m.type==='pairing-load'){reply(window.pairing);return;}
       if(m.type==='pairing-save'){window.pairing=m.pairing;reply(true);return;}
       if(m.type==='pairing-clear'){window.pairing=null;reply(true);return;}
       if(m.type==='validate')reply(window.currentPageInvalid?{valid:false,message:'非空且未绑定页面不可导入'}:{valid:true,message:'空白页可导入'});
       if(m.type==='preview'){window.plan={schemaVersion:1,added:m.scan.resources.length,updated:0,removed:0,unchanged:0,blocked:0,removalSuppressed:false,messages:[]};reply(window.plan);}
-      if(m.type==='import'){window.imported=m.scan;e.source.postMessage({pluginMessage:{type:'progress',progress:{done:1,total:2}}},'*');window.finish=()=>reply(window.plan);}
+      if(m.type==='import'){window.imported=m.scan;e.source.postMessage({pluginMessage:{type:'progress',progress:{done:1,total:2}}},'*');window.finish=cancelled=>reply({...window.plan,applied:{added:cancelled?1:window.plan.added,updated:0,removed:0},failures:[],cancelled:!!cancelled});}
     });
     </script>`);}
   });
@@ -32,6 +34,7 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await ui.getByLabel('配对令牌').fill(f.token);
     await ui.getByRole('button',{name:'连接助手',exact:true}).click();
     await expect(ui.getByTestId('connection')).toHaveText('已连接');
+    await expect(ui.getByRole('button',{name:'取消任务',exact:true})).toBeDisabled();
     await ui.getByRole('button',{name:'管理项目',exact:true}).hover();
     const floating=ui.locator('#manage').locator('..').locator('.tooltip');
     await expect(floating).toBeVisible();
@@ -102,11 +105,24 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await expect(ui.getByRole('button',{name:'扫描资源',exact:true})).toBeDisabled();
     await expect(ui.getByRole('button',{name:'导入主组件',exact:true})).toBeDisabled();
     await expect(ui.getByTestId('progress')).toContainText('1 / 2');
-    await page.evaluate(()=>{(window as any).finish();});
-    await expect(ui.locator('#project')).toBeEnabled();
-    await expect(ui.getByTestId('summary')).toContainText('上次操作');
+    await expect(ui.getByRole('button',{name:'取消任务',exact:true})).toBeEnabled();
+    await ui.getByRole('button',{name:'取消任务',exact:true}).hover();
+    await expect(ui.getByRole('tooltip')).toContainText('已完成的项会保留');
+    await ui.getByRole('button',{name:'取消任务',exact:true}).click();
+    await expect.poll(()=>page.evaluate(()=>(window as any).cancelRequests)).toBe(1);
+    await page.evaluate(()=>{(window as any).finish(true);});
+    await expect(ui.locator('#phase')).toHaveText('已取消');
+    await expect(ui.getByTestId('summary')).toContainText('成功 1');
+    await expect(ui.getByTestId('summary')).toContainText('已取消');
+    await expect(ui.getByRole('button',{name:'取消任务',exact:true})).toBeDisabled();
+    await expect(ui.getByRole('button',{name:'导入主组件',exact:true})).toBeEnabled();
     expect(await page.evaluate(()=>(window as any).imported.resources.length)).toBe(2);
     expect(await page.evaluate(()=>'path' in (window as any).imported.project)).toBe(false);
+    // A second run only fills what the cancelled run left unfinished.
+    await ui.getByRole('button',{name:'导入主组件',exact:true}).click();
+    await page.evaluate(()=>{(window as any).finish(false);});
+    await expect(ui.locator('#phase')).toHaveText('就绪');
+    await expect(ui.getByTestId('summary')).toContainText('上次操作');
     let releaseFailedScan!:()=>void;
     let failedScanStarted!:()=>void;
     const failedHeld=new Promise<void>(resolve=>{releaseFailedScan=resolve;});

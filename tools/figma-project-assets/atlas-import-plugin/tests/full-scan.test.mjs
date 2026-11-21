@@ -89,6 +89,24 @@ test('import task refuses scans produced by an older helper protocol', async () 
   await assert.rejects(platform.importResources(older, () => {}), /扫描协议/);
 });
 
+test('helper client aborts an in-flight scan when the task is cancelled', async () => {
+  const server = createServer((request, response) => {
+    setTimeout(() => {
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ schemaVersion: 2 }));
+    }, 300);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = new api.HelperClient('http://127.0.0.1:' + server.address().port, '0'.repeat(64));
+    const controller = new AbortController();
+    const pending = client.scan('g2', controller.signal);
+    setTimeout(() => controller.abort(), 25);
+    await assert.rejects(pending, /已取消/);
+    await assert.rejects(client.scan('g2', AbortSignal.abort()), /已取消/);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
 test('helper client refuses scan responses from an incompatible protocol version', async () => {
   const server = createServer((request, response) => {
     response.setHeader('Content-Type', 'application/json');
