@@ -16,6 +16,9 @@ npm run typecheck
 - `@myfigma/nine-slice/figma`：`createNineSliceComponent(figma, {width, height, fill}, margins, {overlap?})`。
   返回无 Auto Layout 的主组件；失败移除本次半成品。调用方负责父级、名称、坐标、选择、来源状态和原图删除。
   `fill` 为 Figma `ImagePaint`；消费适配入口的工程需要 `@figma/plugin-typings`。
+- `@myfigma/nine-slice/record`：两个插件共用的 `myfigma.nineSlice.v1` 记录读写。
+  必填 `margins`、`overlap`、`width`、`height` 兼容旧版；新增 `project`（项目统计参数）、`current`（当前参数）和 `override`（人工覆盖）。
+  旧记录缺少 `project` 时按人工覆盖读取，避免增量导入改动既有手工边距。
 
 另一个插件可用本地文件依赖安装本包，先在本目录构建，再将入口 bundle 到自己的产物：
 
@@ -37,4 +40,4 @@ component.name = '九宫格底板';
 
 纯核心测试证明切片规划与非法输入校验。Figma 适配由独立插件的公开消息入口回归覆盖；这些平台替身**不证明**真实图片裁剪、约束传播、不同尺寸拉伸或透明边缘接缝。
 
-生成适配沿用旧插件的切片裁剪和可选重叠公式。重叠默认关闭；透明图建议关闭。原图有自定义裁剪／平铺／旋转、多填充、遮罩、特效或 Auto Layout 父级时不保证视觉兼容。未增加主组件原位更新、手动覆盖协议等 #7 功能。
+生成适配沿用旧插件的切片裁剪和可选重叠公式。重叠默认关闭；透明图建议关闭。原图有自定义裁剪／平铺／旋转、多填充、遮罩、特效或 Auto Layout 父级时不保证视觉兼容。共享记录已支持项目参数、当前参数与人工覆盖状态；在独立插件中恢复项目参数及完整 #7 编辑 UI 仍属后续任务。

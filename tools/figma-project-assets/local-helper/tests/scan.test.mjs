@@ -23,7 +23,7 @@ test('game root registration recursively scans nested imageset atlases and keeps
     });
     await register(f);
     const result = await scan(f);
-    assert.equal(result.schemaVersion, 2);
+    assert.equal(result.schemaVersion, 3);
     assert.equal(result.summary.scanRoot, 'res/imageset');
     assert.equal(result.summary.atlases, 2);
     assert.equal(result.complete, true);
@@ -288,7 +288,7 @@ test('the helper keeps the full scan record on its own disk without local absolu
     const result = await scan(f);
     const cachePath = join(f.data, 'scans', 'g1008.json');
     const cached = JSON.parse(await readFile(cachePath, 'utf8'));
-    assert.equal(cached.schemaVersion, 2);
+    assert.equal(cached.schemaVersion, 3);
     assert.equal(cached.project.name, '起床战争');
     assert.deepEqual(cached.resources.map(r => r.source.identity), result.resources.map(r => r.source.identity));
     assert.deepEqual(cached.summary, result.summary);

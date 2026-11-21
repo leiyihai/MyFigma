@@ -1,4 +1,4 @@
-use crate::{Project, Result};
+use crate::{Project, Result, layout};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use image::{ImageFormat, ImageReader, RgbaImage};
 use serde_json::{Value, json};
@@ -9,7 +9,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-const SCAN_SCHEMA_VERSION: u32 = 2;
+const SCAN_SCHEMA_VERSION: u32 = 3;
 const MAX_JSON_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 /// Restored sprites and atlas sheets share one dimension limit so a large
@@ -439,14 +439,78 @@ pub fn scan(data: &Path, project: &Project) -> Result<Value> {
         .iter()
         .filter(|resource| resource["source"]["kind"] == "atlas")
         .count();
+    let scanned: Vec<layout::ScannedResource> = state
+        .resources
+        .iter()
+        .filter_map(|resource| {
+            let source = &resource["source"];
+            let kind = match source["kind"].as_str()? {
+                "atlas" => "atlas",
+                "standalone" => "standalone",
+                _ => return None,
+            };
+            Some(layout::ScannedResource {
+                identity: source["identity"].as_str()?.to_string(),
+                kind,
+                relative_path: source["relativePath"].as_str()?.to_string(),
+                frame_name: source["frameName"].as_str()?.to_string(),
+                width: resource["width"].as_u64()?.try_into().ok()?,
+                height: resource["height"].as_u64()?.try_into().ok()?,
+            })
+        })
+        .collect();
+    let layout_scan = layout::scan(&root, data, &project.id, &scanned);
+    for resource in &mut state.resources {
+        let Some(identity) = resource["source"]["identity"].as_str() else {
+            continue;
+        };
+        if let Some(value) = layout_scan.layout_json(identity) {
+            resource["layout"] = value;
+        }
+    }
     let complete = state.errors.is_empty() && !state.truncated;
+    let layout_truncated = layout_scan.is_truncated();
+    let mut warnings = layout_scan.warnings.clone();
+    if layout_truncated {
+        warnings.push("布局统计结果不完整".to_string());
+    }
     let mut value = json!({"schemaVersion":SCAN_SCHEMA_VERSION,"project":{"id":project.id,"name":project.name},
-        "resources":state.resources,"errors":state.errors,
+        "resources":state.resources,"errors":state.errors,"warnings":warnings,
         "summary":{"scanRoot":label,"atlases":found.atlases.len(),"atlasFrames":state.atlas_frames,
             "sprites":sprites,"standalone":state.resources.len()-sprites,"resources":state.resources.len(),
-            "errors":state.errors.len(),"skippedLinks":found.links,"entries":found.entries},
+            "errors":state.errors.len(),"skippedLinks":found.links,"entries":found.entries,
+            "layoutFiles":layout_scan.files.len(),"layoutReferences":layout_scan.references,
+            "layoutNineSlice":layout_scan.nine_slice,"layoutIgnored":layout_scan.ignored,
+            "layoutInvalid":layout_scan.invalid},
         "truncated":state.truncated,"complete":complete});
-    if let Err(error) = cache_scan(data, project, &value) {
+    // Add the full local record for the cache write, then strip it from the
+    // Figma payload. This avoids holding a second copy of every base64 image.
+    value["layout"] = layout_scan.full_json();
+    if let Some(resources) = value["resources"].as_array_mut() {
+        for resource in resources {
+            let Some(identity) = resource["source"]["identity"].as_str() else {
+                continue;
+            };
+            let variants = layout_scan.variants_json(identity);
+            if !variants.is_empty()
+                && let Some(entry) = resource.get_mut("layout").and_then(Value::as_object_mut)
+            {
+                entry.insert("nineSliceVariants".to_string(), json!(variants));
+            }
+        }
+    }
+    let cache_result = cache_scan(data, project, &value);
+    if let Some(object) = value.as_object_mut() {
+        object.remove("layout");
+    }
+    if let Some(resources) = value["resources"].as_array_mut() {
+        for resource in resources {
+            if let Some(entry) = resource.get_mut("layout").and_then(Value::as_object_mut) {
+                entry.remove("nineSliceVariants");
+            }
+        }
+    }
+    if let Err(error) = cache_result {
         if let Some(list) = value["errors"].as_array_mut() {
             list.push(json!(error));
         }

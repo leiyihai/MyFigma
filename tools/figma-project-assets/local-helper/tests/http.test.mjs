@@ -103,7 +103,7 @@ test('scan restores individual PNG pixels and stable relative source identities'
     const response = await f.request('/v1/scan','POST',{projectId:'g2'});
     assert.equal(response.status,200);
     const scan = await response.json();
-    assert.equal(scan.schemaVersion,2);
+    assert.equal(scan.schemaVersion,3);
     assert.equal(scan.resources.length,2);
     assert.deepEqual(scan.errors,[]);
     const red = scan.resources.find(r=>r.source.frameName==='red');

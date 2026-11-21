@@ -33,7 +33,7 @@ test('task entry imports nested atlas sprites and standalone images with whiteli
     await workflow.saveProject({ id: 'g1008', name: '起床战争', path: f.project, maintained: true });
     await workflow.selectProject('g1008');
     await workflow.scan();
-    assert.equal(workflow.state.scan.schemaVersion, 2);
+    assert.equal(workflow.state.scan.schemaVersion, 3);
     assert.equal(workflow.state.scan.summary.scanRoot, 'res/imageset');
     assert.equal(workflow.state.scan.summary.sprites, 2);
     assert.equal(workflow.state.scan.summary.standalone, 1);

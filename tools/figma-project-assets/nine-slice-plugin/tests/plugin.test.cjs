@@ -233,3 +233,27 @@ test('no selection reports a notification', async () => {
   assert.equal(env.created.length, 0);
   assert.ok(env.notices.some(text => text.includes('图片')));
 });
+
+test('reads and writes the shared project/current/override record used by the atlas importer', async () => {
+  const env = setup();
+  await env.figma.ui.onmessage(env.settings);
+  const component = env.created[0];
+  const generated = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.equal(generated.project, undefined);
+  assert.deepEqual(generated.current, { left: 10, top: 10, right: 10, bottom: 10 });
+  assert.equal(generated.override, true);
+
+  // Simulate an atlas-imported record: project statistics 8, current 10, no manual override yet.
+  component.setPluginData('myfigma.nineSlice.v1', JSON.stringify({
+    schemaVersion: 1, margins: { left: 10, top: 10, right: 10, bottom: 10 }, overlap: false,
+    width: 100, height: 80, project: { left: 8, top: 8, right: 8, bottom: 8 },
+    current: { left: 10, top: 10, right: 10, bottom: 10 }, override: false
+  }));
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ ...env.settings, left: 12, right: 7, top: 9, bottom: 11 });
+  const edited = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.deepEqual(edited.project, { left: 8, top: 8, right: 8, bottom: 8 });
+  assert.deepEqual(edited.current, { left: 12, top: 9, right: 7, bottom: 11 });
+  assert.deepEqual(edited.margins, { left: 12, top: 9, right: 7, bottom: 11 });
+  assert.equal(edited.override, true);
+});

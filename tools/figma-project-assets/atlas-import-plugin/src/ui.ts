@@ -77,7 +77,9 @@ function render() {
   el<HTMLButtonElement>('import').disabled=busy||pageValidationPending||!s?.scan||s.page?.valid===false||!actionable;
   const summary=s?.scan?.summary;
   const diff=plan?`新增 ${plan.added} · 更新 ${plan.updated} · 源缺失 ${plan.removed} · 未变 ${plan.unchanged}${plan.blocked?` · 跳过 ${plan.blocked}`:''}${plan.removalSuppressed?' · 扫描不完整，未标记源删除':''}`:'';
-  el('summary').textContent=summary?`图集 ${summary.atlases} · 散图 ${summary.sprites} · 独立图片 ${summary.standalone} · 异常 ${summary.errors}${s?.scan?.complete?'':' · 扫描不完整'} · ${diff}`:plan?`上次操作 · ${diff}`:'尚未扫描';
+  const layout=summary&&(summary.layoutReferences||summary.layoutNineSlice||summary.layoutIgnored)
+    ?` · 布局引用 ${summary.layoutReferences||0} · 九宫格 ${summary.layoutNineSlice||0}${summary.layoutIgnored?` · 公共引用忽略 ${summary.layoutIgnored}`:''}`:'';
+  el('summary').textContent=summary?`图集 ${summary.atlases} · 散图 ${summary.sprites} · 独立图片 ${summary.standalone} · 异常 ${summary.errors}${layout}${s?.scan?.complete?'':' · 扫描不完整'} · ${diff}`:plan?`上次操作 · ${diff}`:'尚未扫描';
   const details=el('details');details.textContent=[...(s?.scan?.errors||[]),...(plan?.messages||[])].join('\n');details.classList.toggle('hidden',!details.textContent);
   const progress=s?.progress||{done:0,total:0};
   el('progress').textContent=`${progress.done} / ${progress.total}`;

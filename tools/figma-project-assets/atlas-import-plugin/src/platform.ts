@@ -1,4 +1,11 @@
-import type { ImportPlan, Platform, Progress, PublicProject, Resource, Scan, Source } from './api';
+import type { ImportPlan, LayoutUsage, Platform, Progress, PublicProject, Resource, Scan, Source } from './api';
+import { createNineSlicePlan, type Margins } from '../../packages/nine-slice/src/index';
+import { applyNineSliceComponent, createNineSliceComponent } from '../../packages/nine-slice/src/figma';
+import {
+  NINE_SLICE_RECORD_KEY, createNineSliceRecord, parseNineSliceRecord,
+  serializeNineSliceRecord, type NineSliceRecord
+} from '../../packages/nine-slice/src/record';
+
 const bindingKey = 'atlas.binding';
 const sourceKey = 'atlas.source';
 const syncKey = 'atlas.sync.v1';
@@ -42,12 +49,40 @@ function sourceFor(resource: Resource, project: PublicProject): Source {
     engineReference,sourceSize:{w:resource.width,h:resource.height},
     crop:{x:s.crop.x,y:s.crop.y,w:s.crop.w,h:s.crop.h},offset:{x:s.offset.x,y:s.offset.y}};
 }
+function marginsValue(value: unknown): Margins | undefined {
+  if(!value || typeof value !== 'object') return undefined;
+  const m = value as Partial<Margins>;
+  if(![m.left,m.top,m.right,m.bottom].every(item=>typeof item === 'number' && Number.isFinite(item) && item >= 0)) return undefined;
+  return {left:m.left!,top:m.top!,right:m.right!,bottom:m.bottom!};
+}
+function layoutFor(resource: Resource) {
+  if(resource.layout === undefined) return undefined;
+  const layout = resource.layout;
+  if(!layout || !Number.isInteger(layout.references) || layout.references < 0 || layout.references > 1_000_000) throw new Error('扫描布局引用数据无效');
+  if(layout.nineSlice === undefined) return {references: layout.references};
+  const margins = marginsValue(layout.nineSlice.margins);
+  if(!margins || !Number.isInteger(layout.nineSlice.usage) || layout.nineSlice.usage <= 0) throw new Error('扫描九宫格参数无效');
+  try { createNineSlicePlan({width:resource.width,height:resource.height}, margins); }
+  catch { throw new Error('扫描九宫格参数无法应用到图片尺寸'); }
+  return {references: layout.references, nineSlice: {margins, usage: layout.nineSlice.usage}};
+}
+function validFor(margins: Margins, width: number, height: number): boolean {
+  try { createNineSlicePlan({width,height}, margins); return true; } catch { return false; }
+}
 type SyncState = {
   schemaVersion: 1; identity: string; contentHash: string; imageHash?: string;
   sourceSize: { w: number; h: number }; status: 'current' | 'source-missing';
 };
-type Existing = { component: ComponentNode; source: Source; sync?: SyncState; blocked?: string };
-type Candidate = { resource: Resource; source: Source; hash: string; existing?: Existing };
+type ComponentShape = 'image' | 'slices';
+type Existing = {
+  component: ComponentNode; source: Source; sync?: SyncState; blocked?: string;
+  record?: NineSliceRecord; shape?: ComponentShape; imageHash?: string;
+};
+type Planned = {
+  shape: ComponentShape; margins?: Margins; project?: Margins; override: boolean;
+  overlap: boolean; record?: NineSliceRecord; blocked?: string;
+};
+type Candidate = { resource: Resource; source: Source; hash: string; layout?: LayoutUsage; existing?: Existing; planned: Planned };
 type PlanState = {
   plan: ImportPlan; adds: Candidate[]; updates: Candidate[]; removals: Existing[];
 };
@@ -86,9 +121,46 @@ function contentHash(resource: Resource, source: Source): string {
   return hashText(resource.png + '|' + resource.width + 'x' + resource.height + '|' +
     JSON.stringify([source.kind, source.relativePath, source.frameName, source.crop, source.offset]));
 }
-function isSimpleComponent(component: ComponentNode): boolean {
-  return Array.isArray(component.children) && component.children.length === 0 &&
-    Array.isArray(component.fills) && component.fills.length === 1 && component.fills[0].type === 'IMAGE';
+function imageFillOf(node: ComponentNode, shape: ComponentShape | undefined): ImagePaint | undefined {
+  const fills = Array.isArray(node.fills) ? node.fills : [];
+  if(shape === 'image') return fills.find((fill): fill is ImagePaint => fill.type === 'IMAGE');
+  for(const child of node.children) {
+    if(!('fills' in child) || !Array.isArray(child.fills)) continue;
+    const fill = child.fills.find((item): item is ImagePaint => item.type === 'IMAGE');
+    if(fill) return fill;
+  }
+  return undefined;
+}
+function verifyNineSlice(component: ComponentNode, record: NineSliceRecord): boolean {
+  if(component.layoutMode !== 'NONE') return false;
+  if(!Array.isArray(component.fills) || component.fills.length !== 0) return false;
+  let plan;
+  try { plan = createNineSlicePlan({width:component.width,height:component.height}, record.current, record.overlap); }
+  catch { return false; }
+  if(component.children.length !== plan.slices.length) return false;
+  const expected = new Map(plan.slices.map(slice => [`切片 ${slice.row + 1}-${slice.column + 1}`, slice]));
+  const seen = new Set<string>();
+  let imageHash: string | undefined;
+  for(const child of component.children) {
+    if(child.type !== 'RECTANGLE' || !expected.has(child.name) || seen.has(child.name)) return false;
+    seen.add(child.name);
+    const slice = expected.get(child.name)!;
+    if(Math.abs(child.x - slice.x) > 0.001 || Math.abs(child.y - slice.y) > 0.001 ||
+       Math.abs(child.width - slice.width) > 0.001 || Math.abs(child.height - slice.height) > 0.001) return false;
+    if(child.constraints.horizontal !== slice.horizontal || child.constraints.vertical !== slice.vertical) return false;
+    if(!Array.isArray(child.fills) || child.fills.length !== 1) return false;
+    const fill = child.fills[0];
+    if(fill.type !== 'IMAGE' || fill.scaleMode !== 'CROP') return false;
+    if(imageHash === undefined) imageHash = fill.imageHash;
+    else if(fill.imageHash !== imageHash) return false;
+  }
+  return seen.size === expected.size;
+}
+function storedRecord(component: ComponentNode): {record?: NineSliceRecord; corrupt: boolean} {
+  const raw = component.getPluginData(NINE_SLICE_RECORD_KEY);
+  if(!raw) return {corrupt:false};
+  const record = parseNineSliceRecord(raw);
+  return {record, corrupt:!record};
 }
 function managedCategory(node: ComponentNode): boolean {
   const parent = node.parent;
@@ -105,20 +177,84 @@ function existingComponents(page: PageNode, project: PublicProject): { items: Ex
       continue;
     }
     const sync = parseSync(node,source.identity);
-    const imageHash = Array.isArray(node.fills) && node.fills.length === 1 && node.fills[0].type === 'IMAGE' ? node.fills[0].imageHash : undefined;
-    const blocked = !isSimpleComponent(node) ? '内部结构已修改或不是普通图片组件，已跳过'
-      : sync?.imageHash && imageHash && sync.imageHash !== imageHash ? '图片填充已被手动修改，已跳过'
-      : sync && Array.isArray(node.fills) && node.fills[0]?.type === 'IMAGE' && node.fills[0].scaleMode !== 'FILL' ? '图片填充缩放方式已被手动修改，已跳过' : undefined;
-    result.push({component:node,source,sync,blocked});
+    const stored = storedRecord(node);
+    const fills = Array.isArray(node.fills) ? node.fills : [];
+    let shape: ComponentShape | undefined;
+    let blocked: string | undefined;
+    if(stored.corrupt) blocked = '九宫格记录损坏，已跳过';
+    else if(node.children.length === 0) {
+      if(stored.record) blocked = '九宫格记录与组件结构不符，已跳过';
+      else if(fills.length === 1 && fills[0].type === 'IMAGE') {
+        shape = 'image';
+        if(sync?.imageHash && fills[0].imageHash && sync.imageHash !== fills[0].imageHash) blocked = '图片填充已被手动修改，已跳过';
+        else if(sync && fills[0].scaleMode !== 'FILL') blocked = '图片填充缩放方式已被手动修改，已跳过';
+      } else blocked = '内部结构已修改或不是普通图片组件，已跳过';
+    } else {
+      if(!stored.record) blocked = '内部结构已修改或不是普通图片组件，已跳过';
+      else if(!verifyNineSlice(node, stored.record)) blocked = '内部结构已修改或不是普通图片组件，已跳过';
+      else shape = 'slices';
+    }
+    const imageHash = imageFillOf(node, shape)?.imageHash || undefined;
+    if(!blocked && shape === 'slices' && sync?.imageHash && imageHash && sync.imageHash !== imageHash)
+      blocked = '图片填充已被手动修改，已跳过';
+    result.push({component:node,source,sync,blocked,record:stored.record,shape,imageHash});
   }
   return {items:result,corrupt};
 }
+function planState(existing: Existing | undefined, item: Candidate): Planned {
+  const project = item.layout?.nineSlice?.margins;
+  const record = existing?.record;
+  const width = item.resource.width, height = item.resource.height;
+  if(record?.override) {
+    if(!validFor(record.current,width,height)) return {
+      shape:'slices', override:true, overlap:record.overlap,
+      blocked:`人工九宫格边距无法应用到新尺寸 ${width}×${height}，已跳过`
+    };
+    const effectiveProject = project || record.project;
+    return {shape:'slices', margins:record.current, project:effectiveProject, override:true, overlap:record.overlap,
+      record:createNineSliceRecord(record.current,{width,height},{project:effectiveProject,overlap:record.overlap,override:true})};
+  }
+  if(project) {
+    if(!validFor(project,width,height)) return {
+      shape:'slices', override:false, overlap:record?.overlap === true,
+      blocked:`项目九宫格边距无法应用到 ${width}×${height}，已跳过`
+    };
+    return {shape:'slices', margins:project, project, override:false, overlap:record?.overlap === true,
+      record:createNineSliceRecord(project,{width,height},{project,overlap:record?.overlap === true,override:false})};
+  }
+  if(existing?.shape === 'slices' && record) {
+    // Usage disappeared: keep the existing stretch behavior instead of downgrading.
+    if(!validFor(record.current,width,height)) return {
+      shape:'slices', override:record.override, overlap:record.overlap,
+      blocked:`九宫格边距无法应用到新尺寸 ${width}×${height}，已跳过`
+    };
+    return {shape:'slices', margins:record.current, project:record.project, override:record.override, overlap:record.overlap,
+      record:createNineSliceRecord(record.current,{width,height},{project:record.project,overlap:record.overlap,override:record.override})};
+  }
+  return {shape:'image', override:false, overlap:false};
+}
+function sameMargins(left: Margins | undefined, right: Margins | undefined): boolean {
+  if(!left || !right) return left === right;
+  return left.left === right.left && left.top === right.top && left.right === right.right && left.bottom === right.bottom;
+}
+function isUnchanged(existing: Existing, item: Candidate, planned: Planned): boolean {
+  if(!existing.sync || existing.sync.status !== 'current' || existing.sync.contentHash !== item.hash ||
+     existing.sync.sourceSize.w !== item.resource.width || existing.sync.sourceSize.h !== item.resource.height ||
+     existing.component.width !== item.resource.width || existing.component.height !== item.resource.height) return false;
+  if(existing.shape !== planned.shape) return false;
+  if(planned.shape === 'image') return true;
+  const record = existing.record;
+  return !!record && sameMargins(record.current, planned.margins) && record.overlap === planned.overlap &&
+    record.override === planned.override && sameMargins(record.project, planned.project);
+}
 function buildPlan(scan: Scan, page: PageNode): PlanState {
-  if(scan.schemaVersion !== 2 || !scan.project || !/^[a-zA-Z0-9_-]{1,64}$/.test(scan.project.id) ||
+  if(scan.schemaVersion !== 3 || !scan.project || !/^[a-zA-Z0-9_-]{1,64}$/.test(scan.project.id) ||
      typeof scan.project.name !== 'string' || !scan.project.name.trim() || scan.project.name.length > 200 ||
-     !Array.isArray(scan.resources) || scan.resources.length > 20000 || typeof scan.complete !== 'boolean') throw new Error('扫描协议版本不兼容');
+     !Array.isArray(scan.resources) || scan.resources.length > 20000 || typeof scan.complete !== 'boolean' ||
+     !Array.isArray(scan.warnings ?? []) || (scan.warnings || []).some(message => typeof message !== 'string' || message.length > 2000)) throw new Error('扫描协议版本不兼容');
   const plan: ImportPlan = {schemaVersion:1,added:0,updated:0,removed:0,unchanged:0,blocked:0,removalSuppressed:false,messages:[]};
   const messages = new Set<string>();
+  for(const warning of (scan.warnings || []).slice(0, 50)) messages.add(warning);
   const parsed = existingComponents(page, scan.project);
   if(parsed.corrupt.length) throw new Error('存在来源记录损坏的组件，已停止增量导入；请修复或移除后重试：' + parsed.corrupt.join('、'));
   const existing = parsed.items;
@@ -128,7 +264,7 @@ function buildPlan(scan: Scan, page: PageNode): PlanState {
     const group = groups.get(item.source.identity) || [];
     group.push(item); groups.set(item.source.identity, group);
   }
-  for(const [identity, group] of groups) {
+  for(const group of groups.values()) {
     if(group.length > 1) for(const item of group) {
       item.blocked = '存在重复来源组件，已跳过';
       messages.add(`${item.component.name}：${item.blocked}`);
@@ -137,21 +273,36 @@ function buildPlan(scan: Scan, page: PageNode): PlanState {
   const scanItems = new Map<string, Candidate>();
   for(const resource of scan.resources) {
     const source = sourceFor(resource, scan.project);
+    const layout = layoutFor(resource);
     if(scanItems.has(source.identity)) throw new Error('扫描包含重复资源身份');
-    scanItems.set(source.identity,{resource,source,hash:contentHash(resource,source)});
+    const item: Candidate = {resource,source,hash:contentHash(resource,source),
+      planned:{shape:'image',override:false,overlap:false}};
+    if(layout) item.layout = layout;
+    scanItems.set(source.identity,item);
     const group = groups.get(source.identity);
-    if(group && group.length === 1 && !group[0].blocked) scanItems.get(source.identity)!.existing = group[0];
+    if(group && group.length === 1 && !group[0].blocked) item.existing = group[0];
   }
   for(const item of scanItems.values()) {
     const group = groups.get(item.source.identity);
-    if(!group) {plan.added++; continue;}
+    if(!group) {
+      item.planned = planState(undefined,item);
+      plan.added++;
+      continue;
+    }
     const target = group[0];
     if(target.blocked || group.length !== 1) {
+      item.planned = {shape:'image',override:false,overlap:false};
       plan.blocked++;
       messages.add(`${target.component.name}：${target.blocked || '存在重复来源组件，已跳过'}`);
       continue;
     }
-    if(isUnchanged(target,item)) plan.unchanged++;
+    item.planned = planState(target,item);
+    if(item.planned.blocked) {
+      plan.blocked++;
+      messages.add(`${target.component.name}：${item.planned.blocked}`);
+      continue;
+    }
+    if(isUnchanged(target,item,item.planned)) plan.unchanged++;
     else {
       plan.updated++;
       if(!target.sync) messages.add(`${target.component.name}：旧版组件缺少同步记录，本次将按扫描结果更新`);
@@ -174,16 +325,11 @@ function buildPlan(scan: Scan, page: PageNode): PlanState {
     adds: [...scanItems.values()].filter(item => !groups.has(item.source.identity)),
     updates: [...scanItems.values()].filter(item => {
       const group = groups.get(item.source.identity);
-      return !!group && group.length === 1 && !group[0].blocked && !isUnchanged(group[0], item);
+      return !!group && group.length === 1 && !group[0].blocked && !item.planned.blocked && !isUnchanged(group[0], item, item.planned);
     }),
     removals: [...groups.values()].filter(group => group.length === 1 && !group[0].blocked &&
       !scanItems.has(group[0].source.identity) && scan.complete).map(group => group[0])
   };
-}
-function isUnchanged(existing: Existing, item: Candidate): boolean {
-  return !!existing.sync && existing.sync.status === 'current' && existing.sync.contentHash === item.hash &&
-    existing.sync.sourceSize.w === item.resource.width && existing.sync.sourceSize.h === item.resource.height &&
-    existing.component.width === item.resource.width && existing.component.height === item.resource.height;
 }
 function categoryFrame(page: PageNode): FrameNode | undefined {
   return page.children.find(node => {
@@ -212,6 +358,10 @@ function writeSync(component: ComponentNode, item: Candidate, imageHash: string)
     sourceSize:{w:item.resource.width,h:item.resource.height},status:'current'};
   component.setPluginData(syncKey,JSON.stringify(sync));
 }
+function writeRecord(component: ComponentNode, planned: Planned): void {
+  if(planned.record) component.setPluginData(NINE_SLICE_RECORD_KEY, serializeNineSliceRecord(planned.record));
+  else if(component.getPluginData(NINE_SLICE_RECORD_KEY)) component.setPluginData(NINE_SLICE_RECORD_KEY, '');
+}
 function markMissing(existing: Existing): void {
   const sync: SyncState = existing.sync || {schemaVersion:1,identity:existing.source.identity,contentHash:'',
     sourceSize:{w:existing.component.width,h:existing.component.height},status:'current'};
@@ -236,27 +386,71 @@ function restoreInstances(sizes: InstanceSize[], mainIds: Set<string>): void {
     catch { /* an auto-layout parent may own the instance size */ }
   }
 }
-function updateComponent(component: ComponentNode, item: Candidate, image: ImagePaint): void {
-  component.resize(item.resource.width,item.resource.height);
-  component.fills = [{...image,scaleMode:'FILL'}];
+type UpdateSnapshot = {
+  component: ComponentNode; width: number; height: number; fills: Paint[]; imageFill?: ImagePaint;
+  source: string; sync: string; record: string; shape?: ComponentShape; parsedRecord?: NineSliceRecord;
+};
+function snapshot(component: ComponentNode, existing: Existing): UpdateSnapshot {
+  return {
+    component, width:component.width, height:component.height,
+    fills:Array.isArray(component.fills) ? [...component.fills] : [],
+    imageFill:imageFillOf(component, existing.shape),
+    source:component.getPluginData(sourceKey), sync:component.getPluginData(syncKey),
+    record:component.getPluginData(NINE_SLICE_RECORD_KEY),
+    shape:existing.shape, parsedRecord:existing.record
+  };
+}
+function restoreSnapshot(api: Pick<PluginAPI,'createRectangle'>, snap: UpdateSnapshot): void {
+  try {
+    for(const child of [...snap.component.children]) child.remove();
+    snap.component.resize(snap.width,snap.height);
+    snap.component.fills = snap.fills;
+    snap.component.setPluginData(sourceKey,snap.source);
+    snap.component.setPluginData(syncKey,snap.sync);
+    snap.component.setPluginData(NINE_SLICE_RECORD_KEY,snap.record);
+    if(snap.shape === 'slices' && snap.parsedRecord && snap.imageFill) {
+      applyNineSliceComponent(api,snap.component,
+        {width:snap.width,height:snap.height,fill:snap.imageFill},snap.parsedRecord.current,
+        {overlap:snap.parsedRecord.overlap});
+    }
+  } catch { /* rollback is best effort; never hide the original import failure */ }
+}
+function applyComponent(api: Pick<PluginAPI,'createRectangle'>, component: ComponentNode, item: Candidate, image: ImagePaint): void {
+  const planned = item.planned;
+  if(planned.shape === 'slices' && planned.margins) {
+    applyNineSliceComponent(api,component,
+      {width:item.resource.width,height:item.resource.height,fill:image},planned.margins,
+      {overlap:planned.overlap});
+  } else {
+    component.resize(item.resource.width,item.resource.height);
+    component.fills = [{...image,scaleMode:'FILL'}];
+  }
   component.setPluginData(sourceKey,JSON.stringify(item.source));
   writeSync(component,item,image.imageHash || '');
+  writeRecord(component,planned);
 }
-function createComponent(api: Pick<PluginAPI,'createComponent'>, target: FrameNode, item: Candidate, image: ImagePaint): ComponentNode {
-  const component = api.createComponent();
+function createComponent(api: Pick<PluginAPI,'createComponent'|'createRectangle'>, target: FrameNode, item: Candidate, image: ImagePaint): ComponentNode {
+  const planned = item.planned;
+  const component = planned.shape === 'slices' && planned.margins
+    ? createNineSliceComponent(api,{width:item.resource.width,height:item.resource.height,fill:image},
+        planned.margins,{overlap:planned.overlap})
+    : api.createComponent();
   target.appendChild(component);
   component.name = `未分类/${item.source.frameName} · ${item.source.relativePath}`;
-  component.resize(item.resource.width,item.resource.height);
-  component.fills = [{...image,scaleMode:'FILL'}];
+  if(planned.shape !== 'slices' || !planned.margins) {
+    component.resize(item.resource.width,item.resource.height);
+    component.fills = [{...image,scaleMode:'FILL'}];
+  }
   component.setPluginData(sourceKey,JSON.stringify(item.source));
   writeSync(component,item,image.imageHash || '');
+  writeRecord(component,planned);
   return component;
 }
 async function loadPage(page: PageNode): Promise<void> {
   // dynamic-page documents require explicit loading before findAll().
   if(typeof page.loadAsync === 'function') await page.loadAsync();
 }
-export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFrame'|'createComponent'|'createImage'|'base64Decode'>): Platform {
+export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFrame'|'createComponent'|'createRectangle'|'createImage'|'base64Decode'>): Platform {
   let busy = false;
   return {
     async validate(project) {return validate(api.currentPage,project);},
@@ -275,7 +469,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFra
       let createdFrame = false;
       let writtenName = '', writtenBinding = '';
       const created: ComponentNode[] = [];
-      const updated: Array<{component: ComponentNode; width: number; height: number; fills: Paint[]; source: string; sync: string}> = [];
+      const updated: UpdateSnapshot[] = [];
       const marked: Array<{component: ComponentNode; sync: string}> = [];
       let instances: InstanceSize[] = [];
       let updatedIds = new Set<string>();
@@ -301,10 +495,9 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFra
           if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已撤销本次导入');
           const component = item.existing?.component;
           if(!component) throw new Error('待更新组件已消失');
-          updated.push({component,width:component.width,height:component.height,fills:Array.isArray(component.fills) ? [...component.fills] : [],
-            source:component.getPluginData(sourceKey),sync:component.getPluginData(syncKey)});
+          updated.push(snapshot(component,item.existing!));
           const image = api.createImage(api.base64Decode(item.resource.png));
-          updateComponent(component,item,{type:'IMAGE',imageHash:image.hash,scaleMode:'FILL'});
+          applyComponent(api,component,item,{type:'IMAGE',imageHash:image.hash,scaleMode:'FILL'});
           progress({done:++done,total});
           await new Promise(resolve=>setTimeout(resolve,0));
         }
@@ -331,12 +524,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'createFra
         restoreInstances(instances, updatedIds);
         return plan;
       } catch(error) {
-        for(const snapshot of updated) {
-          snapshot.component.resize(snapshot.width,snapshot.height);
-          snapshot.component.fills = snapshot.fills;
-          snapshot.component.setPluginData(sourceKey,snapshot.source);
-          snapshot.component.setPluginData(syncKey,snapshot.sync);
-        }
+        for(const snapshot of updated) restoreSnapshot(api,snapshot);
         for(const snapshot of marked) snapshot.component.setPluginData(syncKey,snapshot.sync);
         restoreInstances(instances, updatedIds);
         for(const component of created) component.remove();

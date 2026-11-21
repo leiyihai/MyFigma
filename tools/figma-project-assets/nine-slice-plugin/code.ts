@@ -1,6 +1,10 @@
 import { createNineSlicePlan } from '../packages/nine-slice/src/index';
 import type { Margins } from '../packages/nine-slice/src/index';
 import { applyNineSliceComponent, createNineSliceComponent } from '../packages/nine-slice/src/figma';
+import {
+  NINE_SLICE_RECORD_KEY, createNineSliceRecord, parseNineSliceRecord,
+  serializeNineSliceRecord, type NineSliceRecord
+} from '../packages/nine-slice/src/record';
 
 type Language = 'zh' | 'en' | 'ja' | 'ko' | 'ru' | 'de' | 'fr';
 type Settings = {
@@ -10,9 +14,8 @@ type Settings = {
 };
 type PluginMessage = (Settings & { type: 'save-only' | 'generate' }) | { type: 'ui-ready' };
 type ImageNode = SceneNode & GeometryMixin;
-type SavedSlice = { schemaVersion: 1; margins: Margins; overlap: boolean; width: number; height: number };
+
 type EditableSlice = { component: ComponentNode; margins: Margins; overlap: boolean; fill: ImagePaint; width: number; height: number; target: 'component' | 'instance' };
-const NINE_SLICE_DATA = 'myfigma.nineSlice.v1';
 
 figma.showUI(__html__, { width: 360, height: 740, themeColors: true });
 let currentLang: Language = 'en';
@@ -62,15 +65,8 @@ function deriveSlice(component: ComponentNode): { margins: Margins; overlap: boo
     }
   };
 }
-function savedMargins(component: ComponentNode): SavedSlice | undefined {
-  try {
-    const raw = component.getPluginData(NINE_SLICE_DATA);
-    if (!raw) return undefined;
-    const saved = JSON.parse(raw) as SavedSlice;
-    return saved.schemaVersion === 1 && saved.margins ? saved : undefined;
-  } catch {
-    return undefined;
-  }
+function savedMargins(component: ComponentNode): NineSliceRecord | undefined {
+  return parseNineSliceRecord(component.getPluginData(NINE_SLICE_RECORD_KEY));
 }
 function findEditable(node: SceneNode | undefined): EditableSlice | null {
   if (!node) return null;
@@ -80,7 +76,7 @@ function findEditable(node: SceneNode | undefined): EditableSlice | null {
   if (!fills.length || new Set(fills.map(fill => fill.imageHash)).size !== 1) return null;
   const saved = savedMargins(component);
   const derived = deriveSlice(component);
-  const margins = saved?.margins ?? derived.margins;
+  const margins = saved?.current ?? derived.margins;
   const overlap = saved?.overlap ?? derived.overlap;
   try {
     createNineSlicePlan(component, margins, overlap);
@@ -92,7 +88,12 @@ function findEditable(node: SceneNode | undefined): EditableSlice | null {
 function rememberSlice(component: ComponentNode, settings: Settings, overlap: boolean): void {
   const margins: Margins = { left: settings.left, top: settings.top, right: settings.right, bottom: settings.bottom };
   try {
-    component.setPluginData(NINE_SLICE_DATA, JSON.stringify({ schemaVersion: 1, margins, overlap, width: component.width, height: component.height }));
+    const existing = savedMargins(component);
+    // Margins set by a designer are an override; keep the project parameter that
+    // the atlas importer recorded so both plugins read the same state.
+    const record = createNineSliceRecord(margins, { width: component.width, height: component.height },
+      { project: existing?.project, overlap, override: true });
+    component.setPluginData(NINE_SLICE_RECORD_KEY, serializeNineSliceRecord(record));
   } catch (error) {
     console.error('保存九宫格信息失败', error);
   }

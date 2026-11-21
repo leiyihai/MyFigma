@@ -5,13 +5,20 @@ export interface Source {
   identity: string; engineReference: string; sourceSize: {w: number; h: number};
   crop: {x: number; y: number; w: number; h: number}; offset: {x: number; y: number};
 }
-export interface Resource { width: number; height: number; png: string; source: Source }
+export interface Margins { left: number; top: number; right: number; bottom: number }
+export interface LayoutUsage {
+  references: number;
+  nineSlice?: { margins: Margins; usage: number };
+}
+export interface Resource { width: number; height: number; png: string; source: Source; layout?: LayoutUsage }
 export interface ScanSummary {
   scanRoot: string; atlases: number; atlasFrames: number; sprites: number; standalone: number;
   resources: number; errors: number; skippedLinks: number; entries: number;
+  layoutFiles?: number; layoutReferences?: number; layoutNineSlice?: number;
+  layoutIgnored?: number; layoutInvalid?: number;
 }
 export interface Scan {
-  schemaVersion: 2; project: PublicProject; resources: Resource[]; errors: string[];
+  schemaVersion: 3; project: PublicProject; resources: Resource[]; errors: string[]; warnings?: string[];
   summary: ScanSummary; truncated: boolean; complete: boolean;
 }
 export interface PageStatus { valid: boolean; message: string }
@@ -54,7 +61,7 @@ export class HelperClient {
   async projects(): Promise<Project[]> { return (await this.request<{projects:Project[]}>('/v1/projects')).projects; }
   async saveProject(project: Project): Promise<Project[]> { return (await this.request<{projects:Project[]}>('/v1/projects','PUT',project)).projects; }
   async deleteProject(id: string): Promise<Project[]> { return (await this.request<{projects:Project[]}>('/v1/projects/'+encodeURIComponent(id),'DELETE')).projects; }
-  scan(projectId: string): Promise<Scan> { return this.request('/v1/scan','POST',{projectId},2); }
+  scan(projectId: string): Promise<Scan> { return this.request('/v1/scan','POST',{projectId},3); }
 }
 export interface State {
   connected: boolean; busy: boolean; phase: string; error: string;

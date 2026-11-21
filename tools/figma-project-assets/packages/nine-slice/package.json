@@ -11,6 +11,10 @@
     "./figma": {
       "types": "./dist/figma.d.ts",
       "default": "./dist/figma.js"
+    },
+    "./record": {
+      "types": "./dist/record.d.ts",
+      "default": "./dist/record.js"
     }
   },
   "scripts": {

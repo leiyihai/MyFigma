@@ -28,7 +28,7 @@ cargo build --release --locked
 - `token`：首次启动从操作系统随机源生成的 256 位 bearer 令牌。
 - `projects.json`：项目登记表；本机不同 Figma 文件复用。
 - `projects.tmp`：登记保存时先独占创建、同步，再替换正式文件；写失败不更新内存登记表。
-- `scans/<projectId>.json`：最近一次完整扫描结果的本地副本，含恢复图片 base64、来源身份与错误；当前仅写入、尚无读取方（增量判定由 Figma 组件的 `atlas.sync.v1` 记录完成），体积可能较大，删除登记不会自动清理。
+- `scans/<projectId>.json`：最近一次完整扫描结果的本地副本，含恢复图片 base64、来源身份、布局节点引用/边距频次和错误；下次扫描读取其中已选边距处理并列，增量判定仍由 Figma 组件的 `atlas.sync.v1` 记录完成。体积可能较大，删除登记不会自动清理。
 
 扫描结果先落盘到本机 `scans` 目录再返回，Figma 文档只保存白名单来源字段；不写凭据日志。`--data-dir <directory>`、`--port <port>` 供隔离测试/显式本机配置使用（`0` 表示随机端口）；生产插件 manifest 默认仅放行 38473。不要选择共享目录。Windows 依赖当前用户 Local AppData 的默认 ACL；不会主动扩宽 ACL。Unix 测试环境目录/新文件权限分别是 0700/0600，但不承诺非 Windows 产品支持。
 
@@ -59,7 +59,7 @@ cargo build --release --locked
 | GET `/v1/projects` | 无 | `projects: Project[]` |
 | PUT `/v1/projects` | `{id,name,path,maintained}` | 全部 `projects`；编号相同则编辑 |
 | DELETE `/v1/projects/<id>` | 无 | 全部 `projects`；只删登记，不删资源 |
-| POST `/v1/scan` | `{projectId}` | `schemaVersion: 2`、`project:{id,name}`、`resources`、`errors`、`summary`、`truncated`、`complete` |
+| POST `/v1/scan` | `{projectId}` | `schemaVersion: 3`、`project:{id,name}`、`resources`、`errors`、`warnings`、`summary`、`truncated`、`complete` |
 
 `Project.id` 为 1–64 个 ASCII 字母、数字、下划线或连字符，是稳定项目身份。编辑编号意味着新项目；UI 编辑时锁定编号。名称非空且最多 200 UTF-8 字节。路径仅在助手登记与受认证 UI 中存在，不进入扫描响应的项目字段。
 
@@ -95,7 +95,13 @@ cargo build --release --locked
 
 规模上限仅用于防止失控：单次最多 20 000 项资源、恢复像素总量 10 亿、扫描条目 200 000、单图 4096×4096；JSON 最大 16 MiB、PNG 最大 64 MiB。触达上限时返回已恢复内容并给出明确错误、`truncated:true`、`complete:false`，不静默截断。输出是**各散图独立 PNG 的 base64**，不是整张图集。
 
-旋转帧、越界帧、缺图、坏 JSON 等明确报告问题位置（图集相对路径与帧名）并跳过该帧或该图集，不生成错误图片；`complete:false` 表示存在错误或扫描未完成，`truncated:true` 表示触达规模上限；摘要给出图集数/图集帧数/散图数/独立图片数/异常数/条目数。允许导入已成功拆解的散图，但不表示完整扫描；失败不会被当作源资源移除。没有删除推断或增量逻辑。未知结构不承诺兼容。不做九宫格统计、分类或对照页（留给 #4–12）；托盘由 #11 提供。
+旋转帧、越界帧、缺图、坏 JSON 等明确报告问题位置（图集相对路径与帧名）并跳过该帧或该图集，不生成错误图片；`complete:false` 表示存在错误或扫描未完成，`truncated:true` 表示触达规模上限；摘要给出图集数/图集帧数/散图数/独立图片数/异常数/条目数。允许导入已成功拆解的散图，但不表示完整扫描；失败不会被当作源资源移除。没有删除推断或增量逻辑。未知结构不承诺兼容。不做分类或对照页（留给 #8–10、#12）；托盘由 #11 提供。
+
+## 布局九宫格统计
+
+登记游戏根且存在 `<根>/res/layout` 时递归读取布局 JSON（最多 32 层；坏文件只警告并跳过）。节点 `Property` 中 `ImageName`、`NormalImage`、`PushedImage`、`LayoutBackImage`、`Progress*Image` 等图片字段按 `set:<图集文件名> image:<散图名>` 或 `image:<项目内相对路径>` 识别；`StretchType: NineGrid` 的 `StretchOffset` 按左、上、右、下解释，四舍五入为整数边距。
+
+同一散图保留全部合法参数及使用次数，扫描响应只发送最高频的一套参数，不创建变体。并列时若上次选值仍在最高频候选中就保留，否则按左、上、右、下的字典序稳定选择；坏 JSON、负边距、四边之和超过图片尺寸会给出警告并排除该参数。布局引用未命中项目内图集/散图时按公共资源汇总忽略，不向项目外补找。返回值只带选择结果、汇总数和警告；`scans/<id>.json` 保存每个布局文件、节点、引用、边距、命中原因及全部参数频次。
 
 ## 来源身份
 
@@ -121,7 +127,7 @@ cargo test --locked
 npm test
 ```
 
-`npm test` 的 pretest 自动构建 Rust，然后运行真实子进程的集成测试（不是 Rust 单元 mock）：7 个 HTTP 协议／像素用例、11 个递归扫描／独立图片用例，加上 5 个产物与托盘用例，共 23 个。`pngjs` 仅用于测试读取恢复 PNG，对照固定样本的 RGBA 字面值；Rust 实际解码、拆图、编码由 `image` 执行。Rust 原生 `cargo test` 当前只有构建检查，没有额外单元用例。
+`npm test` 的 pretest 自动构建 Rust，然后运行真实子进程的集成测试（不是 Rust 单元 mock）：HTTP 协议／像素、递归扫描／独立图片、布局九宫格统计，以及产物与托盘用例。`pngjs` 仅用于测试读取恢复 PNG，对照固定样本的 RGBA 字面值；Rust 实际解码、拆图、编码由 `image` 执行。Rust 原生 `cargo test` 当前只有构建检查，没有额外单元用例。
 
 公开边界测试覆盖鉴权、Host/CORS/预检、请求限制、项目增删改和重启持久化、拆图像素与身份、非法/外部资源及缺失恢复信息。新增 #3 回归（`tests/scan.test.mjs`，共 11 例）覆盖：游戏根/直接 imageset 两种登记、嵌套递归、跨图集同名、独立图片与图集排除、透明留白与偏移像素、坏 JSON/缺图/旋转/越界定位、超过旧上限的整本导入与触达上限的显式截断报告、助手侧扫描缓存不含绝对路径，以及本机样本包 g1008 子集（9 图集 263 帧 + 1 独立图片，逐像素对照原图集裁切）。
 

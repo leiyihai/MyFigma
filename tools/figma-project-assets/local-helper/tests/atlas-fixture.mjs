@@ -48,6 +48,28 @@ export async function writeAtlas(path, { image, frames, size = { w: 0, h: 0 }, m
   await writeFile(path, JSON.stringify(doc));
 }
 
+// Minimal UI layout document shape used by the three acceptance projects:
+// nodes carry a Property[] of {Name,Value} entries, image refs are
+// `set:<atlas file> image:<frame>` or `image:<project-relative path>`.
+export async function writeLayout(path, nodes) {
+  const doc = { Dialog: { Window: { Type: 'Layout', Name: 'Root', Property: [], Window: nodes } } };
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(doc));
+}
+
+export function layoutImageNode(name, reference, offset) {
+  return {
+    Type: 'StaticImage', Name: name,
+    Property: [
+      ...(offset === undefined ? [] : [
+        { Name: 'StretchType', Value: 'NineGrid' },
+        { Name: 'StretchOffset', Value: offset }
+      ]),
+      { Name: 'ImageName', Value: reference }
+    ]
+  };
+}
+
 export async function register(f, id = 'g1008', name = '起床战争') {
   const response = await f.request('/v1/projects', 'PUT', { id, name, path: f.project, maintained: true });
   if (response.status !== 200) throw new Error('registration failed: ' + await response.text());

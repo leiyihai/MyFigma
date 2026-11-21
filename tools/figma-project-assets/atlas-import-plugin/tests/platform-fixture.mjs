@@ -32,7 +32,16 @@ export function figmaFixture() {
       page.appendChild(n);return n;
     },
     createComponent(){
-      const n={type:'COMPONENT',id:'component-'+(++nodeSequence),name:'Component',children:[],data:{},fills:[],
+      const n={type:'COMPONENT',id:'component-'+(++nodeSequence),name:'Component',children:[],data:{},fills:[],layoutMode:'NONE',
+        getPluginData(k){return this.data[k]||'';},setPluginData(k,v){this.data[k]=v;},
+        resize(w,h){this.width=w;this.height=h;},
+        appendChild(c){this.children=this.children.filter(child=>child!==c);Object.defineProperty(c,'parent',{value:this,writable:true,configurable:true,enumerable:false});this.children.push(c);},
+        remove(){removeFromParent(n);}
+      };
+      return n;
+    },
+    createRectangle(){
+      const n={type:'RECTANGLE',name:'Rectangle',children:[],data:{},fills:[],locked:false,constraints:{horizontal:'MIN',vertical:'MIN'},
         getPluginData(k){return this.data[k]||'';},setPluginData(k,v){this.data[k]=v;},
         resize(w,h){this.width=w;this.height=h;},
         appendChild(c){this.children=this.children.filter(child=>child!==c);Object.defineProperty(c,'parent',{value:this,writable:true,configurable:true,enumerable:false});this.children.push(c);},
