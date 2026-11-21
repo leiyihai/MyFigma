@@ -1,4 +1,6 @@
 mod atlas;
+mod lifecycle;
+mod tray;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -6,6 +8,8 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
+    thread,
+    time::Duration,
 };
 use tiny_http::{Header, Method, Request, Response, Server};
 
@@ -255,15 +259,24 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .map(PathBuf::from)
         .map(|p| p.join("MyFigmaAssets"));
     let mut port = 38473u16;
+    let mut show_tray = true;
+    let mut test_exit_after_ms = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--data-dir" => data = args.next().map(PathBuf::from),
             "--port" => port = args.next().ok_or("missing port")?.parse()?,
+            // 仅测试/CI：跳过托盘，直接等待退出请求。
+            "--no-tray" => show_tray = false,
+            // 仅测试：延迟触发与托盘「退出」相同的退出路径。
+            "--test-exit-after-ms" => {
+                test_exit_after_ms = Some(args.next().ok_or("missing exit delay")?.parse()?)
+            }
             _ => return Err("unknown argument".into()),
         }
     }
-    let mut app = App::open(data.ok_or("LOCALAPPDATA unavailable")?)?;
+    let data = data.ok_or("LOCALAPPDATA unavailable")?;
+    let app = App::open(data.clone())?;
     let server = Server::http((std::net::Ipv4Addr::LOCALHOST, port))?;
     let actual_port = server
         .server_addr()
@@ -271,9 +284,35 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .ok_or("invalid listener")?
         .port();
     println!("LISTEN {actual_port}");
-    for request in server.incoming_requests() {
-        serve(request, &mut app, actual_port);
+    let shutdown = lifecycle::Shutdown::new();
+    let worker = {
+        let shutdown = shutdown.clone();
+        thread::spawn(move || lifecycle::serve(server, app, actual_port, &shutdown))
+    };
+    let tray_result = if show_tray {
+        tray::run(tray::Tray {
+            port: actual_port,
+            data_dir: &data,
+            shutdown: shutdown.clone(),
+            test_exit_after_ms,
+        })
+    } else {
+        if let Some(delay) = test_exit_after_ms {
+            let shutdown = shutdown.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(delay));
+                shutdown.request();
+            });
+        }
+        shutdown.wait();
+        Ok(())
+    };
+    if let Err(reason) = tray_result {
+        eprintln!("托盘不可用（{reason}），助手继续在后台运行；请关闭启动它的终端窗口停止。");
+        shutdown.wait();
     }
+    let _ = worker.join();
+    println!("STOP");
     Ok(())
 }
 fn main() {

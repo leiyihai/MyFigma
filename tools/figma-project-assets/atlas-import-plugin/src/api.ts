@@ -35,7 +35,7 @@ export class HelperClient {
         Authorization: 'Bearer ' + this.token, ...(body === undefined ? {} : {'Content-Type':'application/json'})
       }, body: body === undefined ? undefined : JSON.stringify(body), cache:'no-store', credentials:'omit', redirect:'error',
       signal: AbortSignal.timeout(30000)});
-    } catch { throw new HelperConnectionError('助手未连接：请启动 figma-assets-helper，检查浏览器本地网络权限后重新连接'); }
+    } catch { throw new HelperConnectionError('助手未连接：请启动 figma-assets-helper，并确认任务栏托盘图标显示「资源助手运行中」；已启动时请检查浏览器的本地网络权限后点击「连接助手」重新连接'); }
     if (response.status === 401) throw new HelperAuthError('配对失败：请从本机 token 文件重新复制令牌');
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));

@@ -9,7 +9,8 @@
 - [独立九宫格插件](nine-slice-plugin/README.md)：保留单张／批量转换，修复预览拖动；与导入插件分别构建。
 - [共用九宫格核心](packages/nine-slice/README.md)：构建时复用，不运行时调用另一个插件。
 
-在 `local-helper` 执行 `cargo run --release --locked` 启动助手；首次按该目录 README 从本机令牌文件手动配对，勾选记住后下次自动连接。不把令牌贴到聊天或 Issue。
+在 `local-helper` 执行 `cargo run --release --locked` 或直接运行 `target
+eleaseigma-assets-helper.exe` 启动助手；它驻留通知区域（托盘），右键菜单可查看运行状态、打开数据目录或退出，退出后端口关闭。首次按该目录 README 从本机令牌文件手动配对，勾选记住后下次自动连接。不把令牌贴到聊天或 Issue。
 
 在两个插件目录分别执行 `npm ci` 和 `npm run build`。两个插件都导入各自根目录的 `manifest.json`；九宫格清单指向 `dist/` 下的构建产物。客户端要求有效开发插件身份时需自行注册。本次已在真实客户端验证两个开发插件加载及 localhost 配对连接。
 
@@ -25,7 +26,7 @@
 | --- | --- | --- |
 | `packages/nine-slice` | `npm ci && npm run typecheck && npm test` | 公共切片规划 |
 | `nine-slice-plugin` | `npm ci && npm run typecheck && npm test` | 插件入口与真实浏览器预览交互 |
-| `local-helper` | `npm ci && cargo fmt --check && cargo check --locked && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked && npm test` | 构建检查与真实 Rust 子进程 HTTP／像素集成测试 |
+| `local-helper` | `npm ci && cargo fmt --check && cargo check --locked && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked && npm test` | 构建检查、真实产物启动/托盘退出/重启持久化与真实 Rust 子进程 HTTP／像素集成测试 |
 | `atlas-import-plugin` | `npm ci && npm run test:all` | 助手至插件任务链路与浏览器管理界面 |
 
 浏览器测试需要 Playwright Chromium（九宫格）和系统 Chrome（图集导入）。Rust 原生测试当前没有单元用例；真实 HTTP 集成测试由 Node 驱动，不能把 `cargo test` 的构建通过当作全部行为验证。
@@ -47,7 +48,8 @@
 
 ## 尚未实现／验收
 
-- 增量更新、取消与补齐、自动九宫格导入、已有九宫格原位编辑、自动或手动分类、可选图集对照页、托盘及真实项目性能验收，分别属于后续 #4–12。
+- 增量更新、取消与补齐、自动九宫格导入、已有九宫格原位编辑、自动或手动分类、可选图集对照页及真实项目性能验收，分别属于后续 #4–10、#12。
+- 完整递归扫描／独立图片（#3）与 Windows 托盘助手（#11）已完成；真实鼠标托盘点击仍待人工验收。
 - 未操作测试文件以外的用户设计；未知图集格式、三个真实项目全量兼容与性能仍未验收。
 - 用户反馈的主面板排版、项目编号说明、编辑锁定态、免滚动及记住本机配对已完成；首次配对仍需手动复制令牌。
 - 原独立九宫格目录未覆盖，Issues 未自动关闭。
