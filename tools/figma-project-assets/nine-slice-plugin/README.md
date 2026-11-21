@@ -14,7 +14,7 @@ npx playwright install chromium
 npm test
 ```
 
-Figma 桌面端通过开发插件菜单导入 **`dist/manifest.json`**；同目录包含独立的 `code.js` 和 `ui.html`。无需本地助手、图集导入插件、旧插件、ui-studio 或运行时网络服务。构建只读取仓库的 `tools/figma-project-assets/packages/nine-slice/src/` 并 bundle 到产物。
+Figma 桌面端通过开发插件菜单导入本目录的 **`manifest.json`**；其中 `main`／`ui` 指向构建后的 `dist/code.js` 与 `dist/ui.html`，因此先执行构建。无需本地助手、图集导入插件、旧插件、ui-studio 或运行时网络服务。构建只读取仓库的 `tools/figma-project-assets/packages/nine-slice/src/` 并 bundle 到产物。
 
 没有复用旧发布插件的 ID；如 Figma 客户端要求注册 ID，先创建独立开发插件，使用其新 ID，勿覆盖旧发布插件。实际客户端导入尚未验证。
 

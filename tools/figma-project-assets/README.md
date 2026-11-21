@@ -11,7 +11,7 @@
 
 在 `local-helper` 执行 `cargo run --release --locked` 启动助手；按该目录 README 从本机令牌文件手动配对，不把令牌贴到聊天或 Issue。
 
-在两个插件目录分别执行 `npm ci` 和 `npm run build`。图集导入插件导入其根目录的 `manifest.json`；独立九宫格插件导入其 `dist/manifest.json`。客户端要求有效开发插件身份时需自行注册。本次已在真实客户端验证两个开发插件加载及 localhost 配对连接。
+在两个插件目录分别执行 `npm ci` 和 `npm run build`。两个插件都导入各自根目录的 `manifest.json`；九宫格清单指向 `dist/` 下的构建产物。客户端要求有效开发插件身份时需自行注册。本次已在真实客户端验证两个开发插件加载及 localhost 配对连接。
 
 最小演示将助手的 `examples` 目录登记为资源目录，可得到红、绿两个独立素材。当前图集导入只支持小型直接目录，普通主组件暂归未分类；并非三个实际项目全量导入版本。
 

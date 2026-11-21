@@ -66,6 +66,14 @@ npm run test:browser -- --grep 'small selected'
 - 100×80 九色原图，边距左20／上10／右8／下12，生成主组件及 180×80、100×140、180×140 实例。导出渲染后全部像素与独立预期一致，四角几何保持，边及中心正确拉伸，实例仍指向同一主组件。
 - 关闭消缝的半透明素材，原尺寸和双向拉伸实例均保持 alpha 128；全图 RGB 最大误差 1，无空隙或透明度叠加。
 
+## 清单入口修复
+
+真实客户端再次打开报 `Cannot read properties of undefined (reading 'currentPage')`，随后 `Unable to load code ... nine-slice-plugin\code.js`。旧插件与导入插件可正常打开，说明插件运行时本身可用。
+
+根因是已注册的是插件根目录 `manifest.json`，其中 `main` 仍指向根目录不存在的 `code.js`；真实产物在 `dist/code.js`。构建还会把同一份清单复制到 `dist/`，形成两个入口。
+
+已改为唯一根清单，`main`／`ui` 指向 `dist/code.js` 和 `dist/ui.html`；构建删除陈旧 `dist/manifest.json`，不再复制第二份清单。新增清单回归检查两个目标均存在且留在插件目录。真实客户端重新打开后 UI 恢复，控制台无该错误。
+
 ## 未验证／集成注意
 
 不将以上小样验收扩展为任意复杂图层兼容保证；未穷举开启重叠消缝的半透明素材、任意小尺寸缩放或所有图片。浏览器替身结果与上述真实 Figma 证据分别记录。

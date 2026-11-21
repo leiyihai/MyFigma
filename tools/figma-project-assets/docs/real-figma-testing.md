@@ -100,6 +100,7 @@ with sync_playwright() as p:
 | --- | --- | --- |
 | manifest 拒绝开发域名 | 官方 manifest 规则、默认地址、客户端白名单和助手 Host 校验是否一致 | 数字 IP 写法被客户端拒绝；改为文档支持的 `http://localhost:端口`，同时保留仅回环访问与令牌认证 |
 | 打开插件就报 import expression | 实际主线程 bundle，而非只查源码或类型检查 | 合法的 `async import(...)` 方法名触发安全求值器检查；改成 `importResources`，并用 SES 加载实际 bundle 做回归 |
+| 打开插件即报 `currentPage` 未定义或 `Unable to load code` | 已注册 manifest 的 `main`／`ui` 是否指向真实构建产物，构建后是否产生多个同名入口 | 根清单曾指向不存在的根目录 `code.js`，真实产物在 `dist/`；统一唯一清单并加目标存在性回归 |
 | 助手连接后，页面校验约60秒超时 | 请求是否发出、主线程是否回复、消息来源窗口／origin、requestId 是否匹配 | 回复已经到达 UI，但来自 Figma 顶层而非直接父窗口，被来源过滤丢弃 |
 | Figma 控制台大量红字 | 清空后单次复现，展开与本插件有关的错误和栈 | 头像 CORS、遥测超时、网络能力警告不能单独证明插件根因 |
 | 浏览器测试页面本身加载不了 | frame 层级、混合内容、本地网络权限 | 将 HTTPS 测试宿主嵌入 HTTP 本地页面可能先被浏览器阻止，尚未走到待测消息路径 |
