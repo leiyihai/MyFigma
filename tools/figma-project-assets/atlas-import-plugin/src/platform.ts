@@ -1,7 +1,7 @@
 import type { CategoryResult, ImportPlan, ImportReport, LayoutUsage, Platform, Progress, PublicProject, Resource, Scan, SelectionState, Source, TidyResult } from './api';
 import { Cancellation } from './api';
-import { categoryConfigKey, categoryIndex, categoryOr, classify, componentName, knownCategory, readCategoryConfig,
-  serializeCategories, unsortedCategory, type CategoryConfig } from './category';
+import { categoryConfigKey, categoryIndex, categoryOr, classify, componentName, knownCategory, categoryNameProblem,
+  nextCategoryColor, readCategoryConfig, serializeCategories, unsortedCategory, type CategoryConfig } from './category';
 import { createNineSlicePlan, type Margins } from '../../packages/nine-slice/src/index';
 import { applyNineSliceComponent, createNineSliceComponent } from '../../packages/nine-slice/src/figma';
 import {
@@ -852,6 +852,17 @@ function syncComparePage(page: PageNode, items: Map<string, CompareItem>, api: P
   }
   return {added, removed, kept, groups: keys.length, messages};
 }
+function readCategoryState(page: PageNode) {
+  const config = pageCategories(page);
+  return {schemaVersion:1 as const, categories:config.categories.map(category => ({name:category.name, color:category.color}))};
+}
+// 类别管理只写已绑定的资源页：空白未绑定页写配置后会变成「非空未绑定页」，
+// 反而让后续导入被自己的守卫拒绝。
+function resourcePage(page: PageNode, project: PublicProject): void {
+  const status = validate(page, project);
+  if(!status.valid) throw new Error(status.message);
+  if(!page.getPluginData(bindingKey)) throw new Error('当前页还不是本工具的资源页：请先导入主组件，再管理类别');
+}
 export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'createPage'|'createFrame'|'createComponent'|'createRectangle'|'createImage'|'base64Decode'|'getNodeByIdAsync'>): Platform {
   let busy = false;
   return {
@@ -865,7 +876,89 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
       const raw = page.getPluginData(categoryConfigKey);
       const {config, repaired} = readCategoryConfig(raw);
       if(repaired && page.getPluginData(bindingKey)) page.setPluginData(categoryConfigKey, serializeCategories(config));
-      return {schemaVersion:1, categories:config.categories.map(category => ({name:category.name, color:category.color}))};
+      return readCategoryState(page);
+    },
+    async addCategory(project, name) {
+      if(busy) throw new Error('任务执行中，请等待完成');
+      if(!project || typeof project.id !== 'string' || !project.name) throw new Error('项目信息无效');
+      const page = api.currentPage;
+      await loadPage(page);
+      resourcePage(page, project);
+      const problem = categoryNameProblem(name);
+      if(problem) throw new Error(problem);
+      const category = (name as string).trim();
+      const config = pageCategories(page);
+      if(config.categories.some(existing => existing.name === category)) throw new Error(`已存在类别「${category}」，请换一个名称`);
+      // 配置读回上限是 64 个：越过上限会让整份配置被判为损坏并回退默认七类，所以先拒绝。
+      if(config.categories.length >= 64) throw new Error('类别数量已达上限 64 个，请先删除不用的类别');
+      const next: CategoryConfig = {schemaVersion:1,
+        categories:[...config.categories, {name:category, color:nextCategoryColor(config.categories)}]};
+      busy = true;
+      const created: FrameNode[] = [];
+      try {
+        // 先建 Frame 再写配置：写配置后该 Frame 才被认领，失败时只回滚本次新建的空 Frame。
+        ensureCategoryFrame(page, api, category, created);
+        page.setPluginData(categoryConfigKey, serializeCategories(next));
+        return {...readCategoryState(page), moved:0, message:`已新增类别「${category}」`};
+      } catch(error) {
+        for(const frame of created) if(!frame.children.length) frame.remove();
+        throw error;
+      } finally { busy = false; }
+    },
+    async removeCategory(project, name) {
+      if(busy) throw new Error('任务执行中，请等待完成');
+      if(!project || typeof project.id !== 'string' || !project.name) throw new Error('项目信息无效');
+      const page = api.currentPage;
+      await loadPage(page);
+      resourcePage(page, project);
+      const config = pageCategories(page);
+      const category = knownCategory(config, name);
+      // 定位失败的名称不再走 categoryOr，以免把未分类当成可删除目标。
+      if(!category) throw new Error(`当前页没有类别「${typeof name === 'string' ? name : ''}」`);
+      if(category === unsortedCategory) throw new Error('「未分类」是兜底类别，不能删除');
+      const frames = managedCategoryFrames(page).filter(frame => frameCategory(frame, config) === category);
+      const moved: Array<{node:SceneNode;frame:FrameNode;manual:string}> = [];
+      const created: FrameNode[] = [];
+      let layouts: CategoryLayout[] = [];
+      let movedCount = 0;
+      busy = true;
+      try {
+        // 迁移顺序：先把每个子节点（主组件与用户自有对象）移到未分类并修正人工覆盖，
+        // 再刷新显示名，最后才写配置与删 Frame——任何一步失败都能把已移动的节点放回原处。
+        const children = frames.flatMap(frame => frame.children.map(node => ({node:node as SceneNode, frame})));
+        if(children.length) {
+          const fallback = ensureCategoryFrame(page, api, unsortedCategory, created);
+          layouts = pauseCategoryLayouts([fallback, ...frames]);
+          for(const item of children) {
+            try {
+              fallback.appendChild(item.node);
+              const previous = item.node.getPluginData(manualCategoryKey);
+              moved.push({...item, manual:previous});
+              if(previous === category) item.node.setPluginData(manualCategoryKey, unsortedCategory);
+              if(item.node.type === 'COMPONENT') movedCount++;
+            } catch(error) {
+              for(const done of moved) {
+                try { done.frame.appendChild(done.node); done.node.setPluginData(manualCategoryKey, done.manual); } catch { /* 保留可见错误，不隐藏失败 */ }
+              }
+              throw new Error(`删除类别失败：${item.node.name} 无法移动到未分类，本次未做任何修改（${error instanceof Error ? error.message : '移动失败'}）`);
+            }
+          }
+          restoreCategoryLayouts(layouts); layouts = [];
+          refreshDisplayNames(page, project, []);
+        }
+        const next: CategoryConfig = {schemaVersion:1,
+          categories:config.categories.filter(existing => existing.name !== category)};
+        page.setPluginData(categoryConfigKey, serializeCategories(next));
+        for(const frame of frames) if(!frame.children.length) frame.remove();
+        return {...readCategoryState(page), moved:movedCount,
+          message:movedCount ? `已删除类别「${category}」，${movedCount} 个主组件移到「${unsortedCategory}」`
+            : `已删除类别「${category}」`};
+      } finally {
+        restoreCategoryLayouts(layouts);
+        // 只有本次新建且仍为空的未分类 Frame 需要回滚，已有 Frame 保留。
+        for(const frame of created) if(!frame.children.length) frame.remove();
+        busy = false;
+      }
     },
     async preview(scan) {
       if(busy) throw new Error('导入任务正在执行');

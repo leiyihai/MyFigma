@@ -1,6 +1,6 @@
 import {HelperAuthError,HelperClient,Workflow} from './api';
 import type {CategoryState,Platform,Progress,Project,SelectionState} from './api';
-import {defaultCategories} from './category';
+import {defaultCategories,categoryNameProblem,nextCategoryColor,unsortedCategory} from './category';
 import type {Category} from './category';
 type Pairing={schemaVersion:1;address:string;token:string};
 function el<T extends HTMLElement>(id:string):T {const node=document.getElementById(id);if(!node)throw new Error('界面元素缺失');return node as T;}
@@ -35,6 +35,8 @@ const platform:Platform={
   tidy:project=>rpc('tidy',{project}),
   selection:project=>rpc('selection',{project}),
   categories:()=>rpc('categories',{}),
+  addCategory:(project,name)=>rpc('add-category',{project,name}),
+  removeCategory:(project,name)=>rpc('remove-category',{project,name}),
   setCategory:(project,ids,category)=>rpc('set-category',{project,ids,category})
 };
 let workflow:Workflow|undefined;
@@ -47,6 +49,7 @@ let helperFolderOpened=false;
 let editingId:string|undefined;
 const dialog=el<HTMLDialogElement>('management');
 const pairingDialog=el<HTMLDialogElement>('pairing');
+const categoryManager=el<HTMLDialogElement>('category-manager');
 const detailsDialog=el<HTMLDialogElement>('details-dialog');
 function placeTooltip(wrap:HTMLElement) {
   const tip=wrap.querySelector<HTMLElement>('.tooltip');if(!tip)return;
@@ -81,6 +84,9 @@ document.querySelectorAll<HTMLElement>('.help-wrap').forEach(wrap=>{
 // 标签节点只在配置变化时重建，选中/混合/禁用只更新属性，保留键盘焦点。
 let tagSignature='';
 let lastCurrentTag='';
+// 类别管理弹窗的一次会话状态：删除确认与最近一次变更结果，关闭后不保留。
+let pendingCategoryRemoval='';
+let categoryNotice='';
 function buildTags(container:HTMLElement) {
   container.replaceChildren();
   for(const category of categoryChoices) {
@@ -163,6 +169,93 @@ async function classifyAs(category:string) {
   if(selection.members.every(member=>member.category===category))return;
   await workflow.setCategory(category);
 }
+function renderCategoryManager(busy:boolean,connected:boolean) {
+  const names=categoryChoices.map(category=>category.name);
+  if(pendingCategoryRemoval&&!names.includes(pendingCategoryRemoval))pendingCategoryRemoval='';
+  const open=categoryManager.open;
+  el('category-error').textContent=open?uiError:'';
+  el('category-notice').textContent=categoryNotice;
+  const list=el('category-list');
+  list.replaceChildren();
+  for(const category of categoryChoices) {
+    const row=document.createElement('li');
+    row.className='category-manage-row';
+    row.dataset.category=category.name;
+    const dot=document.createElement('span');
+    dot.className='category-dot';dot.style.setProperty('--tag',category.color);dot.setAttribute('aria-hidden','true');
+    const name=document.createElement('span');name.className='category-manage-name';name.textContent=category.name;
+    row.append(dot,name);
+    if(category.name===unsortedCategory) {
+      const fallback=document.createElement('span');fallback.className='chip';fallback.textContent='兜底类别';
+      fallback.title='无法确定用途的组件归入此类别，因此不能删除。';
+      row.append(fallback);
+    } else {
+      const remove=document.createElement('button');
+      remove.type='button';remove.className='quiet';remove.dataset.remove=category.name;remove.textContent='删除';
+      remove.title=`删除类别「${category.name}」：其中的主组件会先移到「未分类」。`;
+      remove.disabled=busy||!connected;
+      // 不用悬浮提示：删除后确认条紧贴在列表下方出现，浮层会盖住它；改用原生 title。
+      remove.onclick=()=>{pendingCategoryRemoval=category.name;categoryNotice='';render();};
+      row.append(remove);
+    }
+    list.append(row);
+  }
+  const bar=el('category-confirm');
+  bar.replaceChildren();
+  bar.hidden=!pendingCategoryRemoval;
+  if(pendingCategoryRemoval) {
+    bar.dataset.confirm=pendingCategoryRemoval;
+    const dot=document.createElement('span');
+    dot.className='category-dot';
+    dot.style.setProperty('--tag',categoryChoices.find(category=>category.name===pendingCategoryRemoval)?.color||'#8b8d98');
+    dot.setAttribute('aria-hidden','true');
+    const text=document.createElement('span');text.className='category-manage-name';
+    text.textContent=`删除「${pendingCategoryRemoval}」？其中的主组件会移到「${unsortedCategory}」`;
+    const actions=document.createElement('span');actions.className='confirm-actions';
+    const confirm=document.createElement('button');
+    confirm.type='button';confirm.className='primary';confirm.textContent='删除类别';
+    confirm.disabled=busy||!connected||!workflow?.state.selected;
+    const removing=pendingCategoryRemoval;
+    confirm.onclick=()=>void run(()=>deleteCategory(removing));
+    const cancel=document.createElement('button');
+    cancel.type='button';cancel.className='quiet';cancel.textContent='取消';
+    cancel.onclick=()=>{pendingCategoryRemoval='';render();};
+    actions.append(confirm,cancel);
+    bar.append(dot,text,actions);
+  } else delete bar.dataset.confirm;
+  const value=input('new-category').value.trim();
+  const problem=categoryNameProblem(value);
+  const duplicate=!!value&&names.includes(value);
+  const selected=!!workflow?.state.selected;
+  const reason=!connected?'先连接资源助手'
+    :busy?'任务执行中，请等待完成'
+    :!selected?'先选择游戏':!value?'输入类别名称'
+    :problem||(duplicate?'已存在同名类别，请换一个名称':undefined);
+  el<HTMLButtonElement>('add-category').disabled=!!reason;
+  const note=el('new-category-note');
+  note.textContent=reason||'颜色按调色板顺序自动分配，已用颜色不会被改写';
+  note.classList.toggle('warning',!!reason&&!!value);
+  const color=nextCategoryColor(categoryChoices);
+  const dot=el('new-category-dot');
+  dot.style.setProperty('--tag',color);
+  el('new-category-color').textContent=color;
+}
+async function addCategory() {
+  const name=input('new-category').value.trim();
+  categoryNotice='';
+  const change=await workflow?.addCategory(name);
+  input('new-category').value='';
+  categoryNotice=change?.message||'';
+  // 页面配置是唯一来源：变更后重新回读，标签区与本弹窗共用同一份列表。
+  await loadCategories();
+}
+async function deleteCategory(name:string) {
+  categoryNotice='';
+  const change=await workflow?.removeCategory(name);
+  pendingCategoryRemoval='';
+  categoryNotice=change?.message||'';
+  await loadCategories();
+}
 function render() {
   const s=workflow?.state,busy=!!s?.busy,connected=!!s?.connected;
   const connection=el('connection');connection.textContent=connected?'资源助手：已连接':'资源助手：未连接';connection.classList.toggle('connected',connected);
@@ -225,6 +318,9 @@ function render() {
   if(selection?.ignored)selectionNotes.push(`已忽略 ${selection.ignored} 个非本工具对象`);
   selectionStatusEl.title=selectionNotes.length?selectionNotes.join('；'):'按 Figma 当前选择处理；实例会定位主组件，无关对象不改动。';
   renderTags(selection,busy);
+  const managerOpen=el<HTMLButtonElement>('category-manager-open');
+  managerOpen.disabled=busy||!connected;
+  renderCategoryManager(busy,connected);
   const detailLines=[...(s?.scan?.errors||[]),...(plan?.messages||[]),...(s?.result?.failures||[]).map(failure=>`失败 ${failure.name}：${failure.reason}`),...(s?.compare?.messages||[])];
   el('details-body').textContent=detailLines.join('\n');
   const detailsButton=el<HTMLButtonElement>('details-open');
@@ -362,6 +458,17 @@ el('pairing-close').onclick=()=>pairingDialog.close();
 el('forget').onclick=()=>void run(async()=>{await clearPairing();input('token').value='';render();});
 el('details-open').onclick=()=>{if(!detailsDialog.open)detailsDialog.showModal();};
 el('details-close').onclick=()=>detailsDialog.close();
+el('category-manager-open').onclick=()=>{
+  if(workflow?.state.busy)return;
+  pendingCategoryRemoval='';categoryNotice='';uiError='';
+  render();
+  if(!categoryManager.open)categoryManager.showModal();
+  input('new-category').focus();
+};
+el('category-manager-close').onclick=()=>{if(!workflow?.state.busy)categoryManager.close();};
+categoryManager.addEventListener('cancel',event=>{if(workflow?.state.busy)event.preventDefault();else{pendingCategoryRemoval='';categoryNotice='';}});
+input('new-category').oninput=()=>render();
+el('add-category').onclick=()=>void run(addCategory);
 pairingDialog.addEventListener('cancel',event=>{if(workflow?.state.busy)event.preventDefault();});
 el('manage').onclick=()=>dialog.showModal();
 el('close').onclick=()=>{if(!workflow?.state.busy)dialog.close();};

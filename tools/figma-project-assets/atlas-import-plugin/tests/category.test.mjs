@@ -774,3 +774,233 @@ test('点击已高亮的当前类别不产生写入，混合选择点标签批�
     assert.equal(foreign.getPluginData('atlas.category.manual'), '');
   } finally { await f.cleanup(); }
 });
+
+// #16 新增类别：只通过公开平台入口观察页面配置、分类 Frame 与颜色。
+const project16 = { id: 'g8', name: '分类测试' };
+
+test('新增类别写入页面配置、创建分类 Frame 并按调色板稳定分配颜色', async () => {
+  const { f, workflow, platform, page, api: figmaApi } = await setup();
+  try {
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    await workflow.scan();
+    await workflow.import();
+    const before = await platform.categories();
+    assert.deepEqual(before.categories.map(category => category.name), defaultNames);
+
+    const added = await platform.addCategory(project16, '特效');
+    // 颜色来自追加式调色板：默认七类已占用前七个槽位，新类别取第一个未用颜色。
+    assert.deepEqual(added.categories, [...before.categories, { name: '特效', color: '#0091ff' }]);
+    // 配置回读：页面级配置真的写入了文档，而不是只在返回值里。
+    assert.deepEqual(JSON.parse(page.getPluginData('atlas.categories.v1')).categories, added.categories);
+    // 对应分类 Frame 一并创建，参数与自动分类 Frame 一致。
+    const frame = categoryFrame(page, '特效');
+    assert.ok(frame);
+    assert.equal(frame.getPluginData('atlas.category'), '特效');
+    assert.equal(frame.layoutMode, 'HORIZONTAL');
+    assert.equal(frame.name, '特效');
+
+    // 重新打开（同一页面新建平台实例）颜色与顺序不变。
+    const reopened = await api.createFigmaPlatform(figmaApi).categories();
+    assert.deepEqual(reopened.categories, added.categories);
+
+    // 再新增一个类别：前一个类别的颜色不被重排，新类别继续取下一个未用颜色。
+    const second = await platform.addCategory(project16, '特效2');
+    assert.deepEqual(second.categories.slice(-2), [
+      { name: '特效', color: '#0091ff' },
+      { name: '特效2', color: '#12a594' }
+    ]);
+    assert.deepEqual((await platform.categories()).categories, second.categories);
+    assert.ok(categoryFrame(page, '特效2'));
+    // 新 Frame 与既有分类 Frame 不重叠。
+    assertNoOverlap(page.children.filter(node => node.getPluginData('atlas.category')));
+    // 新类别可立即用于人工分类，显示名与标签顺序同步。
+    const icon = page.findAll(node => node.type === 'COMPONENT' && node.name === '图标/icon_coin')[0];
+    page.selection = [icon];
+    await workflow.loadSelection();
+    await workflow.setCategory('特效');
+    assert.equal(icon.parent, categoryFrame(page, '特效'));
+    assert.equal(icon.name, '特效/icon_coin');
+  } finally { await f.cleanup(); }
+});
+
+test('新增类别拒绝重名、非法名称和未绑定资源页，失败不写配置也不建 Frame', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    await workflow.scan();
+    await workflow.import();
+    await platform.addCategory(project16, '特效');
+    const written = page.getPluginData('atlas.categories.v1');
+    const frames = page.children.filter(node => node.getPluginData('atlas.category')).length;
+
+    // 重名（含首尾空白）被拒绝，错误信息指出具体类别名。
+    await assert.rejects(() => platform.addCategory(project16, '特效'), /已存在类别「特效」/);
+    await assert.rejects(() => platform.addCategory(project16, '  特效  '), /已存在类别「特效」/);
+    await assert.rejects(() => platform.addCategory(project16, '未分类'), /已存在类别「未分类」/);
+    // 名称形状不合格时返回 categoryNameProblem 的可操作中文说明。
+    await assert.rejects(() => platform.addCategory(project16, ''), /类别名称不能为空/);
+    await assert.rejects(() => platform.addCategory(project16, '   '), /类别名称不能为空/);
+    await assert.rejects(() => platform.addCategory(project16, 'a/b'), /不能包含/);
+    await assert.rejects(() => platform.addCategory(project16, '换\n行'), /不能包含/);
+    await assert.rejects(() => platform.addCategory(project16, 'x'.repeat(25)), /最多 24 个字符/);
+    await assert.rejects(() => platform.addCategory(project16, 42), /类别名称必须是文本/);
+    // 拒绝后配置、Frame 数量与标签回读都不变。
+    assert.equal(page.getPluginData('atlas.categories.v1'), written);
+    assert.equal(page.children.filter(node => node.getPluginData('atlas.category')).length, frames);
+    assert.deepEqual((await platform.categories()).categories, JSON.parse(written).categories);
+  } finally { await f.cleanup(); }
+});
+
+test('未绑定页面不能新增类别，绑定其他项目的页面也不写入', async () => {
+  const f = await projectFixture();
+  const fixture = figmaFixture();
+  const platform = api.createFigmaPlatform(fixture.api);
+  try {
+    // 空白未绑定页：拒绝并保持配置与页面内容为空，避免把页面变成「非空未绑定页」。
+    await assert.rejects(() => platform.addCategory({ id: 'g8', name: '分类测试' }, '特效'), /请先导入主组件/);
+    assert.equal(fixture.page.getPluginData('atlas.categories.v1'), '');
+    assert.equal(fixture.page.children.length, 0);
+    // 绑定损坏：拒绝且提示使用新的空白页。
+    fixture.page.setPluginData('atlas.binding', '{not json');
+    await assert.rejects(() => platform.addCategory({ id: 'g8', name: '分类测试' }, '特效'), /绑定损坏/);
+    // 绑定其他项目：拒绝并保留原配置。
+    fixture.page.setPluginData('atlas.binding', JSON.stringify({ schemaVersion: 1, projectId: 'g9' }));
+    fixture.page.name = '其他游戏（g9）- 分类资源';
+    fixture.page.setPluginData('atlas.categories.v1', JSON.stringify({ schemaVersion: 1, categories: [
+      { name: '未分类', color: '#8b8d98' }, { name: '按钮', color: '#e5484d' }] }));
+    await assert.rejects(() => platform.addCategory({ id: 'g8', name: '分类测试' }, '特效'), /绑定其他项目/);
+    assert.deepEqual(JSON.parse(fixture.page.getPluginData('atlas.categories.v1')).categories.map(category => category.name),
+      ['未分类', '按钮']);
+  } finally { await f.cleanup(); }
+});
+
+test('删除类别先把主组件与实例关系安全移到未分类，再删配置与分类 Frame', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
+    await sprite(f, 'dot.json', 'dot', 1, 1);
+    await workflow.scan();
+    await workflow.import();
+    await platform.addCategory(project16, '特效');
+    const icon = page.findAll(node => node.type === 'COMPONENT' && node.name === '图标/icon_coin')[0];
+    const button = page.findAll(node => node.type === 'COMPONENT' && node.name === '按钮/btn_ok')[0];
+    // 一个自动归入的组件（无人工覆盖）和一个手工移入的组件，外加实例关系。
+    page.selection = [icon, button];
+    await workflow.loadSelection();
+    await workflow.setCategory('特效');
+    assert.equal(icon.name, '特效/icon_coin');
+    assert.equal(button.getPluginData('atlas.category.manual'), '特效');
+    const instance = icon.createInstance();
+    page.appendChild(instance);
+    const sourceBefore = icon.getPluginData('atlas.source');
+    assert.equal(sourceBefore.length > 0, true);
+
+    const removed = await platform.removeCategory(project16, '特效');
+    // 返回值与页面配置回读都不再包含被删类别，页面仍保留未分类。
+    assert.deepEqual(removed.categories.map(category => category.name), [...defaultNames]);
+    assert.deepEqual(JSON.parse(page.getPluginData('atlas.categories.v1')).categories, removed.categories);
+    assert.deepEqual((await platform.categories()).categories, removed.categories);
+    assert.equal(removed.moved, 2);
+
+    // 分类 Frame 已删除，主组件落到未分类 Frame 并按新分类刷新显示名。
+    assert.equal(categoryFrame(page, '特效'), undefined);
+    const unsortedFrame = categoryFrame(page, '未分类');
+    assert.ok(unsortedFrame);
+    assert.equal(icon.parent, unsortedFrame);
+    assert.equal(button.parent, unsortedFrame);
+    assert.equal(icon.name, '未分类/icon_coin');
+    assert.equal(button.name, '未分类/btn_ok');
+    // 来源记录、人工覆盖与实例关系都不丢。
+    assert.equal(icon.getPluginData('atlas.source'), sourceBefore);
+    assert.equal(button.getPluginData('atlas.category.manual'), '未分类');
+    assert.equal(await instance.getMainComponentAsync(), icon);
+    assert.equal(page.findAll(node => node.type === 'INSTANCE').length, 1);
+    assert.equal(page.findAll(node => node.type === 'COMPONENT').length, 3);
+
+    // 删除后标签与人工分类一致：选中组件读回未分类，且不再能定位被删类别。
+    page.selection = [button];
+    await workflow.loadSelection();
+    assert.equal(workflow.state.selection.members[0].category, '未分类');
+    assert.equal(workflow.state.selection.members[0].manual, true);
+    await assert.rejects(() => workflow.setCategory('特效'), /分类无效/);
+    // 保留的人工覆盖不再指向已删除类别，重新导入不会把它读成无效值。
+    await workflow.scan();
+    await workflow.import();
+    assert.equal(button.getPluginData('atlas.category.manual'), '未分类');
+    assert.equal(button.parent, unsortedFrame);
+    assert.equal(button.name, '未分类/btn_ok');
+  } finally { await f.cleanup(); }
+});
+
+test('未分类不可删除，删除未知类别与未绑定页被拒绝且不改动页面', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'dot.json', 'dot', 1, 1);
+    await workflow.scan();
+    await workflow.import();
+    await platform.addCategory(project16, '特效');
+    const written = page.getPluginData('atlas.categories.v1');
+    const frames = page.children.filter(node => node.getPluginData('atlas.category')).length;
+
+    // 未分类是兜底类别：拒绝、配置不变、Frame 保留。
+    await assert.rejects(() => platform.removeCategory(project16, '未分类'), /未分类.*不能删除/);
+    // 不存在的类别：拒绝并指出名称。
+    await assert.rejects(() => platform.removeCategory(project16, '不存在的类别'), /没有类别「不存在的类别」/);
+    await assert.rejects(() => platform.removeCategory(project16, ''), /没有类别/);
+    assert.equal(page.getPluginData('atlas.categories.v1'), written);
+    assert.equal(page.children.filter(node => node.getPluginData('atlas.category')).length, frames);
+    assert.ok(categoryFrame(page, '未分类'));
+    assert.deepEqual((await platform.categories()).categories, JSON.parse(written).categories);
+  } finally { await f.cleanup(); }
+});
+
+test('未分类 Frame 缺失时删除类别会重建它并接管被删类别的全部子节点', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    await workflow.scan();
+    await workflow.import();
+    await platform.addCategory(project16, '特效');
+    const icon = page.findAll(node => node.type === 'COMPONENT' && node.name === '图标/icon_coin')[0];
+    page.selection = [icon];
+    await workflow.loadSelection();
+    await workflow.setCategory('特效');
+    const effectFrame = categoryFrame(page, '特效');
+    // 这次导入没有产生未分类组件，页面上还没有未分类 Frame。
+    assert.equal(categoryFrame(page, '未分类'), undefined);
+    // 分类 Frame 里除主组件外还有用户自有对象：删除类别时也不能丢。
+    const extra = icon.createInstance();
+    effectFrame.appendChild(extra);
+
+    const removed = await platform.removeCategory(project16, '特效');
+    assert.equal(removed.categories.some(category => category.name === '特效'), false);
+    assert.equal(removed.moved, 1);
+    const rebuilt = categoryFrame(page, '未分类');
+    assert.ok(rebuilt);
+    assert.equal(icon.parent, rebuilt);
+    assert.equal(extra.parent, rebuilt);
+    assert.equal(extra.getMainComponentAsync !== undefined, true);
+    assert.equal(await extra.getMainComponentAsync(), icon);
+    assert.equal(icon.name, '未分类/icon_coin');
+    assert.equal(effectFrame.children.length, 0);
+  } finally { await f.cleanup(); }
+});
+
+test('类别数量达到配置上限时拒绝新增，避免整份配置被判定损坏并回退默认七类', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'dot.json', 'dot', 1, 1);
+    await workflow.scan();
+    await workflow.import();
+    // 直接写入 63 个自定义类别加未分类，正好到达上限。
+    const categories = [...Array(63)].map((_, index) => ({ name: `活动道具${index}`, color: '#0091ff' }));
+    categories.push({ name: '未分类', color: '#8b8d98' });
+    page.setPluginData('atlas.categories.v1', JSON.stringify({ schemaVersion: 1, categories }));
+    assert.equal((await platform.categories()).categories.length, 64);
+    await assert.rejects(() => platform.addCategory(project16, '再一个'), /上限 64/);
+    // 配置仍是 64 项，没有被写坏。
+    assert.equal(JSON.parse(page.getPluginData('atlas.categories.v1')).categories.length, 64);
+    assert.equal((await platform.categories()).categories.length, 64);
+  } finally { await f.cleanup(); }
+});
