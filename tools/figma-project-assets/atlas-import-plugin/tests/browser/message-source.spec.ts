@@ -24,7 +24,8 @@ for(const origin of ['https://www.figma.com','https://untrusted.example']) {
         const m=e.data?.pluginMessage;
         if(!m?.requestId||e.source!==frames[0])return;
         if(m.type==='helper-path-load'){frames[0].postMessage({pluginMessage:{type:'result',requestId:m.requestId,result:''}},'*');return;}
-        if(m.type==='helper-path-save'||m.type==='open-helper-folder'){frames[0].postMessage({pluginMessage:{type:'result',requestId:m.requestId,result:true}},'*');return;}
+        if(m.type==='helper-path-save'){frames[0].postMessage({pluginMessage:{type:'result',requestId:m.requestId,result:true}},'*');return;}
+        if(m.type==='open-helper-folder'){window.openedPath=m.path;frames[0].postMessage({pluginMessage:{type:'result',requestId:m.requestId,result:true}},'*');return;}
         if(m.type==='pairing-load'){frames[0].postMessage({pluginMessage:{type:'result',requestId:m.requestId,result:null}},'*');return;}
         if(m.type==='pairing-save'||m.type==='pairing-clear'){frames[0].postMessage({pluginMessage:{type:'result',requestId:m.requestId,result:true}},'*');return;}
         if(m.type==='validate'){
@@ -35,10 +36,16 @@ for(const origin of ['https://www.figma.com','https://untrusted.example']) {
       });</script>`}));
     await page.goto(host);
     const ui=page.frameLocator('iframe[title="bridge"]').frameLocator('iframe[title="plugin"]');
-    await ui.locator('#connect').click();
+    await expect(ui.locator('#connect')).toBeDisabled();
+    await ui.locator('#settings').click();
     await expect(ui.locator('#pairing')).toBeVisible();
     await ui.locator('#token').fill('0'.repeat(64));
-    await ui.locator('#connect-submit').click();
+    await ui.locator('#helper-path').fill('E:\\Tools\\helper');
+    await ui.locator('#settings-save').click();
+    await expect(ui.locator('#pairing')).not.toBeVisible();
+    await ui.locator('#connect').click();
+    await expect.poll(()=>page.evaluate(()=>(window as any).openedPath)).toBe('E:\\Tools\\helper');
+    await ui.locator('#connect').click();
     await expect(ui.locator('#connection')).toHaveText('资源助手：已连接');
     await ui.locator('#project').selectOption('g2');
     await expect.poll(()=>page.evaluate(()=>(window as any).validationCount)).toBe(1);

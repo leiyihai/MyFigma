@@ -78,10 +78,16 @@ function render() {
   const connection=el('connection');connection.textContent=connected?'资源助手：已连接':'资源助手：未连接';connection.classList.toggle('connected',connected);
   el('phase').textContent=uiError?'失败':s?.phase||'未连接';
   el('error').textContent=uiError||s?.error||'';
-  const connectButton=el<HTMLButtonElement>('connect');connectButton.disabled=busy;
+  const connectButton=el<HTMLButtonElement>('connect');
   const hasHelperPath=!!input('helper-path').value.trim();
   const hasToken=!!input('token').value.trim();
-  connectButton.textContent=connected||helperFolderOpened||(!hasHelperPath&&hasToken)?'连接资源助手':'启动资源助手';
+  const configured=hasHelperPath&&hasToken;
+  connectButton.classList.toggle('hidden',connected);
+  connectButton.disabled=busy||!configured;
+  connectButton.textContent=!configured?'先完成设置':helperFolderOpened?'连接资源助手':'启动资源助手';
+  const settingsButton=el<HTMLButtonElement>('settings');
+  settingsButton.disabled=busy;
+  settingsButton.classList.toggle('attention',!configured);
   input('address').disabled=busy;input('token').disabled=busy;input('helper-path').disabled=busy;
   el<HTMLButtonElement>('forget').disabled=busy||!remembered;
   const pairingError=el('pairing-error');pairingError.textContent=el<HTMLDialogElement>('pairing').open?uiError:'';
@@ -177,6 +183,14 @@ async function refreshSelection() {
   try{await workflow?.loadSelection();}catch{ /* a changed page clears the transient selection panel */ }
   render();
 }
+async function saveSettings():Promise<void> {
+  const token=input('token').value.trim();
+  if(!/^[a-f0-9]{64}$/.test(token))throw new Error('请输入 64 位配对令牌');
+  await saveHelperPath();
+  await rpc('pairing-save',{pairing:{schemaVersion:1,address:input('address').value.trim(),token}});
+  remembered=true;
+  pairingDialog.close();
+}
 async function saveHelperPath():Promise<string> {
   const path=input('helper-path').value.trim();
   await rpc('helper-path-save',{path});
@@ -184,14 +198,14 @@ async function saveHelperPath():Promise<string> {
 }
 async function openHelperFolder():Promise<void> {
   const path=input('helper-path').value.trim();
-  if(!path){openPairing();return;}
+  if(!path){openSettings();return;}
   try {
     await saveHelperPath();
     await rpc('open-helper-folder',{path});
     helperFolderOpened=true;
   } catch {
     try{await navigator.clipboard.writeText(path);}catch{/* sandbox clipboard may be unavailable */}
-    openPairing();
+    openSettings();
     throw new Error(`无法打开资源助手文件夹，路径已填入配对窗口，请手动打开：${path}`);
   }
 }
@@ -208,7 +222,7 @@ async function connectHelper(address:string,token:string) {
   await rpc('pairing-save',{pairing:{schemaVersion:1,address,token}});
   remembered=true;
 }
-function openPairing() {
+function openSettings() {
   if(workflow?.state.busy)return;
   uiError='';render();
   if(!pairingDialog.open)pairingDialog.showModal();
@@ -229,26 +243,16 @@ async function run(action:()=>Promise<void>) {
   if(workflow&&!workflow.state.busy&&workflow.state.selected) await refreshSelection();
   render();
 }
+el('settings').onclick=()=>openSettings();
 el('connect').onclick=()=>{
-  if(workflow?.state.connected) {openPairing();return;}
+  if(workflow?.state.connected)return;
   const path=input('helper-path').value.trim();
   const token=input('token').value.trim();
-  if(!path) {
-    if(token)void run(()=>connectHelper(input('address').value.trim(),token));
-    else openPairing();
-    return;
-  }
+  if(!path||!token)return;
   if(!helperFolderOpened) {void run(openHelperFolder);return;}
-  if(!token) {openPairing();return;}
   void run(()=>connectHelper(input('address').value.trim(),token));
 };
-const submitPairing=()=>void run(async()=>{
-  await saveHelperPath();
-  await connectHelper(input('address').value.trim(),input('token').value.trim());
-  pairingDialog.close();
-});
-el('connect-submit').onclick=submitPairing;
-input('token').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();submitPairing();}});
+el('settings-save').onclick=()=>void run(saveSettings);
 
 el('pairing-close').onclick=()=>pairingDialog.close();
 el('forget').onclick=()=>void run(async()=>{await clearPairing();input('token').value='';render();});

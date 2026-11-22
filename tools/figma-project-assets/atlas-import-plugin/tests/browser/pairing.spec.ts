@@ -34,8 +34,8 @@ test('a remembered pairing connects automatically and can be forgotten', async (
     expect(await ui.getByLabel('配对令牌').inputValue()).toBe(pairing.token);
     expect(await ui.locator('body').evaluate(el => el.scrollHeight <= el.clientHeight)).toBe(true);
 
-    // The single connect button opens the pairing sheet even when reconnecting.
-    await ui.getByRole('button', {name:'连接资源助手', exact:true}).click();
+    // Connection actions and settings are separate; reconnect/forget live behind the gear.
+    await ui.getByRole('button', {name:'资源助手设置', exact:true}).click();
     await expect(ui.locator('#pairing')).toBeVisible();
     await ui.getByRole('button', {name:'忘记配对', exact:true}).click();
     await expect(ui.getByLabel('配对令牌')).toHaveValue('');

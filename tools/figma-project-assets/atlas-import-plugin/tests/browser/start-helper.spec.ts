@@ -25,13 +25,17 @@ test('unconnected start action opens the saved helper folder, then offers pairin
   try {
     await page.goto('http://127.0.0.1:'+(server.address() as {port:number}).port);
     const ui=page.frameLocator('iframe');
+    await expect(ui.getByRole('button',{name:'先完成设置',exact:true})).toBeDisabled();
+    expect(await ui.getByLabel('资源助手文件夹（用于启动）').inputValue()).toBe(helperPath);
+    await ui.getByRole('button',{name:'资源助手设置',exact:true}).click();
+    await ui.getByLabel('配对令牌').fill('0'.repeat(64));
+    await ui.locator('#settings-save').click();
     const start=ui.getByRole('button',{name:'启动资源助手',exact:true});
     await expect(start).toBeVisible();
-    expect(await ui.getByLabel('资源助手文件夹（用于启动）').inputValue()).toBe(helperPath);
     await start.click();
     await expect.poll(()=>page.evaluate(()=>(window as any).openedPath)).toBe(helperPath);
     await expect(ui.getByRole('button',{name:'连接资源助手',exact:true})).toBeVisible();
-    await ui.getByRole('button',{name:'连接资源助手',exact:true}).click();
+    await ui.getByRole('button',{name:'资源助手设置',exact:true}).click();
     await expect(ui.locator('#pairing')).toBeVisible();
     await expect(ui.getByLabel('资源助手文件夹（用于启动）')).toHaveValue(helperPath);
     expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);

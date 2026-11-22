@@ -37,14 +37,21 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
   try {
     await page.goto('http://127.0.0.1:'+ (server.address() as {port:number}).port);
     const ui=page.frameLocator('iframe');
-    await ui.getByRole('button',{name:'启动资源助手',exact:true}).click();
+    await expect(ui.getByRole('button',{name:'先完成设置',exact:true})).toBeDisabled();
+    await ui.getByRole('button',{name:'资源助手设置',exact:true}).click();
     await expect(ui.locator('#pairing')).toBeVisible();
     await ui.locator('#address').evaluate((el, base) => { (el as HTMLInputElement).value = base; }, f.base);
     await ui.getByLabel('配对令牌').fill(f.token);
-    await ui.locator('#connect-submit').click();
+    await ui.getByLabel('资源助手文件夹（用于启动）').fill('E:\\Tools\\resource-helper');
+    await ui.locator('#settings-save').click();
+    await expect(ui.locator('#pairing')).not.toBeVisible();
+    await expect(ui.getByTestId('connection')).toHaveText('资源助手：未连接');
+    await ui.getByRole('button',{name:'启动资源助手',exact:true}).click();
+    await expect.poll(()=>page.evaluate(()=>(window as any).openHelperPath)).toBe('E:\\Tools\\resource-helper');
+    await ui.getByRole('button',{name:'连接资源助手',exact:true}).click();
     await expect(ui.getByTestId('connection')).toHaveText('资源助手：已连接');
     await expect(ui.locator('h1')).toHaveCount(0);
-    await expect(ui.getByRole('button',{name:'连接资源助手',exact:true})).toBeVisible();
+    await expect(ui.locator('#connect')).toBeHidden();
     await expect(ui.locator('#search')).toHaveCount(0);
     await expect(ui.locator('#validate')).toHaveCount(0);
     await expect(ui.getByRole('region',{name:'本机助手'})).toHaveCount(0);
