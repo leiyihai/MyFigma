@@ -29,6 +29,7 @@ cargo build --release --locked
 - `projects.json`：项目登记表；本机不同 Figma 文件复用。
 - `projects.tmp`：登记保存时先独占创建、同步，再替换正式文件；写失败不更新内存登记表。
 - `scans/<projectId>.json`：最近一次完整扫描结果的本地副本，含恢复图片 base64、来源身份、布局节点引用/边距频次和错误；下次扫描读取其中已选边距处理并列，增量判定仍由 Figma 组件的 `atlas.sync.v1` 记录完成。体积可能较大，删除登记不会自动清理。
+- `samples/<projectId>.json`：该项目最近一次提交的人工训练样本，只含「来源身份 + 类别」；重复提交覆盖旧文件。文件名使用已校验的项目编号，不含图片、令牌或本机路径。
 
 扫描结果先落盘到本机 `scans` 目录再返回，Figma 文档只保存白名单来源字段；不写凭据日志。`--data-dir <directory>`、`--port <port>` 供隔离测试/显式本机配置使用（`0` 表示随机端口）；生产插件 manifest 默认仅放行 38473。不要选择共享目录。Windows 依赖当前用户 Local AppData 的默认 ACL；不会主动扩宽 ACL。Unix 测试环境目录/新文件权限分别是 0700/0600，但不承诺非 Windows 产品支持。
 
@@ -51,7 +52,7 @@ cargo build --release --locked
 
 ## HTTP v1 协议与安全决策
 
-所有业务请求均需 `Authorization: Bearer <token>`。写请求还需精确的 `Content-Type: application/json`；请求体上限 64 KiB。无 Cookie、无远端网络、无文件上传/任意文件下载/命令执行接口。
+所有业务请求均需 `Authorization: Bearer <token>`。写请求还需精确的 `Content-Type: application/json`；请求体上限一般 64 KiB，只有训练样本接口为 4 MiB（随资源数增长）。无 Cookie、无远端网络、无文件上传/任意文件下载/命令执行接口。
 
 | 方法 / 路径 | 输入 | 成功输出（各端点版本见说明） |
 | --- | --- | --- |
@@ -60,6 +61,7 @@ cargo build --release --locked
 | PUT `/v1/projects` | `{id,name,path,maintained}` | 全部 `projects`；编号相同则编辑 |
 | DELETE `/v1/projects/<id>` | 无 | 全部 `projects`；只删登记，不删资源 |
 | POST `/v1/scan` | `{projectId}` | `schemaVersion: 3`、`project:{id,name}`、`resources`、`errors`、`warnings`、`summary`、`truncated`、`complete` |
+| POST `/v1/samples` | `{projectId,samples:[{identity,category}]}` | `schemaVersion: 1`、`count`（保存条数）；覆盖 `samples/<projectId>.json` |
 
 `Project.id` 为 1–64 个 ASCII 字母、数字、下划线或连字符，是稳定项目身份。编辑编号意味着新项目；UI 编辑时锁定编号。名称非空且最多 200 UTF-8 字节。路径仅在助手登记与受认证 UI 中存在，不进入扫描响应的项目字段。
 
@@ -69,6 +71,18 @@ cargo build --release --locked
 - 健康和读取接口同样鉴权；错误码为 401 鉴权失败、403 来源/Host 拒绝、413 请求过大、415 类型错误、400 业务错误。错误消息不包含操作系统错误详情或绝对路径。
 - 登记目录规范化；扫描 JSON 和 PNG 均解析真实路径，拒绝逃出登记目录的符号链接。图集图片只能是同目录的 PNG 文件名，不接受绝对路径、父目录、URL 或外部公共资源。
 - 扫描不修改源项目。单请求串行执行，项目编辑与扫描不会并发改变助手登记。
+
+### 训练样本（#18）
+
+`POST /v1/samples` 保存当前资源页中带人工类别覆盖的主组件标签。请求体只有项目编号与数组：
+
+```json
+{"projectId":"g2","samples":[{"identity":"[\"g2\",\"atlas\",\"tiny.json\",\"red\"]","category":"按钮"}]}
+```
+
+助手严格校验（错误统一为 400，消息不含绝对路径）：项目必须已登记；`samples` 为 1–20 000 条；只允许 `identity` 与 `category` 两个字段（`deny_unknown_fields`，图片等未知字段直接拒绝）；`identity` 必须是与该项目匹配的 `atlas`（四段：项目、`atlas`、相对路径、散图原名）或 `standalone`（三段：项目、`standalone`、相对路径）身份且每段非空、不重复；类别去空白后非空、不超过 200 字节、不含 `/`、`\` 或控制字符。成功返回 `{"schemaVersion":1,"count":N}`。
+
+保存使用独占创建临时文件 + 同步 + `rename` 覆盖 `samples/<projectId>.json`，内容为 `{"schemaVersion":1,"projectId":"<id>","samples":[...]}`；重复提交按最新人工标签整体替换，不追加。该路由单独放宽到 4 MiB，其余请求仍为 64 KiB；超限返回 413。响应只有条数，不返回本机数据目录、项目资源路径或图片。
 
 ## 支持的最小图集格式
 
@@ -127,9 +141,9 @@ cargo test --locked
 npm test
 ```
 
-`npm test` 的 pretest 自动构建 Rust，然后运行真实子进程的集成测试（不是 Rust 单元 mock）：HTTP 协议／像素、递归扫描／独立图片、布局九宫格统计，以及产物与托盘用例。`pngjs` 仅用于测试读取恢复 PNG，对照固定样本的 RGBA 字面值；Rust 实际解码、拆图、编码由 `image` 执行。Rust 原生 `cargo test` 当前只有构建检查，没有额外单元用例。
+`npm test` 的 pretest 自动构建 Rust，然后运行真实子进程的集成测试（不是 Rust 单元 mock）：HTTP 协议／像素、训练样本、递归扫描／独立图片、布局九宫格统计，以及产物与托盘用例。`pngjs` 仅用于测试读取恢复 PNG，对照固定样本的 RGBA 字面值；Rust 实际解码、拆图、编码由 `image` 执行。Rust 原生 `cargo test` 当前只有构建检查，没有额外单元用例。
 
-公开边界测试覆盖鉴权、Host/CORS/预检、请求限制、项目增删改和重启持久化、拆图像素与身份、非法/外部资源及缺失恢复信息。新增 #3 回归（`tests/scan.test.mjs`，共 11 例）覆盖：游戏根/直接 imageset 两种登记、嵌套递归、跨图集同名、独立图片与图集排除、透明留白与偏移像素、坏 JSON/缺图/旋转/越界定位、超过旧上限的整本导入与触达上限的显式截断报告、助手侧扫描缓存不含绝对路径，以及本机样本包 g1008 子集（9 图集 263 帧 + 1 独立图片，逐像素对照原图集裁切）。
+公开边界测试覆盖鉴权、Host/CORS/预检、请求限制、项目增删改和重启持久化、拆图像素与身份、非法/外部资源及缺失恢复信息。训练样本用例覆盖未配对/可疑 Origin、缺项目、非法身份形状与重复身份、空/非法类别、未知字段含图片、覆盖旧样本、`samples/<id>.json` 可读回且不泄露本机路径，以及 20 000 条约 1.2 MB 的放宽上限与超过 4 MiB 的 413（其他写接口仍按 64 KiB 拒绝）。新增 #3 回归（`tests/scan.test.mjs`，共 11 例）覆盖：游戏根/直接 imageset 两种登记、嵌套递归、跨图集同名、独立图片与图集排除、透明留白与偏移像素、坏 JSON/缺图/旋转/越界定位、超过旧上限的整本导入与触达上限的显式截断报告、助手侧扫描缓存不含绝对路径，以及本机样本包 g1008 子集（9 图集 263 帧 + 1 独立图片，逐像素对照原图集裁切）。
 
 产物与托盘用例走进程边界（`tests/tray.test.mjs`）：
 

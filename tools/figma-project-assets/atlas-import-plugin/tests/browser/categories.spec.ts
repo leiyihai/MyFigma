@@ -67,12 +67,14 @@ test('类别管理弹窗新增、重名提示、删除确认与关闭后标签�
     const list=ui.getByTestId('category-list');
     const input=ui.getByLabel('新类别名称');
     const addButton=ui.getByRole('button',{name:'新增类别',exact:true});
-    // 未连接时动作行的类别管理入口禁用；合并 #17 后动作行为「撤销 + 类别管理」两个按钮，
-    // 这里断言没有重复或额外按钮，而不是仍然只有类别管理一个。
+    // 未连接时动作行的类别管理入口禁用；合并 #16/#17/#18 后动作行为
+    // 「撤销 + 类别管理 + 提交训练样本」三个按钮，这里断言没有重复或额外按钮，
+    // 而不是仍然只有类别管理一个。
     await expect(manager).toBeDisabled();
-    expect(await ui.locator('#category-actions button').count()).toBe(2);
+    expect(await ui.locator('#category-actions button').count()).toBe(3);
     await expect(ui.locator('#category-actions button#undo-category')).toHaveCount(1);
     await expect(ui.locator('#category-actions button#category-manager-open')).toHaveCount(1);
+    await expect(ui.locator('#category-actions button#submit-training')).toHaveCount(1);
 
     await ui.getByRole('button',{name:'资源助手设置',exact:true}).click();
     await ui.locator('#address').evaluate((el, base) => { (el as HTMLInputElement).value = base; }, f.base);

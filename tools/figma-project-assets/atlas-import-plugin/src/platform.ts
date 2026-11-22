@@ -1,4 +1,4 @@
-import type { CategoryOverride, CategoryRestoreResult, CategoryResult, ImportPlan, ImportReport, LayoutUsage, Platform, Progress, PublicProject, Resource, Scan, SelectionState, Source, TidyResult } from './api';
+import type { CategoryOverride, CategoryRestoreResult, CategoryResult, ImportPlan, ImportReport, LayoutUsage, Platform, Progress, PublicProject, Resource, Scan, SelectionState, Source, TidyResult, TrainingExport } from './api';
 import { Cancellation } from './api';
 import { categoryConfigKey, categoryIndex, categoryOr, classify, componentName, knownCategory, categoryNameProblem,
   nextCategoryColor, readCategoryConfig, serializeCategories, unsortedCategory, type CategoryConfig } from './category';
@@ -1272,6 +1272,30 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         restoreCategoryLayouts(layouts);
         busy = false;
       }
+    },
+    async trainingSamples(project) {
+      if(busy) throw new Error('任务执行中，请等待完成');
+      if(!project || typeof project.id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(project.id) ||
+         typeof project.name !== 'string' || !project.name.trim() || project.name.length > 200) throw new Error('项目信息无效');
+      const page = api.currentPage;
+      await loadPage(page);
+      const status = validate(page, project);
+      if(!status.valid) throw new Error(status.message);
+      const config = pageCategories(page);
+      const samples: TrainingExport['samples'] = [];
+      const seen = new Set<string>();
+      // 只读当前资源页的主组件：人工覆盖非空且仍在页面类别配置里；
+      // 身份取 atlas.source，不用显示名，也不继承导入时的损坏拦截。
+      for(const node of page.findAll(() => true)) {
+        if(node.type !== 'COMPONENT') continue;
+        const source = parseStoredSource(node, project);
+        if(!source) continue;
+        const category = manualCategory(node, config);
+        if(!category || seen.has(source.identity)) continue;
+        seen.add(source.identity);
+        samples.push({identity:source.identity, category});
+      }
+      return {schemaVersion:1, projectId:project.id, samples};
     },
     async tidy(project) {
       if(!project || typeof project.id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(project.id) ||

@@ -25,6 +25,26 @@ struct Project {
     maintained: bool,
 }
 
+// 训练样本只有人工覆盖的「来源身份 + 类别」；图片和本机路径不进入请求或落盘。
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TrainingSample {
+    identity: String,
+    category: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TrainingRequest {
+    #[serde(rename = "projectId")]
+    project_id: String,
+    samples: Vec<TrainingSample>,
+}
+
+const SAMPLE_LIMIT: usize = 20_000;
+const SAMPLE_BODY_LIMIT: usize = 4 * 1024 * 1024;
+const JSON_BODY_LIMIT: usize = 65_536;
+
 struct App {
     data: PathBuf,
     token: String,
@@ -89,6 +109,30 @@ impl App {
         fs::rename(temp, self.data.join("projects.json")).map_err(|_| "无法保存登记")
     }
 
+    fn save_samples(&self, project_id: &str, samples: &[TrainingSample]) -> Result<()> {
+        let directory = self.data.join("samples");
+        fs::create_dir_all(&directory).map_err(|_| "无法保存训练样本")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
+                .map_err(|_| "无法保存训练样本")?;
+        }
+        let target = directory.join(format!("{project_id}.json"));
+        let temp = directory.join(format!("{project_id}.tmp"));
+        // Only one request executes at a time. Recover a leftover interrupted write.
+        if temp.exists() {
+            fs::remove_file(&temp).map_err(|_| "无法保存训练样本")?;
+        }
+        let payload = json!({"schemaVersion":1,"projectId":project_id,"samples":samples});
+        private_write(
+            &temp,
+            &serde_json::to_vec(&payload).map_err(|_| "无法保存训练样本")?,
+        )
+        .map_err(|_| "无法保存训练样本")?;
+        fs::rename(temp, target).map_err(|_| "无法保存训练样本")
+    }
+
     fn route(&mut self, method: &Method, url: &str, body: &[u8]) -> Result<Value> {
         match (method, url) {
             (&Method::Get, "/v1/health") => Ok(json!({"schemaVersion":1,"status":"ready"})),
@@ -101,6 +145,58 @@ impl App {
                     .find(|p| p.id == id)
                     .ok_or("项目未登记")?;
                 atlas::scan(&self.data, project)
+            }
+            (&Method::Post, "/v1/samples") => {
+                let request: TrainingRequest =
+                    serde_json::from_slice(body).map_err(|_| "训练样本格式错误")?;
+                let project = self
+                    .projects
+                    .iter()
+                    .find(|p| p.id == request.project_id)
+                    .ok_or("项目未登记")?;
+                if request.samples.is_empty() {
+                    return Err("训练样本为空");
+                }
+                if request.samples.len() > SAMPLE_LIMIT {
+                    return Err("训练样本过多");
+                }
+                let mut seen = std::collections::HashSet::new();
+                let mut samples = Vec::with_capacity(request.samples.len());
+                for sample in request.samples {
+                    let identity = sample.identity;
+                    if identity.is_empty() || identity.len() > 1024 {
+                        return Err("训练样本身份无效");
+                    }
+                    // 身份是助手生成的 JSON 数组；只接受属于本项目且每段非空的来源身份。
+                    let parts: Vec<String> =
+                        serde_json::from_str(&identity).map_err(|_| "训练样本身份无效")?;
+                    let shape_ok = match parts.get(1).map(String::as_str) {
+                        Some("atlas") => parts.len() == 4,
+                        Some("standalone") => parts.len() == 3,
+                        _ => false,
+                    };
+                    if !shape_ok
+                        || parts[0] != project.id
+                        || parts.iter().any(|part| part.is_empty())
+                    {
+                        return Err("训练样本身份无效");
+                    }
+                    if !seen.insert(identity.clone()) {
+                        return Err("训练样本身份重复");
+                    }
+                    let category = sample.category.trim().to_string();
+                    if category.is_empty()
+                        || category.len() > 200
+                        || category.contains('/')
+                        || category.contains('\\')
+                        || category.chars().any(char::is_control)
+                    {
+                        return Err("训练样本类别无效");
+                    }
+                    samples.push(TrainingSample { identity, category });
+                }
+                self.save_samples(&project.id, &samples)?;
+                Ok(json!({"schemaVersion":1,"count":samples.len()}))
             }
             (&Method::Get, "/v1/projects") => {
                 Ok(json!({"schemaVersion":1,"projects":self.projects}))
@@ -200,13 +296,19 @@ fn serve(mut request: Request, app: &mut App, port: u16) {
         if has_body && header(&request, "Content-Type") != Some("application/json") {
             (415, json!({"error":"需要 application/json"}))
         } else {
+            // 训练样本随资源数增长，只放宽该路由；其余写接口保持 64 KiB。
+            let limit = if request.url() == "/v1/samples" {
+                SAMPLE_BODY_LIMIT
+            } else {
+                JSON_BODY_LIMIT
+            };
             let mut body = Vec::new();
             if request
                 .as_reader()
-                .take(65537)
+                .take(limit as u64 + 1)
                 .read_to_end(&mut body)
                 .is_err()
-                || body.len() > 65536
+                || body.len() > limit
             {
                 (413, json!({"error":"请求过大"}))
             } else {
