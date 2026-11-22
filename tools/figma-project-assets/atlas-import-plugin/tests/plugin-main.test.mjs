@@ -87,6 +87,24 @@ test('built main script loads in an import-rejecting sandbox, stores pairing loc
     assert.equal(page.children[0].x, 0);
     assert.equal(page.children[0].y, 0);
     assert.equal(page.children[0].children.length, 2);
+    // 类别新增/删除走同一主线程入口：先用已绑定资源页新增，再删除并回读。
+    await figma.ui.onmessage({ type: 'add-category', requestId: 21, project: { id: 'g2', name: '测试游戏' }, name: '特效' });
+    const addedCategory = replies.find(reply => reply.requestId === 21);
+    assert.equal(addedCategory.error, undefined);
+    assert.deepEqual(addedCategory.result.categories.at(-1), { name: '特效', color: '#0091ff' });
+    assert.equal(addedCategory.result.moved, 0);
+    assert.equal(page.children.at(-1).name, '特效');
+    await figma.ui.onmessage({ type: 'add-category', requestId: 22, project: { id: 'g2', name: '测试游戏' }, name: '特效' });
+    assert.match(replies.find(reply => reply.requestId === 22).error, /已存在类别/);
+    await figma.ui.onmessage({ type: 'add-category', requestId: 23, project: { id: 'g2', name: '测试游戏' } });
+    assert.match(replies.find(reply => reply.requestId === 23).error, /类别名称无效/);
+    await figma.ui.onmessage({ type: 'remove-category', requestId: 24, project: { id: 'g2', name: '测试游戏' }, name: '特效' });
+    const removedCategory = replies.find(reply => reply.requestId === 24);
+    assert.equal(removedCategory.error, undefined);
+    assert.equal(removedCategory.result.categories.some(category => category.name === '特效'), false);
+    assert.equal(removedCategory.result.moved, 0);
+    await figma.ui.onmessage({ type: 'remove-category', requestId: 25, project: { id: 'g2', name: '测试游戏' }, name: '未分类' });
+    assert.match(replies.find(reply => reply.requestId === 25).error, /不能删除/);
     await figma.ui.onmessage({ type: 'compare', requestId: 3, project: { id: 'g2', name: '测试游戏' } });
     const compared = replies.find(reply => reply.requestId === 3);
     assert.equal(compared.error, undefined);

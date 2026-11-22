@@ -49,6 +49,9 @@ export interface CategoryResult {
 // The page is the source of truth for categories; the UI only renders this
 // ordered readback and never keeps a second list of its own.
 export interface CategoryState { schemaVersion: 1; categories: Category[] }
+// A category change reports the readback plus what happened to existing
+// components, so the UI can confirm the result without guessing.
+export interface CategoryChange extends CategoryState { moved: number; message: string }
 // Import is not one atomic transaction: every item commits or is isolated and
 // reported, so a later incremental run can fill only what is still missing.
 export interface ImportReport extends ImportPlan {
@@ -84,6 +87,8 @@ export interface Platform {
   tidy(project: PublicProject): Promise<TidyResult>;
   selection(project: PublicProject): Promise<SelectionState>;
   categories(): Promise<CategoryState>;
+  addCategory(project: PublicProject, name: string): Promise<CategoryChange>;
+  removeCategory(project: PublicProject, name: string): Promise<CategoryChange>;
   setCategory(project: PublicProject, ids: string[], category: string): Promise<CategoryResult>;
 }
 
@@ -202,6 +207,27 @@ export class Workflow {
     if(!this.state.selected || this.state.busy) { this.state.selection = undefined; return; }
     this.state.selection = await this.platform.selection(this.state.selected);
     this.changed();
+  }
+  // 类别管理：页面配置是唯一来源，变更后回读并重取选择，标签区、分类 Frame 与
+  // 显示名一次同步；不使旧扫描失效，因为资源集合没有变化。
+  private async categoryChange(phase: string, name: string,
+    apply: (project: PublicProject, name: string) => Promise<CategoryChange>): Promise<CategoryChange> {
+    let change: CategoryChange | undefined;
+    await this.task(phase,async () => {
+      const project = this.state.selected;
+      if(!project) throw new Error('请选择游戏');
+      change = await apply(project,name);
+      this.state.notice = change.message;
+      this.state.selection = await this.platform.selection(project);
+    });
+    if(!change) throw new Error('类别操作未完成');
+    return change;
+  }
+  async addCategory(name: string): Promise<CategoryChange> {
+    return this.categoryChange('新增类别',name,(project,value) => this.platform.addCategory(project,value));
+  }
+  async removeCategory(name: string): Promise<CategoryChange> {
+    return this.categoryChange('删除类别',name,(project,value) => this.platform.removeCategory(project,value));
   }
   async setCategory(category: string): Promise<void> {
     const selection = this.state.selection;

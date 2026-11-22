@@ -30,6 +30,20 @@ export const categoryPalette: readonly string[] = [
 export const categoryConfigKey = 'atlas.categories.v1';
 export const categoryNameLimit = 24;
 
+// Colour assignment for a category added later: the first palette entry with the
+// fewest users. Stored configurations keep their colours, so reopening a page
+// recomputes the same answer and a second addition never recolours the first.
+export function nextCategoryColor(categories: readonly Category[]): string {
+  const used = new Map<string, number>();
+  for(const category of categories) used.set(category.color, (used.get(category.color) || 0) + 1);
+  let picked = categoryPalette[0], fewest = Infinity;
+  for(const color of categoryPalette) {
+    const count = used.get(color) || 0;
+    if(count < fewest) { picked = color; fewest = count; }
+  }
+  return picked;
+}
+
 // A prefix only counts as the leading token: letters up to the first digit,
 // separator or other script, so `btn2_ok`, `BTN_OK` and `btn-ok` all read
 // `btn`, while `bgm_panel` does not pretend to be `bg`.
