@@ -9,7 +9,7 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
   const f=await fixture();
   const server=createServer(async(req,res)=>{
     if(req.url==='/ui.html') {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(await readFile(new URL('../../dist/ui.html',import.meta.url)));}
-    else {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:520px;height:720px"></iframe>
+    else {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:440px;height:540px"></iframe>
     <script>
     window.imported=null;window.pairing=null;
     addEventListener('message',e=>{
@@ -34,12 +34,14 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
   try {
     await page.goto('http://127.0.0.1:'+ (server.address() as {port:number}).port);
     const ui=page.frameLocator('iframe');
-    await ui.getByRole('button',{name:'连接助手',exact:true}).click();
+    await ui.getByRole('button',{name:'连接资源助手',exact:true}).click();
     await expect(ui.locator('#pairing')).toBeVisible();
     await ui.locator('#address').evaluate((el, base) => { (el as HTMLInputElement).value = base; }, f.base);
     await ui.getByLabel('配对令牌').fill(f.token);
     await ui.locator('#connect-submit').click();
-    await expect(ui.getByTestId('connection')).toHaveText('已连接');
+    await expect(ui.getByTestId('connection')).toHaveText('资源助手：已连接');
+    await expect(ui.locator('h1')).toHaveCount(0);
+    await expect(ui.getByRole('button',{name:'连接资源助手',exact:true})).toBeVisible();
     await expect(ui.locator('#search')).toHaveCount(0);
     await expect(ui.locator('#validate')).toHaveCount(0);
     await expect(ui.getByRole('region',{name:'本机助手'})).toHaveCount(0);
@@ -105,6 +107,7 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
     await ui.getByRole('button',{name:'扫描资源',exact:true}).click();
     await expect(ui.getByTestId('summary')).toContainText('散图 2');
     await expect(ui.getByTestId('summary')).toContainText('新增 2');
+    await expect(ui.getByTestId('summary')).toContainText('扫描耗时');
     await ui.getByRole('button',{name:'导入主组件',exact:true}).hover();
     await expect(ui.getByRole('tooltip')).toContainText('新增创建主组件');
     await ui.getByRole('button',{name:'导入主组件',exact:true}).click();
@@ -131,6 +134,7 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
     await page.evaluate(()=>{(window as any).finish(false);});
     await expect(ui.locator('#phase')).toHaveText('就绪');
     await expect(ui.getByTestId('action-result')).toContainText('导入：成功 2');
+    await expect(ui.getByTestId('action-result')).toContainText('导入耗时');
     // The optional comparison page stays absent through scan/import until requested.
     expect(await page.evaluate(()=>(window as any).compareCalls||0)).toBe(0);
     await ui.getByRole('button',{name:'对照页',exact:true}).hover();
@@ -180,13 +184,13 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
       document.querySelector('iframe')!.contentWindow!.postMessage({pluginMessage:{type:'page-changed'}},'*');
     });
     releaseFailedScan();
-    await expect(ui.getByTestId('connection')).toHaveText('未连接');
+    await expect(ui.getByTestId('connection')).toHaveText('资源助手：未连接');
     await expect(ui.locator('#page-status')).toContainText('非空且未绑定');
-    await expect(ui.getByRole('alert')).toContainText('请启动 figma-assets-helper');
+    await expect(ui.getByRole('alert')).toContainText('请启动 resource-helper');
     await expect(ui.locator('#phase')).toHaveText('失败');
     await page.unroute(f.base+'/v1/scan');
     await f.stop();
-    await ui.getByRole('button',{name:'连接助手',exact:true}).click();
-    await expect(ui.getByRole('alert')).toContainText('请启动 figma-assets-helper');
+    await ui.getByRole('button',{name:'连接资源助手',exact:true}).click();
+    await expect(ui.getByRole('alert')).toContainText('请启动 resource-helper');
   } finally {await new Promise<void>(r=>server.close(()=>r()));await f.cleanup();}
 });

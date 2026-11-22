@@ -15,11 +15,11 @@ for(const origin of ['https://www.figma.com','https://untrusted.example']) {
       contentType:'text/html; charset=utf-8',body:await readFile(new URL('../../dist/ui.html',import.meta.url),'utf8')}));
     await page.route(origin+'/acceptance-bridge.html',route=>route.fulfill({
       contentType:'text/html; charset=utf-8',body:`
-        <iframe title="plugin" sandbox="allow-scripts" src="${origin}/acceptance-ui.html" style="width:460px;height:750px"></iframe>
+        <iframe title="plugin" sandbox="allow-scripts" src="${origin}/acceptance-ui.html" style="width:440px;height:540px"></iframe>
         <script>addEventListener('message',e=>{if(e.source===frames[0]&&e.data?.pluginMessage)parent.postMessage(e.data,'*');});</script>`}));
     const host=origin+'/plugin-message-acceptance';
     await page.route(host,route=>route.fulfill({contentType:'text/html; charset=utf-8',body:`
-      <iframe title="bridge" src="${origin}/acceptance-bridge.html" style="width:500px;height:800px"></iframe>
+      <iframe title="bridge" src="${origin}/acceptance-bridge.html" style="width:460px;height:540px"></iframe>
       <script>addEventListener('message',e=>{
         const m=e.data?.pluginMessage;
         if(!m?.requestId||e.source!==frames[0])return;
@@ -37,7 +37,7 @@ for(const origin of ['https://www.figma.com','https://untrusted.example']) {
     await expect(ui.locator('#pairing')).toBeVisible();
     await ui.locator('#token').fill('0'.repeat(64));
     await ui.locator('#connect-submit').click();
-    await expect(ui.locator('#connection')).toHaveText('已连接');
+    await expect(ui.locator('#connection')).toHaveText('资源助手：已连接');
     await ui.locator('#project').selectOption('g2');
     await expect.poll(()=>page.evaluate(()=>(window as any).validationCount)).toBe(1);
     if(origin==='https://www.figma.com') {

@@ -75,7 +75,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "figma-assets-helper"
+name = "resource-helper"
 version = "0.1.0"
 dependencies = [
  "base64",

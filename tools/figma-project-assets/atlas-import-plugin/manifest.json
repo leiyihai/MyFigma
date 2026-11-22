@@ -1,5 +1,5 @@
 {
-  "name": "项目图集导入",
+  "name": "资源导入器",
   "id": "figma-project-assets-atlas-import",
   "api": "1.0.0",
   "main": "dist/code.js",

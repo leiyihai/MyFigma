@@ -20,19 +20,19 @@ test('a remembered pairing connects automatically and can be forgotten', async (
         else if (m.type === 'pairing-clear') { window.pairing = null; reply(true); }
         else if (m.type === 'validate') reply({valid:true,message:'空白页可导入'});
       });
-    </script><iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:520px;height:720px"></iframe>`);
+    </script><iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:440px;height:540px"></iframe>`);
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
     await page.goto('http://127.0.0.1:' + (server.address() as {port:number}).port);
     const ui = page.frameLocator('iframe');
-    await expect(ui.getByTestId('connection')).toHaveText('已连接');
+    await expect(ui.getByTestId('connection')).toHaveText('资源助手：已连接');
     await expect(ui.locator('#pairing')).not.toBeVisible();
     expect(await ui.getByLabel('配对令牌').inputValue()).toBe(pairing.token);
     expect(await ui.locator('body').evaluate(el => el.scrollHeight <= el.clientHeight)).toBe(true);
 
     // The single connect button opens the pairing sheet even when reconnecting.
-    await ui.getByRole('button', {name:'连接助手', exact:true}).click();
+    await ui.getByRole('button', {name:'连接资源助手', exact:true}).click();
     await expect(ui.locator('#pairing')).toBeVisible();
     await ui.getByRole('button', {name:'忘记配对', exact:true}).click();
     await expect(ui.getByLabel('配对令牌')).toHaveValue('');

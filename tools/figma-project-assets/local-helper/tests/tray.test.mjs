@@ -43,7 +43,7 @@ test('built helper runs from a copied artifact without a development server and 
   try {
     const artifact = join(root, 'artifact');
     await mkdir(artifact);
-    const exe = join(artifact, 'figma-assets-helper' + (process.platform === 'win32' ? '.exe' : ''));
+    const exe = join(artifact, 'resource-helper' + (process.platform === 'win32' ? '.exe' : ''));
     await copyFile(helperExecutable(), exe);
     const data = join(root, 'data'), project = join(root, 'project');
     const helper = await startHelper(data, { exe, cwd: artifact, args: ['--test-exit-after-ms', '2500'] });

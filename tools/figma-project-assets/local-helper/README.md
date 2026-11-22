@@ -8,7 +8,7 @@
 
 ```powershell
 cargo build --release --locked
-.\target\release\figma-assets-helper.exe
+.\target\release\resource-helper.exe
 ```
 
 启动后同时出现控制台窗口和托盘图标，两者都能停止进程。默认只监听 `127.0.0.1:38473`，Figma 插件使用 `http://localhost:38473` 访问，以兼容其 manifest 本地开发域名校验。端口被占用时不要向未知进程输入令牌。
@@ -17,7 +17,7 @@ cargo build --release --locked
 
 - 托盘提示文字：`资源助手运行中 · 端口 38473`。图标使用系统默认应用图标，未附带自定义 .ico。
 - 左键或右键图标打开菜单：首项是只读运行状态，其后是「打开数据目录」（用资源管理器打开本机数据目录）、「显示配对令牌」（仅在控制台输出，便利用户首次/忘记后重新配对）和「退出」。
-- 也可显式运行 `figma-assets-helper.exe --show-token` 打印当前令牌；正常启动日志不包含令牌。
+- 也可显式运行 `resource-helper.exe --show-token` 打印当前令牌；正常启动日志不包含令牌。
 - 「退出」与关闭窗口走同一条退出路径：先请求停止 HTTP，等待监听套接字释放，再删除托盘图标并以状态码 0 结束进程；退出后端口不再接受连接。
 - 关闭控制台窗口或 Ctrl+C 时进程同样结束、端口随之关闭。
 - 托盘初始化失败（例如没有可用通知区域）时，标准错误输出一行不带路径的提示，助手继续在后台服务，需关闭启动它的终端来停止。
@@ -43,7 +43,7 @@ cargo build --release --locked
 
 1. 启动助手，确认托盘图标出现且菜单首项显示「资源助手运行中」。
 2. 在本机用文本查看器打开 `%LOCALAPPDATA%\MyFigmaAssets\token`，将内容粘贴到插件的密码输入框。不要把它贴到 Issue、聊天、Figma 图层或日志。
-3. 点击「连接助手」。令牌只在插件 UI 与主线程之间传递；勾选「记住本机配对」时保存到本机 `figma.clientStorage`，下次打开自动连接，点击「忘记配对」删除。不写入 Figma 文档或上传远端；首次仍需手动复制令牌。
+3. 点击「连接资源助手」。令牌只在插件 UI 与主线程之间传递；连接成功后保存到本机 `figma.clientStorage`，下次打开自动连接，点击「忘记配对」删除。不写入 Figma 文档或上传远端；首次仍需手动复制令牌。
 4. 忘记或更换令牌时，在托盘菜单选择「显示配对令牌」，或在终端运行 `--show-token`；不要把令牌贴到 Issue、聊天或日志。
 5. 令牌泄漏时停止助手，删除本机 `token` 后重新启动、配对；不必删除项目登记。旧令牌会失效，插件下次连接会提示重新配对。
 
@@ -144,7 +144,7 @@ npm test
 
 自动化只证明托盘图标创建成功、退出命令路径有效，不能替代真实鼠标点击。人工步骤：
 
-1. `cargo build --release --locked` 后双击 `target\release\figma-assets-helper.exe`，确认通知区域出现图标、悬停显示「资源助手运行中 · 端口 38473」。
+1. `cargo build --release --locked` 后双击 `target\release\resource-helper.exe`，确认通知区域出现图标、悬停显示「资源助手运行中 · 端口 38473」。
 2. 右键图标：确认首项为只读状态，点击「打开数据目录」应打开 `%LOCALAPPDATA%\MyFigmaAssets`。
 3. 配对插件、登记项目、扫描并导入；关闭插件后重新打开应自动连接。
 4. 在托盘菜单点击「退出」：图标消失、进程从任务管理器消失，`curl http://localhost:38473/v1/health` 连接失败。

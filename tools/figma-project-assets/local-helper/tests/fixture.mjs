@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 export const helperDir = fileURLToPath(new URL('../', import.meta.url));
 const sleep = ms => new Promise(done => setTimeout(done, ms));
 export function helperExecutable() {
-  return resolve(helperDir, 'target/debug/figma-assets-helper' + (process.platform === 'win32' ? '.exe' : ''));
+  return resolve(helperDir, 'target/debug/resource-helper' + (process.platform === 'win32' ? '.exe' : ''));
 }
 // 测试通过 --no-tray 显式跳过托盘；托盘默认路径由 tray.test.mjs 单独覆盖。
 export async function startHelper(dataDir, options = {}) {

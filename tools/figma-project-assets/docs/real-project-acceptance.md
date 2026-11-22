@@ -6,7 +6,7 @@
 
 - 日期：2026-11-22
 - Figma 桌面客户端：126.10.7（Chromium 150）
-- 助手：`tools/figma-project-assets/local-helper/target/release/figma-assets-helper.exe`，版本 0.1.0，真实运行于 `http://localhost:38473`
+- 资源助手：`tools/figma-project-assets/local-helper/target/release/resource-helper.exe`，版本 0.1.0，真实运行于 `http://localhost:38473`（验收运行时的旧文件名为 `figma-assets-helper.exe`，之后更名）
 - 插件：当前工作树构建产物 `atlas-import-plugin/dist/code.js` / `dist/ui.html`，开发 manifest
 - 测试使用三个独立 Figma 文件，各自只有一个验收资源页；不修改三个游戏的源目录
 - 本机内存为 Figma 全部进程合计：首次导入前约 7.75 GB，三个文件导入并打开后约 9.32 GB；该数值包含其他已打开设计文件，只作量级记录

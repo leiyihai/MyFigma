@@ -21,6 +21,7 @@ async function ready(f,figma) {
 
 test('development manifest permits the documented localhost endpoint used by the built UI',async()=>{
   const manifest=JSON.parse(await readFile(new URL('../manifest.json',import.meta.url),'utf8'));
+  assert.equal(manifest.name,'资源导入器');
   const html=await readFile(new URL('../dist/ui.html',import.meta.url),'utf8');
   const address=html.match(/id="address" value="([^"]+)"/)?.[1];
   assert.ok(address,'built UI must declare its default helper endpoint');

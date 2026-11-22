@@ -87,7 +87,7 @@ class HelperConnectionError extends Error {}
 export class HelperAuthError extends HelperConnectionError {}
 export class HelperClient {
   constructor(private base: string, private token: string) {
-    if (!/^http:\/\/(?:localhost|127\.0\.0\.1):\d{1,5}$/.test(base)) throw new Error('仅允许本机 localhost 或 127.0.0.1 HTTP 助手');
+    if (!/^http:\/\/(?:localhost|127\.0\.0\.1):\d{1,5}$/.test(base)) throw new Error('仅允许本机 localhost 或 127.0.0.1 HTTP 资源助手');
     if (!/^[a-f0-9]{64}$/.test(token)) throw new Error('请输入本机 token 文件中的 64 位配对令牌');
   }
   private async request<T>(path: string, method = 'GET', body?: unknown, version = 1, signal?: AbortSignal): Promise<T> {
@@ -103,7 +103,7 @@ export class HelperClient {
       signal: controller.signal});
     } catch {
       if(signal?.aborted) throw new CancelledTask();
-      throw new HelperConnectionError('助手未连接：请启动 figma-assets-helper，并确认任务栏托盘图标显示「资源助手运行中」；已启动时请检查浏览器的本地网络权限后点击「连接助手」重新连接');
+      throw new HelperConnectionError('资源助手未连接：请启动 resource-helper.exe（资源助手），并确认任务栏托盘显示「资源助手运行中」；已启动时请检查浏览器的本地网络权限后点击「连接资源助手」重新连接');
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener('abort', abort);
@@ -111,10 +111,10 @@ export class HelperClient {
     if (response.status === 401) throw new HelperAuthError('配对失败：请从本机 token 文件重新复制令牌');
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(typeof error.error === 'string' ? error.error : '助手请求失败');
+      throw new Error(typeof error.error === 'string' ? error.error : '资源助手请求失败');
     }
     const value = await response.json();
-    if (value.schemaVersion !== version) throw new Error('助手协议版本不兼容');
+    if (value.schemaVersion !== version) throw new Error('资源助手协议版本不兼容');
     return value as T;
   }
   async health(): Promise<void> { await this.request('/v1/health'); }
@@ -125,7 +125,7 @@ export class HelperClient {
 }
 export interface State {
   connected: boolean; busy: boolean; phase: string; error: string;
-  selected?: PublicProject; page?: PageStatus; scan?: Scan; plan?: ImportPlan; result?: ImportReport; compare?: CompareResult; tidy?: TidyResult; selection?: SelectionState; notice?: string; progress: Progress;
+  selected?: PublicProject; page?: PageStatus; scan?: Scan; plan?: ImportPlan; result?: ImportReport; compare?: CompareResult; tidy?: TidyResult; selection?: SelectionState; notice?: string; scanDurationMs?: number; importDurationMs?: number; progress: Progress;
 }
 export class Workflow {
   readonly state: State = {connected:false,busy:false,phase:'未连接',error:'',progress:{done:0,total:0}};
@@ -161,13 +161,13 @@ export class Workflow {
   }
   async connect(): Promise<void> {
     await this.task('连接中',async () => {
-      this.state.connected = false; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined; this.state.notice = undefined;
+      this.state.connected = false; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined; this.state.notice = undefined; this.state.scanDurationMs = undefined; this.state.importDurationMs = undefined;
       await this.helper.health(); this.projects = await this.helper.projects(); this.state.connected = true;
     });
   }
   async saveProject(project: Project): Promise<void> {
     await this.task('保存登记',async () => {
-      this.projects = await this.helper.saveProject(project); this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined; this.state.notice = undefined;
+      this.projects = await this.helper.saveProject(project); this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined; this.state.notice = undefined; this.state.scanDurationMs = undefined; this.state.importDurationMs = undefined;
       if(this.state.selected?.id === project.id) {
         this.state.selected = {id:project.id,name:project.name};
         this.state.page = await this.platform.validate(this.state.selected);
@@ -182,7 +182,7 @@ export class Workflow {
   }
   async selectProject(id: string): Promise<void> {
     await this.task('页面校验',async () => {
-      this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined; this.state.notice = undefined;
+      this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined; this.state.notice = undefined; this.state.scanDurationMs = undefined; this.state.importDurationMs = undefined;
       if(!id) {this.state.selected=undefined;this.state.scan=undefined;this.state.plan=undefined;this.state.result=undefined;this.state.page=undefined;this.state.progress={done:0,total:0};return;}
       const project = this.projects.find(p=>p.id===id);
       if (!project) throw new Error('请选择已登记的游戏');
@@ -190,7 +190,7 @@ export class Workflow {
       this.state.page = await this.platform.validate(this.state.selected);
     });
   }
-  invalidateScan(): void {this.state.scan=undefined;this.state.plan=undefined;this.state.result=undefined;this.state.compare=undefined;this.state.tidy=undefined;this.state.notice=undefined;this.state.progress={done:0,total:0};}
+  invalidateScan(): void {this.state.scan=undefined;this.state.plan=undefined;this.state.result=undefined;this.state.compare=undefined;this.state.tidy=undefined;this.state.notice=undefined;this.state.scanDurationMs=undefined;this.state.importDurationMs=undefined;this.state.progress={done:0,total:0};}
   async validatePage(): Promise<void> {
     await this.task('页面校验',async () => {if (this.state.selected) this.state.page = await this.platform.validate(this.state.selected);});
   }
@@ -212,8 +212,9 @@ export class Workflow {
   }
   async scan(): Promise<void> {
     await this.task('扫描中',async cancellation => {
-      if(!this.state.selected || !this.state.connected) throw new Error('请连接助手并选择游戏');
-      this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.tidy = undefined; this.state.notice = undefined; this.state.progress = {done:0,total:0};
+      const started = Date.now();
+      if(!this.state.selected || !this.state.connected) throw new Error('请连接资源助手并选择游戏');
+      this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.tidy = undefined; this.state.notice = undefined; this.state.scanDurationMs = undefined; this.state.importDurationMs = undefined; this.state.progress = {done:0,total:0};
       this.state.page = await this.platform.validate(this.state.selected);
       if(!this.state.page.valid) throw new Error(this.state.page.message);
       const controller = new AbortController();
@@ -224,7 +225,7 @@ export class Workflow {
       cancellation.throwIfCancelled();
       const plan = await this.platform.preview(scan);
       cancellation.throwIfCancelled();
-      this.state.scan = scan; this.state.plan = plan;
+      this.state.scan = scan; this.state.plan = plan; this.state.scanDurationMs = Date.now() - started;
       this.state.progress = {done:0,total:scan.resources.length};
     });
   }
@@ -235,6 +236,7 @@ export class Workflow {
       this.state.tidy = undefined;
       this.state.page = await this.platform.validate(scan.project);
       if(!this.state.page.valid) throw new Error(this.state.page.message);
+      const started = Date.now();
       let report: ImportReport;
       try { report = await this.platform.importResources(scan,progress=>{this.state.progress=progress;this.changed();},cancellation); }
       catch(error) {
@@ -244,6 +246,7 @@ export class Workflow {
       }
       this.state.result = report;
       this.state.plan = report;
+      this.state.importDurationMs = Date.now() - started;
       this.state.notice = report.cancelled ? '导入已取消：已完成项保留，可再次导入补齐'
         : report.failures.length ? `导入：成功 ${report.applied.added+report.applied.updated+report.applied.removed} · 失败 ${report.failures.length}`
         : `导入：成功 ${report.applied.added+report.applied.updated+report.applied.removed}`;

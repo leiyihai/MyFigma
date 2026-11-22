@@ -2,7 +2,7 @@ import {createFigmaPlatform} from './platform';
 import {Cancellation} from './api';
 import type {PublicProject,Scan} from './api';
 import type {CategoryName} from './category';
-figma.showUI(__html__,{width:520,height:720,themeColors:true});
+figma.showUI(__html__,{width:440,height:540,themeColors:true});
 const platform=createFigmaPlatform(figma);
 const pairingKey='atlas.pairing.v1';
 type Pairing={schemaVersion:1;address:string;token:string};

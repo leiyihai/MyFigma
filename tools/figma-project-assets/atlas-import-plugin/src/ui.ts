@@ -5,6 +5,10 @@ import type {CategoryName} from './category';
 type Pairing={schemaVersion:1;address:string;token:string};
 function el<T extends HTMLElement>(id:string):T {const node=document.getElementById(id);if(!node)throw new Error('界面元素缺失');return node as T;}
 function input(id:string) {return el<HTMLInputElement>(id);}
+function formatDuration(ms:number|undefined):string {
+  if(ms===undefined)return '';
+  return ms<1000?`${Math.max(0,Math.round(ms))} 毫秒`:`${(ms/1000).toFixed(1)} 秒`;
+}
 let sequence=0;
 const pending=new Map<number,{resolve:(value:any)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
 let reportProgress:((value:Progress)=>void)|undefined;
@@ -70,11 +74,11 @@ document.querySelectorAll<HTMLElement>('.help-wrap').forEach(wrap=>{
 });
 function render() {
   const s=workflow?.state,busy=!!s?.busy,connected=!!s?.connected;
-  const connection=el('connection');connection.textContent=connected?'已连接':'未连接';connection.classList.toggle('connected',connected);
+  const connection=el('connection');connection.textContent=connected?'资源助手：已连接':'资源助手：未连接';connection.classList.toggle('connected',connected);
   el('phase').textContent=uiError?'失败':s?.phase||'未连接';
   el('error').textContent=uiError||s?.error||'';
   const connectButton=el<HTMLButtonElement>('connect');connectButton.disabled=busy;
-  connectButton.textContent='连接助手';
+  connectButton.textContent='连接资源助手';
   input('address').disabled=busy;input('token').disabled=busy;
   el<HTMLButtonElement>('forget').disabled=busy||!remembered;
   const pairingError=el('pairing-error');pairingError.textContent=el<HTMLDialogElement>('pairing').open?uiError:'';
@@ -99,10 +103,13 @@ function render() {
   const diff=plan?`新增 ${plan.added} · 更新 ${plan.updated} · 源缺失 ${plan.removed} · 未变 ${plan.unchanged}${plan.blocked?` · 跳过 ${plan.blocked}`:''}${plan.removalSuppressed?' · 扫描不完整，未标记源删除':''}`:'';
   const layout=summary&&(summary.layoutReferences||summary.layoutNineSlice||summary.layoutIgnored)
     ?` · 布局引用 ${summary.layoutReferences||0} · 九宫格 ${summary.layoutNineSlice||0}${summary.layoutIgnored?` · 公共引用忽略 ${summary.layoutIgnored}`:''}`:'';
-  el('summary').textContent=summary?`图集 ${summary.atlases} · 散图 ${summary.sprites} · 独立图片 ${summary.standalone} · 异常 ${summary.errors}${layout}${s?.scan?.complete?'':' · 扫描不完整'} · ${diff}`:plan?`上次操作 · ${diff}`:'尚未扫描';
+  let summaryText=summary?`图集 ${summary.atlases} · 散图 ${summary.sprites} · 独立图片 ${summary.standalone} · 异常 ${summary.errors}${layout}${s?.scan?.complete?'':' · 扫描不完整'} · ${diff}`:plan?`上次操作 · ${diff}`:'尚未扫描';
+  if(summary&&s?.scanDurationMs!==undefined)summaryText+=` · 扫描耗时 ${formatDuration(s.scanDurationMs)}`;
+  el('summary').textContent=summaryText;
   el<HTMLButtonElement>('compare').disabled=busy||!s?.selected;
   el<HTMLButtonElement>('tidy').disabled=busy||!s?.selected;
-  const notice=s?.notice||'';
+  let notice=s?.notice||'';
+  if(notice.startsWith('导入')&&s?.importDurationMs!==undefined)notice+=` · 导入耗时 ${formatDuration(s.importDurationMs)}`;
   const noticeEl=el('action-result');noticeEl.textContent=notice;noticeEl.classList.toggle('hidden',!notice);
   const categorySelect=el<HTMLSelectElement>('category-select');
   const previousCategory=categorySelect.value;
