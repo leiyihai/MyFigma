@@ -121,6 +121,9 @@ dialog::backdrop{background:#0006}
 .category-tag[aria-pressed=true]{border-color:var(--tag);box-shadow:inset 0 0 0 1px var(--tag);background:var(--figma-color-bg,#fff);font-weight:700}
 .category-tag:disabled{opacity:.45;cursor:not-allowed}
 .category-action{border-style:dashed;font-weight:500;color:var(--figma-color-text-secondary,#555)}
+.category-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:6px;flex:none}
+.category-actions:empty{display:none}
+.category-actions button{flex:none;padding:3px 8px;font-size:11px}
 </style></head><body>
 <main class="app-main">
 <div class="app-content">
@@ -149,6 +152,9 @@ dialog::backdrop{background:#0006}
 <section class="card category-card" aria-label="选中主组件分类">
   <div class="card-head"><h2>选中主组件分类 <span class="help-wrap"><span class="help" tabindex="0" role="note" aria-label="分类更正说明" title="按 Figma 当前选择处理主组件或实例；实例会定位主组件，无关对象不会被改造。点击其他类别标签立即把选中主组件移入该类别并更新显示名；点击当前高亮标签不会改写组件；混合选择不高亮单一类别。人工分类优先于自动规则。">?</span><span class="tooltip" role="tooltip">按 Figma 当前选择处理主组件或实例；实例会定位主组件，无关对象不会被改造。点击其他类别标签立即把选中主组件移入该类别并更新显示名；点击当前高亮标签不会改写组件；混合选择不高亮单一类别。人工分类优先于自动规则。</span></span></h2><span id="selection-status" data-testid="selection-status" class="chip">先选择游戏</span></div>
   <div id="category-tags" data-testid="category-tags" class="category-tags" role="group" aria-label="类别标签" data-mixed="false" data-disabled="true"></div>
+  <!-- 分类动作行：撤销（#17）、类别管理（#16）、提交训练样本（#18）各自在这里追加一个按钮，
+       保持右对齐、单行、不换行，未实现时该容器为空且不占高度。 -->
+  <div id="category-actions" data-testid="category-actions" class="category-actions"></div>
 </section>
 </div>
 
