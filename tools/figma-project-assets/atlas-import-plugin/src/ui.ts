@@ -35,8 +35,17 @@ const platform:Platform={
   tidy:project=>rpc('tidy',{project}),
   selection:project=>rpc('selection',{project}),
   categories:()=>rpc('categories',{}),
-  setCategory:(project,ids,category)=>rpc('set-category',{project,ids,category})
+  setCategory:(project,ids,category)=>rpc('set-category',{project,ids,category}),
+  trainingSamples:project=>rpc('training-samples',{project})
 };
+const categoryActionRow=el('category-actions');
+const trainingButton=document.createElement('button');
+trainingButton.type='button';
+trainingButton.id='submit-training';
+trainingButton.textContent='提交训练样本';
+trainingButton.title='把当前资源页中带人工类别覆盖的主组件（来源身份 + 类别）保存为本机训练样本；不上传图片、不改变画布，重复提交覆盖该游戏的旧样本。';
+trainingButton.onclick=()=>void run(()=>workflow!.submitTraining());
+categoryActionRow.append(tooltip(trainingButton));
 let workflow:Workflow|undefined;
 // Category choices come from the page; the default seven are only a fallback.
 let categoryChoices:readonly Category[]=defaultCategories;
@@ -225,6 +234,9 @@ function render() {
   if(selection?.ignored)selectionNotes.push(`已忽略 ${selection.ignored} 个非本工具对象`);
   selectionStatusEl.title=selectionNotes.length?selectionNotes.join('；'):'按 Figma 当前选择处理；实例会定位主组件，无关对象不改动。';
   renderTags(selection,busy);
+  // 提交训练样本属于页面级动作，不需要选中组件；未连接或任务中不可用。
+  trainingButton.disabled=busy||!connected;
+  setTagHint(trainingButton,!connected?'先连接资源助手':busy?'任务执行中，请等待完成':'只提交当前页人工覆盖的「来源身份 + 类别」，不上传图片');
   const detailLines=[...(s?.scan?.errors||[]),...(plan?.messages||[]),...(s?.result?.failures||[]).map(failure=>`失败 ${failure.name}：${failure.reason}`),...(s?.compare?.messages||[])];
   el('details-body').textContent=detailLines.join('\n');
   const detailsButton=el<HTMLButtonElement>('details-open');

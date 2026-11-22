@@ -131,3 +131,82 @@ test('loopback service authenticates and persists project registration across re
     assert.deepEqual(list.projects,[project]);
   } finally { if(restarted) await restarted.stop(); await f.cleanup(); }
 });
+
+const samplesPath = (data, id) => join(data, 'samples', id + '.json');
+
+test('training samples stay behind pairing, Host checks and strict identity+category fields',async()=>{
+  const f=await fixture();
+  try {
+    await f.request('/v1/projects','PUT',{id:'g2',name:'测试游戏',path:f.project,maintained:true});
+    const identity=JSON.stringify(['g2','atlas','tiny.json','red']);
+    const post=(body,headers={})=>fetch(f.base+'/v1/samples',{method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+f.token,...headers},body:JSON.stringify(body)});
+    // 未配对、可疑来源都被拒绝，且响应不回本机路径。
+    assert.equal((await post({projectId:'g2',samples:[{identity,category:'按钮'}]},{Authorization:'Bearer '+'0'.repeat(64)})).status,401);
+    assert.equal((await post({projectId:'g2',samples:[{identity,category:'按钮'}]},{Origin:'https://untrusted.example'})).status,403);
+    // 字段严格：只接受项目编号与「来源身份 + 类别」。
+    for (const body of [
+      {samples:[{identity,category:'按钮'}]},
+      {projectId:'missing',samples:[{identity,category:'按钮'}]},
+      {projectId:'g2',samples:[]},
+      {projectId:'g2',samples:[{identity,category:'按钮',png:'AAAA'}]},
+      {projectId:'g2',images:[],samples:[{identity,category:'按钮'}]},
+      {projectId:'g2',samples:[{identity,category:''}]},
+      {projectId:'g2',samples:[{identity,category:'   '}]},
+      {projectId:'g2',samples:[{identity,category:'a/b'}]},
+      {projectId:'g2',samples:[{identity,category:'换\n行'}]},
+      {projectId:'g2',samples:[{identity:'不是 JSON',category:'按钮'}]},
+      {projectId:'g2',samples:[{identity:JSON.stringify(['other','atlas','tiny.json','red']),category:'按钮'}]},
+      {projectId:'g2',samples:[{identity:JSON.stringify(['g2','atlas','tiny.json']),category:'按钮'}]},
+      {projectId:'g2',samples:[{identity:JSON.stringify(['g2','standalone']),category:'按钮'}]},
+      {projectId:'g2',samples:[{identity,category:'按钮'},{identity,category:'图标'}]}
+    ]) {
+      const response=await post(body);
+      assert.equal(response.status,400,JSON.stringify(body));
+      const text=await response.text();
+      assert.equal(text.includes(JSON.stringify(f.data).slice(1,-1)),false);
+    }
+    // 合法提交返回保存条数；文件可读回且不含本机绝对路径。
+    const saved=await post({projectId:'g2',samples:[{identity,category:'按钮'}]});
+    assert.equal(saved.status,200);
+    assert.deepEqual(await saved.json(),{schemaVersion:1,count:1});
+    const written=JSON.parse(await readFile(samplesPath(f.data,'g2'),'utf8'));
+    assert.equal(written.schemaVersion,1);
+    assert.equal(written.projectId,'g2');
+    assert.deepEqual(written.samples,[{identity,category:'按钮'}]);
+    assert.equal(JSON.stringify(written).includes(JSON.stringify(f.data).slice(1,-1)),false);
+
+    // 重复提交按最新人工标签整体覆盖旧样本，不残留中间文件。
+    const replaced=await post({projectId:'g2',samples:[
+      {identity:JSON.stringify(['g2','atlas','tiny.json','green']),category:'图标'}
+    ]});
+    assert.equal(replaced.status,200);
+    assert.deepEqual(await replaced.json(),{schemaVersion:1,count:1});
+    assert.deepEqual(JSON.parse(await readFile(samplesPath(f.data,'g2'),'utf8')).samples,[
+      {identity:JSON.stringify(['g2','atlas','tiny.json','green']),category:'图标'}
+    ]);
+    const {readdir}=await import('node:fs/promises');
+    assert.deepEqual((await readdir(join(f.data,'samples'))).sort(),['g2.json']);
+  }finally{await f.cleanup();}
+});
+
+test('training samples raise only the samples body cap while other routes keep 64 KiB',async()=>{
+  const f=await fixture();
+  try {
+    await f.request('/v1/projects','PUT',{id:'g2',name:'测试游戏',path:f.project,maintained:true});
+    const identity=i=>JSON.stringify(['g2','atlas','bulk.json','frame'+i]);
+    // 20 000 条标签约 1.2 MB，超过旧 64 KiB 上限，仍应被接受并落盘。
+    const samples=[...Array(20000)].map((_,i)=>({identity:identity(i),category:'按钮'}));
+    const large=await f.request('/v1/samples','POST',{projectId:'g2',samples});
+    assert.equal(large.status,200);
+    assert.deepEqual(await large.json(),{schemaVersion:1,count:20000});
+    assert.equal(JSON.parse(await readFile(samplesPath(f.data,'g2'),'utf8')).samples.length,20000);
+    // 超过 4 MiB 的样本请求明确拒绝，而不是静默截断。
+    const oversized=await f.request('/v1/samples','POST',{projectId:'g2',samples:[
+      {identity:identity(0),category:'x'.repeat(4*1024*1024)}
+    ]});
+    assert.equal(oversized.status,413);
+    // 其他写接口仍保持 64 KiB 上限。
+    assert.equal((await f.request('/v1/projects','PUT',{bad:'x'.repeat(66000)})).status,413);
+  }finally{await f.cleanup();}
+});

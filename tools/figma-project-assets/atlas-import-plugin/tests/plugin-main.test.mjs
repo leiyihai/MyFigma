@@ -80,6 +80,15 @@ test('built main script loads in an import-rejecting sandbox, stores pairing loc
     assert.equal(page.name, '测试游戏（g2）- 分类资源');
     assert.equal(page.children[0].children.length, 2);
     assert.equal(replies.filter(reply => reply.type === 'progress').at(-1).progress.done, 2);
+    // 训练样本 RPC 只回人工覆盖的「来源身份 + 类别」，自动分类不进入。
+    const manual = page.findAll(node => node.type === 'COMPONENT')[0];
+    manual.setPluginData('atlas.category.manual', '按钮');
+    await figma.ui.onmessage({ type: 'training-samples', requestId: 21, project: { id: 'g2', name: '测试游戏' } });
+    const samplesReply = replies.find(reply => reply.requestId === 21);
+    assert.equal(samplesReply.error, undefined);
+    assert.deepEqual(samplesReply.result.samples, [{
+      identity: JSON.parse(manual.getPluginData('atlas.source')).identity, category: '按钮'
+    }]);
     await figma.ui.onmessage({ type: 'tidy', requestId: 4, project: { id: 'g2', name: '测试游戏' } });
     const tidied = replies.find(reply => reply.requestId === 4);
     assert.equal(tidied.error, undefined);

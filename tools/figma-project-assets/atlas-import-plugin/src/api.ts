@@ -46,6 +46,10 @@ export interface SelectionState {
 export interface CategoryResult {
   schemaVersion: 1; action: 'manual' | 'auto'; updated: number; moved: number; messages: string[];
 }
+// 训练样本只含人工覆盖：来源身份 + 当前类别。图片、显示名和本机路径都不参与。
+export interface TrainingSample { identity: string; category: string }
+export interface TrainingExport { schemaVersion: 1; projectId: string; samples: TrainingSample[] }
+export interface TrainingResult { schemaVersion: 1; count: number }
 // The page is the source of truth for categories; the UI only renders this
 // ordered readback and never keeps a second list of its own.
 export interface CategoryState { schemaVersion: 1; categories: Category[] }
@@ -85,6 +89,7 @@ export interface Platform {
   selection(project: PublicProject): Promise<SelectionState>;
   categories(): Promise<CategoryState>;
   setCategory(project: PublicProject, ids: string[], category: string): Promise<CategoryResult>;
+  trainingSamples(project: PublicProject): Promise<TrainingExport>;
 }
 
 class HelperConnectionError extends Error {}
@@ -126,6 +131,10 @@ export class HelperClient {
   async saveProject(project: Project): Promise<Project[]> { return (await this.request<{projects:Project[]}>('/v1/projects','PUT',project)).projects; }
   async deleteProject(id: string): Promise<Project[]> { return (await this.request<{projects:Project[]}>('/v1/projects/'+encodeURIComponent(id),'DELETE')).projects; }
   scan(projectId: string, signal?: AbortSignal): Promise<Scan> { return this.request('/v1/scan','POST',{projectId},3,signal); }
+  // 训练样本请求只带身份与类别；助手按项目覆盖保存，不回传本机路径。
+  submitSamples(projectId: string, samples: TrainingSample[]): Promise<TrainingResult> {
+    return this.request('/v1/samples','POST',{projectId,samples});
+  }
 }
 export interface State {
   connected: boolean; busy: boolean; phase: string; error: string;
@@ -215,6 +224,22 @@ export class Workflow {
       await this.platform.setCategory(project,selection.members.map(member=>member.id),category);
       this.invalidateScan();
       this.state.selection = await this.platform.selection(project);
+    });
+  }
+  // 只提交当前资源页的人工覆盖；自动分类结果不进入训练真值。
+  async submitTraining(): Promise<void> {
+    await this.task('提交训练样本',async () => {
+      const project = this.state.selected;
+      if(!project) throw new Error('请选择游戏');
+      if(!this.state.connected) throw new Error('请连接资源助手后提交训练样本');
+      const exported = await this.platform.trainingSamples(project);
+      if(!exported.samples.length) {
+        this.state.notice = '没有可提交的人工标签：先在画布选中主组件并点击类别标签，再提交训练样本';
+        return '就绪';
+      }
+      const result = await this.helper.submitSamples(project.id,exported.samples);
+      this.state.notice = `训练样本：已提交 ${result.count} 个标签到本机助手`;
+      return '就绪';
     });
   }
   async scan(): Promise<void> {

@@ -42,6 +42,7 @@ figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicPro
     else if(message.type==='tidy')reply(await platform.tidy(message.project));
     else if(message.type==='selection')reply(await platform.selection(message.project));
     else if(message.type==='categories')reply(await platform.categories());
+    else if(message.type==='training-samples')reply(await platform.trainingSamples(message.project));
     else if(message.type==='set-category') {
       if(!Array.isArray(message.ids) || !message.category) throw new Error('分类参数无效');
       reply(await platform.setCategory(message.project,message.ids,message.category));
