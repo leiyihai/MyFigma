@@ -122,7 +122,6 @@ dialog::backdrop{background:#0006}
 .category-tag:disabled{opacity:.45;cursor:not-allowed}
 .category-action{border-style:dashed;font-weight:500;color:var(--figma-color-text-secondary,#555)}
 .category-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:6px;flex:none}
-.category-actions:empty{display:none}
 .category-actions button{flex:none;height:24px;padding:0 9px;font-size:11px;display:inline-flex;align-items:center}
 /* 类别管理：沿用配对/详情弹窗的 dialog 结构，只增加类别列表与新增表单。 */
 #category-manager .small-body{gap:8px}
@@ -170,9 +169,10 @@ dialog::backdrop{background:#0006}
 <section class="card category-card" aria-label="选中主组件分类">
   <div class="card-head"><h2>选中主组件分类 <span class="help-wrap"><span class="help" tabindex="0" role="note" aria-label="分类更正说明" title="按 Figma 当前选择处理主组件或实例；实例会定位主组件，无关对象不会被改造。点击其他类别标签立即把选中主组件移入该类别并更新显示名；点击当前高亮标签不会改写组件；混合选择不高亮单一类别。人工分类优先于自动规则。">?</span><span class="tooltip" role="tooltip">按 Figma 当前选择处理主组件或实例；实例会定位主组件，无关对象不会被改造。点击其他类别标签立即把选中主组件移入该类别并更新显示名；点击当前高亮标签不会改写组件；混合选择不高亮单一类别。人工分类优先于自动规则。</span></span></h2><span id="selection-status" data-testid="selection-status" class="chip">先选择游戏</span></div>
   <div id="category-tags" data-testid="category-tags" class="category-tags" role="group" aria-label="类别标签" data-mixed="false" data-disabled="true"></div>
-  <!-- 分类动作行：撤销（#17）、类别管理（#16）、提交训练样本（#18）各自在这里追加一个按钮，
-       保持右对齐、单行、不换行，未实现时该容器为空且不占高度。 -->
-  <div id="category-actions" data-testid="category-actions" class="category-actions"><button id="undo-category" type="button" class="quiet" disabled title="暂无可撤销的人工分类">撤销</button><button id="category-manager-open" type="button" title="新增或删除当前资源页的类别；删除类别前其中的主组件会先移到未分类。">类别管理</button></div>
+  <!-- 分类动作行：三个 24px 按钮单行右对齐，不换行、不撑高 350×600 面板。
+       「撤销」「类别管理」写在这里，「提交训练样本」由 ui.ts 追加到末尾；
+       容器始终有内容（未实现时也保留按钮的禁用态），所以不设空容器样式。 -->
+  <div id="category-actions" data-testid="category-actions" class="category-actions"><button id="undo-category" type="button" class="quiet" disabled title="暂无可撤销的人工分类">撤销</button><button id="category-manager-open" type="button" title="新增或删除当前资源页的类别；删除类别时其中的主组件会先移到未分类，用户自有对象留在原处。">类别管理</button></div>
 </section>
 </div>
 
@@ -217,7 +217,7 @@ dialog::backdrop{background:#0006}
   <div class="dialog-small">
     <div class="dialog-head"><h2 id="category-manager-title">类别管理</h2><button type="button" id="category-manager-close" title="关闭类别管理；已保存的类别不会撤销。">关闭类别管理</button></div>
     <div class="small-body">
-      <p class="muted small">类别保存在当前资源页：新增后立即出现分类 Frame 与标签，删除前其中的主组件会先移到「未分类」。</p>
+      <p class="muted small">类别保存在当前资源页：新增后立即出现分类 Frame 与标签，删除时其中的主组件会先移到「未分类」，用户自有对象留在原处。</p>
       <ul id="category-list" data-testid="category-list" class="category-manage-list" aria-label="当前类别"></ul>
       <!-- 删除确认固定放在列表之外：列表再长也不会把确认行挤到滚动区外。 -->
       <div id="category-confirm" class="category-confirm" role="group" aria-label="确认删除类别" hidden></div>

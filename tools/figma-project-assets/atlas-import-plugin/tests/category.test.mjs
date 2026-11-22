@@ -1106,8 +1106,8 @@ test('未分类不可删除，删除未知类别与未绑定页被拒绝且不�
   } finally { await f.cleanup(); }
 });
 
-test('未分类 Frame 缺失时删除类别会重建它并接管被删类别的全部子节点', async () => {
-  const { f, workflow, platform, page } = await setup();
+test('删除类别只迁移带工具记录的子节点，用户自有对象留在原 Frame 且 Frame 不被删除', async () => {
+  const { f, workflow, platform, page, api: figma } = await setup();
   try {
     await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
     await workflow.scan();
@@ -1120,21 +1120,64 @@ test('未分类 Frame 缺失时删除类别会重建它并接管被删类别的�
     const effectFrame = categoryFrame(page, '特效');
     // 这次导入没有产生未分类组件，页面上还没有未分类 Frame。
     assert.equal(categoryFrame(page, '未分类'), undefined);
-    // 分类 Frame 里除主组件外还有用户自有对象：删除类别时也不能丢。
+    // 分类 Frame 里还有用户自有对象（实例与普通组件），删除类别时不能被抢走。
     const extra = icon.createInstance();
     effectFrame.appendChild(extra);
+    const user = figma.createComponent();
+    user.name = '用户自己的按钮';
+    user.resize(10, 10);
+    effectFrame.appendChild(user);
 
     const removed = await platform.removeCategory(project16, '特效');
     assert.equal(removed.categories.some(category => category.name === '特效'), false);
+    // 只有带工具来源记录的主组件被移到未分类。
     assert.equal(removed.moved, 1);
     const rebuilt = categoryFrame(page, '未分类');
     assert.ok(rebuilt);
     assert.equal(icon.parent, rebuilt);
-    assert.equal(extra.parent, rebuilt);
-    assert.equal(extra.getMainComponentAsync !== undefined, true);
-    assert.equal(await extra.getMainComponentAsync(), icon);
     assert.equal(icon.name, '未分类/icon_coin');
-    assert.equal(effectFrame.children.length, 0);
+    // 用户自有对象留在原 Frame，Frame 仍在页面上但已清除类别标记，不再被认领。
+    assert.equal(extra.parent, effectFrame);
+    assert.equal(user.parent, effectFrame);
+    assert.equal(page.children.includes(effectFrame), true);
+    assert.equal(effectFrame.name, '特效');
+    assert.equal(effectFrame.getPluginData('atlas.category'), '');
+    // 返回消息说清楚保留了多少非本工具对象，而不是静默改变结构。
+    assert.match(removed.message, /保留 2 个非本工具对象/);
+    // 已不再被认领：再次删除同名类别按「没有类别」拒绝，组件与用户对象都不动。
+    await assert.rejects(() => platform.removeCategory(project16, '特效'), /没有类别「特效」/);
+    assert.equal(extra.parent, effectFrame);
+    assert.equal(user.parent, effectFrame);
+    assert.equal(icon.parent, rebuilt);
+  } finally { await f.cleanup(); }
+});
+
+test('调色板用尽后按索引从色相环生成稳定且互异的新颜色', async () => {
+  const { f, workflow, platform, api: figmaApi } = await setup();
+  try {
+    await sprite(f, 'dot.json', 'dot', 1, 1);
+    await workflow.scan();
+    await workflow.import();
+    // 默认七类占色调色板前七个槽位，再新增 10 个就把 12 个调色板颜色用尽。
+    for (let index = 0; index < 10; index++) await platform.addCategory(project16, `补充${index}`);
+    let categories = (await platform.categories()).categories;
+    assert.equal(categories.length, 17);
+    assert.equal(new Set(categories.slice(0, 12).map(category => category.color)).size, 12);
+
+    // 第 13 个新类别不复用旧色，与所有已有颜色互异且仍是合法的 #rrggbb。
+    const extra = await platform.addCategory(project16, '超出调色板');
+    categories = extra.categories;
+    assert.equal(categories.length, 18);
+    assert.equal(new Set(categories.map(category => category.color)).size, 18);
+    for (const category of categories) assert.match(category.color, /^#[0-9a-f]{6}$/);
+    const generated = categories[categories.length - 1].color;
+
+    // 同一索引恒定：删掉后再新增同一位置，重算出的颜色相同。
+    await platform.removeCategory(project16, '超出调色板');
+    const again = await platform.addCategory(project16, '再补一个');
+    assert.equal(again.categories[again.categories.length - 1].color, generated);
+    // 重新打开（同一页面新建平台实例）回读的颜色与顺序不变。
+    assert.deepEqual((await api.createFigmaPlatform(figmaApi).categories()).categories, again.categories);
   } finally { await f.cleanup(); }
 });
 

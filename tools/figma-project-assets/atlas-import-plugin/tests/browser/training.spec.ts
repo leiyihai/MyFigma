@@ -31,7 +31,7 @@ async function host(pairing:unknown) {
       if(m.type==='training-samples'){
         window.trainingCalls+=1;
         if(window.trainingError){reply(null,window.trainingError);return;}
-        reply(window.training||{schemaVersion:1,projectId:m.project&&m.project.id||'',samples:[]});
+        reply(window.training||{schemaVersion:1,projectId:m.project&&m.project.id||'',samples:[],ignored:0});
         return;
       }
       reply(null,'未知插件任务');
@@ -112,6 +112,17 @@ test('提交训练样本按钮随连接启用，提交人工标签、显示条�
     expect(written.projectId).toBe('g2');
     expect(written.samples).toEqual(samples);
     expect(JSON.stringify(written).includes(f.data)).toBe(false);
+
+    // 平台报告重复身份时，成功提示补充被忽略的数量，而不是静默丢弃（B3）。
+    await page.evaluate(()=>{(window as any).training={schemaVersion:1,projectId:'g2',
+      samples:[{identity:'dup',category:'按钮'}],ignored:1};});
+    await page.route(f.base+'/v1/samples',route=>route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({schemaVersion:1,count:1})}));
+    await button.click();
+    await expect(notice).toContainText('已提交 1 个标签');
+    await expect(notice).toContainText('忽略 1 个重复身份');
+    await expect(ui.locator('#phase')).toHaveText('就绪');
+    await page.unroute(f.base+'/v1/samples');
 
     // 助手拒绝时显示具体、可操作的错误，而不是静默成功。
     await page.route(f.base+'/v1/samples',route=>route.fulfill({status:400,contentType:'application/json',

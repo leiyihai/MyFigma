@@ -4,7 +4,9 @@
 // keywords, then a coarse size ratio. Nine-slice usage, margins and slice
 // structure only decide the stretch behaviour and never the purpose. Anything
 // uncertain stays 未分类; no image recognition is involved.
-export interface Category { name: string; color: string }
+// 类别名是页面配置里的字符串标识；集中成别名，避免各处把它和显示名、身份混用。
+export type CategoryName = string;
+export interface Category { name: CategoryName; color: string }
 export interface CategoryConfig { schemaVersion: 1; categories: Category[] }
 
 // Default seven with stable colours. Stored page configurations may add,
@@ -30,18 +32,34 @@ export const categoryPalette: readonly string[] = [
 export const categoryConfigKey = 'atlas.categories.v1';
 export const categoryNameLimit = 24;
 
-// Colour assignment for a category added later: the first palette entry with the
-// fewest users. Stored configurations keep their colours, so reopening a page
-// recomputes the same answer and a second addition never recolours the first.
+// Colour assignment for a category added later: the first unused palette entry.
+// Stored configurations keep their colours, so reopening a page recomputes the
+// same answer and a second addition never recolours the first. Once the palette
+// is exhausted the old colour is never reused: colours are generated along the
+// hue wheel by index, which keeps a given index stable and skips colours already
+// in use so new categories stay distinguishable from existing ones.
+function hslColor(hue: number, saturation: number, lightness: number): string {
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const second = chroma * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const offset = lightness - chroma / 2;
+  const [red, green, blue] = hue < 60 ? [chroma, second, 0] : hue < 120 ? [second, chroma, 0]
+    : hue < 180 ? [0, chroma, second] : hue < 240 ? [0, second, chroma]
+    : hue < 300 ? [second, 0, chroma] : [chroma, 0, second];
+  const hex = (value: number) => Math.round((value + offset) * 255).toString(16).padStart(2, '0');
+  return `#${hex(red)}${hex(green)}${hex(blue)}`;
+}
+function generatedCategoryColor(index: number): string {
+  // 黄金角步长让相邻索引的色相尽量分开，而不是沿色环缓慢移动。
+  return hslColor((index * 137.508) % 360, 0.62, 0.52);
+}
 export function nextCategoryColor(categories: readonly Category[]): string {
-  const used = new Map<string, number>();
-  for(const category of categories) used.set(category.color, (used.get(category.color) || 0) + 1);
-  let picked = categoryPalette[0], fewest = Infinity;
-  for(const color of categoryPalette) {
-    const count = used.get(color) || 0;
-    if(count < fewest) { picked = color; fewest = count; }
+  const used = new Set(categories.map(category => category.color));
+  const unused = categoryPalette.find(color => !used.has(color));
+  if(unused) return unused;
+  for(let index = 0; ; index++) {
+    const color = generatedCategoryColor(index);
+    if(!used.has(color)) return color;
   }
-  return picked;
 }
 
 // A prefix only counts as the leading token: letters up to the first digit,
@@ -67,7 +85,7 @@ const nameRules: ReadonlyArray<{category: string; keywords: readonly string[]}> 
 
 export type CategoryInput = { frameName: string; width: number; height: number };
 
-export function classify(input: CategoryInput): string {
+export function classify(input: CategoryInput): CategoryName {
   const name = input.frameName.toLocaleLowerCase();
   const token = name.match(/^[a-z]+/)?.[0];
   if(token) for(const rule of prefixRules) if(rule.prefixes.includes(token)) return rule.category;
@@ -83,7 +101,7 @@ export function classify(input: CategoryInput): string {
 
 // Display name format: 分类/散图原名. `sourceInfo` is the source location and
 // is only appended when two components in the same category share a name.
-export function componentName(category: string, frameName: string, sourceInfo?: string): string {
+export function componentName(category: CategoryName, frameName: string, sourceInfo?: string): string {
   return sourceInfo ? `${category}/${frameName} · ${sourceInfo}` : `${category}/${frameName}`;
 }
 
@@ -141,7 +159,7 @@ function defaultConfig(): CategoryConfig {
   return {schemaVersion:1, categories:defaultCategories.map(category => ({...category}))};
 }
 
-export function knownCategory(config: CategoryConfig, value: unknown): string | undefined {
+export function knownCategory(config: CategoryConfig, value: unknown): CategoryName | undefined {
   return typeof value === 'string' && value.length > 0 &&
     config.categories.some(category => category.name === value) ? value : undefined;
 }
@@ -155,8 +173,7 @@ export function categoryIndex(names: readonly string[], name: string): number {
 
 // Classification only knows the six rule categories, so a name that the page
 // configuration dropped falls back to 未分类 instead of creating an unmanaged Frame.
-export function categoryOr(config: CategoryConfig, name: string): string {
-  if(knownCategory(config, name)) return name;
-  const fallback = config.categories.find(category => category.name === unsortedCategory);
-  return fallback ? fallback.name : config.categories[0].name;
+// 配置读回始终补齐「未分类」，所以这里不需要再回退到「第一个类别」。
+export function categoryOr(config: CategoryConfig, name: CategoryName): CategoryName {
+  return knownCategory(config, name) ? name : unsortedCategory;
 }

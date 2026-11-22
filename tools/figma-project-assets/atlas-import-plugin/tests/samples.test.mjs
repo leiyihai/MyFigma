@@ -41,7 +41,7 @@ test('训练样本只导出人工覆盖的来源身份与当前类别，自动�
 
     // 自动分类结果不是训练真值：没有人工覆盖时导出的样本为空。
     assert.deepEqual(await platform.trainingSamples({ id: 'g8', name: '分类测试' }), {
-      schemaVersion: 1, projectId: 'g8', samples: []
+      schemaVersion: 1, projectId: 'g8', samples: [], ignored: 0
     });
 
     // 人工点击类别标签后，来源身份保持不变，类别取人工覆盖。
@@ -53,7 +53,7 @@ test('训练样本只导出人工覆盖的来源身份与当前类别，自动�
     const exported = await platform.trainingSamples({ id: 'g8', name: '分类测试' });
     assert.deepEqual(exported, {
       schemaVersion: 1, projectId: 'g8',
-      samples: [{ identity, category: '艺术字' }]
+      samples: [{ identity, category: '艺术字' }], ignored: 0
     });
     // 自动分类的图标仍被过滤；身份来自 atlas.source，不是显示名。
     assert.equal(exported.samples.some(sample => sample.identity === identityOf(icon)), false);
@@ -111,6 +111,39 @@ test('提交训练样本写入项目级本机文件，重复提交按最新人�
     const replaced = JSON.parse(await readFile(path, 'utf8')).samples;
     assert.equal(replaced.length, 2);
     assert.equal(replaced.find(sample => sample.identity === identityOf(button)).category, '背景');
+  } finally { await f.cleanup(); }
+});
+
+test('同一来源身份重复出现时只导出第一条，并报告被忽略的重复身份数量', async () => {
+  const { f, workflow, platform, page, api: figma } = await setup();
+  try {
+    await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    const button = componentNamed(page, '按钮/btn_ok');
+    page.selection = [button];
+    await workflow.loadSelection();
+    await workflow.setCategory('艺术字');
+
+    // 手工制造同一来源身份的第二个主组件（例如复制粘贴后仍带来源记录）。
+    const duplicate = figma.createComponent();
+    page.appendChild(duplicate);
+    duplicate.name = '按钮/btn_ok 副本';
+    duplicate.setPluginData('atlas.source', button.getPluginData('atlas.source'));
+    duplicate.setPluginData('atlas.category.manual', '背景');
+
+    // 只导出第一条，不静默丢弃重复项，而是把忽略数量返回给调用方。
+    const exported = await platform.trainingSamples({ id: 'g8', name: '分类测试' });
+    assert.equal(exported.samples.length, 1);
+    assert.equal(exported.ignored, 1);
+    assert.equal(exported.samples[0].identity, identityOf(button));
+
+    // 成功提示里体现忽略数量，落盘仍只有一条样本。
+    await workflow.submitTraining();
+    assert.match(workflow.state.notice, /已提交 1 个标签/);
+    assert.match(workflow.state.notice, /忽略 1 个重复身份/);
+    const written = JSON.parse(await readFile(join(f.data, 'samples', 'g8.json'), 'utf8'));
+    assert.deepEqual(written.samples, exported.samples);
   } finally { await f.cleanup(); }
 });
 

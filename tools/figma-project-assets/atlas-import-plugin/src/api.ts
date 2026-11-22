@@ -1,4 +1,4 @@
-import type { Category } from './category';
+import type { Category, CategoryName } from './category';
 export interface Project { id: string; name: string; path: string; maintained: boolean }
 export interface PublicProject { id: string; name: string }
 export interface Source {
@@ -38,14 +38,14 @@ export interface TidyResult {
 }
 export interface ItemFailure { name: string; reason: string }
 export interface SelectionMember {
-  id: string; name: string; category: string; manual: boolean; viaInstance: boolean;
+  id: string; name: string; category: CategoryName; manual: boolean; viaInstance: boolean;
 }
 export interface SelectionState {
   schemaVersion: 1; members: SelectionMember[]; ignored: number; mixed: boolean;
 }
 // 人工分类前每个组件的类别与人工覆盖状态；撤销只按这份快照写回，不重跑自动规则。
 export interface CategoryOverride {
-  id: string; category: string; manual: boolean;
+  id: string; category: CategoryName; manual: boolean;
 }
 export interface CategoryResult {
   schemaVersion: 1; action: 'manual' | 'auto'; updated: number; moved: number; messages: string[];
@@ -59,8 +59,9 @@ export interface CategoryUndo {
   schemaVersion: 1; entries: CategoryOverride[];
 }
 // 训练样本只含人工覆盖：来源身份 + 当前类别。图片、显示名和本机路径都不参与。
-export interface TrainingSample { identity: string; category: string }
-export interface TrainingExport { schemaVersion: 1; projectId: string; samples: TrainingSample[] }
+// 同一来源身份重复出现时只保留第一条，`ignored` 告知调用方被忽略的数量。
+export interface TrainingSample { identity: string; category: CategoryName }
+export interface TrainingExport { schemaVersion: 1; projectId: string; samples: TrainingSample[]; ignored: number }
 export interface TrainingResult { schemaVersion: 1; count: number }
 // The page is the source of truth for categories; the UI only renders this
 // ordered readback and never keeps a second list of its own.
@@ -105,7 +106,7 @@ export interface Platform {
   categories(): Promise<CategoryState>;
   addCategory(project: PublicProject, name: string): Promise<CategoryChange>;
   removeCategory(project: PublicProject, name: string): Promise<CategoryChange>;
-  setCategory(project: PublicProject, ids: string[], category: string): Promise<CategoryResult>;
+  setCategory(project: PublicProject, ids: string[], category: CategoryName | 'auto'): Promise<CategoryResult>;
   restoreCategory(project: PublicProject, entries: CategoryOverride[]): Promise<CategoryRestoreResult>;
   trainingSamples(project: PublicProject): Promise<TrainingExport>;
 }
@@ -251,9 +252,10 @@ export class Workflow {
   async removeCategory(name: string): Promise<CategoryChange> {
     return this.categoryChange('删除类别',name,(project,value) => this.platform.removeCategory(project,value));
   }
-  async setCategory(category: string): Promise<void> {
+  async setCategory(category: CategoryName): Promise<void> {
     const selection = this.state.selection;
     // 点击已高亮的当前类别是空操作：不移动组件，也不写人工覆盖。
+    // 这里是权威短路，界面另有一份同类检查只为避免忙碌相位闪烁；不要删掉两份中的任何一份。
     if(selection?.members.length && selection.members.every(member => member.category === category)) return;
     await this.task('应用分类',async () => {
       const project = this.state.selected;
@@ -295,7 +297,8 @@ export class Workflow {
         return '就绪';
       }
       const result = await this.helper.submitSamples(project.id,exported.samples);
-      this.state.notice = `训练样本：已提交 ${result.count} 个标签到本机助手`;
+      const ignored = exported.ignored ? `，忽略 ${exported.ignored} 个重复身份` : '';
+      this.state.notice = `训练样本：已提交 ${result.count} 个标签到本机助手${ignored}`;
       return '就绪';
     });
   }

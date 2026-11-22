@@ -1,18 +1,16 @@
 import {test,expect} from '@playwright/test';
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
-// Public helper fixture launches the real Rust binary.
+// 默认类别、追加式调色板与颜色分配统一取自实现：伪宿主不再自造一套 nextColor。
+import {defaultCategories,categoryPalette,nextCategoryColor} from '../../src/category';
 // @ts-ignore JS fixture is intentionally shared across the two owned packages.
 import {fixture} from '../../../local-helper/tests/fixture.mjs';
 
-const defaultCategories=[
-  {name:'按钮',color:'#e5484d'},{name:'底板',color:'#8e4ec6'},{name:'图标',color:'#f2a900'},
-  {name:'背景',color:'#3e63dd'},{name:'艺术字',color:'#d6409f'},{name:'进度条',color:'#30a46c'},
-  {name:'未分类',color:'#8b8d98'}
-];
-const palette=['#e5484d','#8e4ec6','#f2a900','#3e63dd','#d6409f','#30a46c','#8b8d98','#0091ff','#12a594'];
+const addedColor=nextCategoryColor(defaultCategories);
 
 test('类别管理弹窗新增、重名提示、删除确认与关闭后标签刷新',async({page})=>{
+  // 默认七类就是调色板的前七个槽位，颜色与实现同源。
+  expect(defaultCategories.map(category=>category.color)).toEqual(categoryPalette.slice(0,defaultCategories.length));
   const f=await fixture();
   const server=createServer(async(req,res)=>{
     if(req.url==='/ui.html') {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(await readFile(new URL('../../dist/ui.html',import.meta.url)));}
@@ -20,10 +18,8 @@ test('类别管理弹窗新增、重名提示、删除确认与关闭后标签�
     <script>
     window.categoryConfig=${JSON.stringify(defaultCategories)};
     window.selectionMembers=[{id:'component-1',name:'按钮/ok',category:'按钮',manual:false,viaInstance:false}];
-    const nextColor=()=>{
-      const used=window.categoryConfig.map(c=>c.color);
-      return ${JSON.stringify(palette)}.find(color=>!used.includes(color))||'#6e56cf';
-    };
+    // 颜色来自实现算出的下一个类别颜色，宿主不自建调色板逻辑。
+    window.addedColor=${JSON.stringify(addedColor)};
     addEventListener('message',e=>{
       const m=e.data.pluginMessage;if(!m)return;
       const reply=(result,error)=>e.source.postMessage({pluginMessage:{type:'result',requestId:m.requestId,result,error}},'*');
@@ -40,7 +36,7 @@ test('类别管理弹窗新增、重名提示、删除确认与关闭后标签�
         window.addRequests=(window.addRequests||0)+1;
         const name=typeof m.name==='string'?m.name.trim():'';
         if(window.categoryConfig.some(c=>c.name===name)){reply(null,'已存在类别「'+name+'」');return;}
-        window.categoryConfig=[...window.categoryConfig,{name,color:nextColor()}];
+        window.categoryConfig=[...window.categoryConfig,{name,color:window.addedColor}];
         reply({schemaVersion:1,categories:window.categoryConfig,moved:0,message:'已新增类别「'+name+'」'});return;}
       if(m.type==='remove-category'){
         window.removeRequests=(window.removeRequests||0)+1;
@@ -67,10 +63,18 @@ test('类别管理弹窗新增、重名提示、删除确认与关闭后标签�
     const list=ui.getByTestId('category-list');
     const input=ui.getByLabel('新类别名称');
     const addButton=ui.getByRole('button',{name:'新增类别',exact:true});
-    // 未连接时动作行的类别管理入口禁用；合并 #16/#17/#18 后动作行为
-    // 「撤销 + 类别管理 + 提交训练样本」三个按钮，这里断言没有重复或额外按钮，
-    // 而不是仍然只有类别管理一个。
-    await expect(manager).toBeDisabled();
+    // 类别配置存在页面里，属于本地操作：未连接助手也能打开类别管理，删除按钮也只受
+    // 任务执行中限制；新增需要先选游戏（项目编号用于定位资源页）。
+    await expect(manager).toBeEnabled();
+    await manager.click();
+    await expect(dialog).toBeVisible();
+    await expect(list.locator('li')).toHaveCount(7);
+    await expect(list.locator('[data-remove="按钮"]')).toBeEnabled();
+    await expect(addButton).toBeDisabled();
+    await expect(ui.locator('#new-category-note')).toContainText('先选择游戏');
+    await ui.getByRole('button',{name:'关闭类别管理',exact:true}).click();
+    await expect(dialog).not.toBeVisible();
+    // 合并 #16/#17/#18 后动作行为「撤销 + 类别管理 + 提交训练样本」三个按钮。
     expect(await ui.locator('#category-actions button').count()).toBe(3);
     await expect(ui.locator('#category-actions button#undo-category')).toHaveCount(1);
     await expect(ui.locator('#category-actions button#category-manager-open')).toHaveCount(1);

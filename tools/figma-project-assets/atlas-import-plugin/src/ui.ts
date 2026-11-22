@@ -175,11 +175,12 @@ async function restoreAuto() {
 async function classifyAs(category:string) {
   const selection=workflow?.state.selection;
   if(!workflow?.state.selected||!selection?.members.length)return;
-  // 点击已高亮的标签不产生写入。
+  // 点击已高亮的标签不产生写入。这里的短路只为不进入 busy 相位（避免闪动与多余重绘），
+  // 权威短路在 `Workflow.setCategory`，两份都不能删。
   if(selection.members.every(member=>member.category===category))return;
   await workflow.setCategory(category);
 }
-function renderCategoryManager(busy:boolean,connected:boolean) {
+function renderCategoryManager(busy:boolean) {
   const names=categoryChoices.map(category=>category.name);
   if(pendingCategoryRemoval&&!names.includes(pendingCategoryRemoval))pendingCategoryRemoval='';
   const open=categoryManager.open;
@@ -202,8 +203,9 @@ function renderCategoryManager(busy:boolean,connected:boolean) {
     } else {
       const remove=document.createElement('button');
       remove.type='button';remove.className='quiet';remove.dataset.remove=category.name;remove.textContent='删除';
-      remove.title=`删除类别「${category.name}」：其中的主组件会先移到「未分类」。`;
-      remove.disabled=busy||!connected;
+      remove.title=`删除类别「${category.name}」：其中的主组件会先移到「未分类」，用户自有对象留在原处。`;
+      // 类别配置存在页面里，属本地操作：只要没有任务在跑就能删，不要求连接助手。
+      remove.disabled=busy;
       // 不用悬浮提示：删除后确认条紧贴在列表下方出现，浮层会盖住它；改用原生 title。
       remove.onclick=()=>{pendingCategoryRemoval=category.name;categoryNotice='';render();};
       row.append(remove);
@@ -224,7 +226,7 @@ function renderCategoryManager(busy:boolean,connected:boolean) {
     const actions=document.createElement('span');actions.className='confirm-actions';
     const confirm=document.createElement('button');
     confirm.type='button';confirm.className='primary';confirm.textContent='删除类别';
-    confirm.disabled=busy||!connected||!workflow?.state.selected;
+    confirm.disabled=busy||!workflow?.state.selected;
     const removing=pendingCategoryRemoval;
     confirm.onclick=()=>void run(()=>deleteCategory(removing));
     const cancel=document.createElement('button');
@@ -237,8 +239,7 @@ function renderCategoryManager(busy:boolean,connected:boolean) {
   const problem=categoryNameProblem(value);
   const duplicate=!!value&&names.includes(value);
   const selected=!!workflow?.state.selected;
-  const reason=!connected?'先连接资源助手'
-    :busy?'任务执行中，请等待完成'
+  const reason=busy?'任务执行中，请等待完成'
     :!selected?'先选择游戏':!value?'输入类别名称'
     :problem||(duplicate?'已存在同名类别，请换一个名称':undefined);
   el<HTMLButtonElement>('add-category').disabled=!!reason;
@@ -335,8 +336,9 @@ function render() {
     ?`撤销上一次人工分类，恢复 ${undoCount} 个组件到操作前的类别与人工覆盖状态；不会重新运行自动分类。`
     :'暂无可撤销的人工分类');
   const managerOpen=el<HTMLButtonElement>('category-manager-open');
-  managerOpen.disabled=busy||!connected;
-  renderCategoryManager(busy,connected);
+  // 类别配置存在页面里：打开弹窗、删除确认都不依赖资源助手连接，只有任务执行中禁用。
+  managerOpen.disabled=busy;
+  renderCategoryManager(busy);
   // 提交训练样本属于页面级动作，不需要选中组件；未连接或任务中不可用。
   trainingButton.disabled=busy||!connected;
   setTagHint(trainingButton,!connected?'先连接资源助手':busy?'任务执行中，请等待完成':'只提交当前页人工覆盖的「来源身份 + 类别」，不上传图片');
