@@ -97,6 +97,16 @@ function buildTags(container:HTMLElement) {
     button.title='点击把选中的主组件移到该类别';
     container.append(tooltip(button));
   }
+  // 恢复自动分类原先挂在被移除的下拉框里，属于 #8 已确认的能力，仍需可达。
+  // 它放在标签区内部的末端，跟随标签区一起滚动，不额外撑高面板。
+  const restore=document.createElement('button');
+  restore.type='button';
+  restore.id='restore-auto';
+  restore.className='category-tag category-action';
+  restore.textContent='恢复自动分类';
+  restore.title='清除人工分类覆盖，按当前名称前缀与尺寸规则重新归类；不确定时回到未分类。';
+  restore.onclick=()=>void run(restoreAuto);
+  container.append(tooltip(restore));
 }
 function setTagHint(button:HTMLButtonElement,text:string) {
   const wrap=button.parentElement;
@@ -126,6 +136,11 @@ function renderTags(selection:SelectionState|undefined,busy:boolean) {
     else if(!current&&check) check.remove();
     if(current) currentTag=button;
   });
+  const restore=container.querySelector<HTMLButtonElement>('#restore-auto');
+  if(restore) {
+    restore.disabled=disabled;
+    setTagHint(restore,disabled?'先选中本工具主组件':'清除人工覆盖并按当前规则重新归类');
+  }
   // 只调整标签区自身的滚动位置：高亮切换后当前类别在四行窗口外时滚到可见，
   // 主面板仍不滚动；同一高亮不反复夺回用户主动滚动的位置。
   const currentName=currentTag?.dataset.category||'';
@@ -135,6 +150,11 @@ function renderTags(selection:SelectionState|undefined,busy:boolean) {
     else if(tag.bottom>box.bottom) container.scrollTop+=(tag.bottom-box.bottom);
   }
   lastCurrentTag=currentName;
+}
+async function restoreAuto() {
+  const selection=workflow?.state.selection;
+  if(!workflow?.state.selected||!selection?.members.length)return;
+  await workflow.setCategory('auto');
 }
 async function classifyAs(category:string) {
   const selection=workflow?.state.selection;

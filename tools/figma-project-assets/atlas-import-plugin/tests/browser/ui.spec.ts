@@ -28,7 +28,7 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
         {name:'背景',color:'#3e63dd'},{name:'艺术字',color:'#d6409f'},{name:'进度条',color:'#30a46c'},
         {name:'未分类',color:'#8b8d98'}]});return;}
       if(m.type==='selection'){const members=window.selectionMembers||[];reply({schemaVersion:1,members,ignored:window.selectionIgnored||0,mixed:new Set(members.map(x=>x.category)).size>1});return;}
-      if(m.type==='set-category'){window.categoryRequest=m;window.categoryRequests=(window.categoryRequests||0)+1;const members=(window.categoryMembers||window.selectionMembers||[]).map(x=>({...x,category:m.category,manual:m.category!=='auto'}));window.selectionMembers=members;reply({schemaVersion:1,action:m.category==='auto'?'auto':'manual',updated:members.length,moved:members.length,messages:[]});return;}
+      if(m.type==='set-category'){window.categoryRequest=m;window.categoryRequests=(window.categoryRequests||0)+1;const members=(window.categoryMembers||window.selectionMembers||[]).map(x=>({...x,category:m.category==='auto'?'未分类':m.category,manual:m.category!=='auto'}));window.selectionMembers=members;reply({schemaVersion:1,action:m.category==='auto'?'auto':'manual',updated:members.length,moved:members.length,messages:[]});return;}
       if(m.type==='validate')reply(window.currentPageInvalid?{valid:false,message:'非空且未绑定页面不可导入'}:{valid:true,message:'空白页可导入'});
       if(m.type==='preview'){window.plan={schemaVersion:1,added:m.scan.resources.length,updated:0,removed:0,unchanged:0,blocked:0,removalSuppressed:false,messages:[]};reply(window.plan);}
       if(m.type==='import'){window.imported=m.scan;e.source.postMessage({pluginMessage:{type:'progress',progress:{done:1,total:2}}},'*');window.finish=cancelled=>reply({...window.plan,applied:{added:cancelled?1:window.plan.added,updated:0,removed:0},failures:[],cancelled:!!cancelled});}
@@ -169,7 +169,7 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
     const tags=ui.locator('#category-tags');
     const tag=(name:string)=>ui.locator(`#category-tags button[data-category="${name}"]`);
     await expect(tags).toBeVisible();
-    await expect(ui.locator('#category-tags button')).toHaveCount(7);
+    await expect(ui.locator('#category-tags button')).toHaveCount(8);
     await expect(tag('按钮')).toContainText('按钮');
     await expect(tag('未分类')).toContainText('未分类');
     await expect(ui.getByRole('button',{name:'应用',exact:true})).toHaveCount(0);
@@ -210,6 +210,13 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
     await tag('艺术字').click();
     await expect(ui.getByTestId('selection-status')).toContainText('当前分类：艺术字');
     expect(await page.evaluate(()=>(window as any).categoryRequests)).toBe(1);
+    // 恢复自动分类仍可达：清除人工覆盖，按当前规则重新归类。
+    await expect(ui.locator('#restore-auto')).toBeEnabled();
+    await ui.locator('#restore-auto').click();
+    await expect.poll(()=>page.evaluate(()=>(window as any).categoryRequest.category)).toBe('auto');
+    await expect(ui.getByTestId('selection-status')).toContainText('当前分类：未分类');
+    await expect(tag('未分类')).toHaveAttribute('aria-pressed','true');
+    await expect(tag('艺术字')).toHaveAttribute('aria-pressed','false');
     expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
     await expect(ui.locator('.status-card')).toBeInViewport();
     await expect(ui.locator('.app-footer')).toBeInViewport();
@@ -219,7 +226,7 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
       w.categoryConfig=[{name:'特殊按钮',color:'#0091ff'},{name:'未分类',color:'#8b8d98'}];
       document.querySelector('iframe')!.contentWindow!.postMessage({pluginMessage:{type:'page-changed'}},'*');
     });
-    await expect(ui.locator('#category-tags button')).toHaveCount(2);
+    await expect(ui.locator('#category-tags button')).toHaveCount(3);
     await expect(tag('特殊按钮')).toContainText('特殊按钮');
     await expect(tag('按钮')).toHaveCount(0);
     expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
@@ -230,7 +237,7 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
       w.categoryConfig.push({name:'未分类',color:'#8b8d98'});
       document.querySelector('iframe')!.contentWindow!.postMessage({pluginMessage:{type:'page-changed'}},'*');
     });
-    await expect(ui.locator('#category-tags button')).toHaveCount(21);
+    await expect(ui.locator('#category-tags button')).toHaveCount(22);
     const scrollBox=await tags.evaluate(node=>{
       const style=getComputedStyle(node);
       const button=node.querySelector('button')!;
