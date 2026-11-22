@@ -190,6 +190,8 @@ function storedRecord(component: ComponentNode): {record?: NineSliceRecord; corr
 // Category frames are tool-managed page children. New frames store the category
 // name in `atlas.category`; `unsorted` is the legacy #3 marker for 未分类.
 const categoryGap = 48;
+const compareColumns = 3;
+const compareGap = 24;
 function frameCategory(node: FrameNode): CategoryName | undefined {
   const raw = node.getPluginData(categoryKey);
   if(raw === 'unsorted') return '未分类';
@@ -226,13 +228,13 @@ function looksManagedName(node: ComponentNode): boolean {
 function findCategoryFrame(page: PageNode, category: CategoryName): FrameNode | undefined {
   return managedCategoryFrames(page).find(frame => frameCategory(frame) === category);
 }
-function nextCategoryFrameY(page: PageNode): number {
+function nextCategoryFrameX(page: PageNode): number {
   const frames = managedCategoryFrames(page);
   if(!frames.length) return 0;
-  return Math.max(...frames.map(frame => frame.y + frame.height)) + categoryGap;
+  return Math.max(...frames.map(frame => frame.x + frame.width)) + categoryGap;
 }
 function createCategoryFrame(page: PageNode, api: Pick<PluginAPI,'createFrame'>, category: CategoryName): FrameNode {
-  const y = nextCategoryFrameY(page);
+  const x = nextCategoryFrameX(page);
   const frame = api.createFrame();
   page.appendChild(frame);
   frame.name = category;
@@ -242,9 +244,9 @@ function createCategoryFrame(page: PageNode, api: Pick<PluginAPI,'createFrame'>,
   frame.itemSpacing = 16; frame.counterAxisSpacing = 16;
   frame.paddingTop = frame.paddingRight = frame.paddingBottom = frame.paddingLeft = 16;
   frame.setPluginData(categoryKey, category);
-  // New frames are placed below the existing ones; normal imports never reflow
+  // New frames are placed to the right of existing ones; normal imports never reflow
   // existing frame positions, only 重新整理 does.
-  frame.x = 0; frame.y = y;
+  frame.x = x; frame.y = 0;
   return frame;
 }
 function ensureCategoryFrame(page: PageNode, api: Pick<PluginAPI,'createFrame'>, category: CategoryName,
@@ -489,13 +491,15 @@ function tidyCategoryFrames(page: PageNode): TidyResult {
   const frames = orderedCategoryFrames(page);
   if(!frames.length) return {schemaVersion:1,frames:0,moved:0,
     messages:['当前页没有本工具创建的分类 Frame，无需整理']};
-  let y = 0, moved = 0;
+  // Categories read as one horizontal shelf. Their internal Auto Layout still
+  // wraps components, so the page grows sideways rather than by every frame height.
+  let x = 0, moved = 0;
   for(const frame of frames) {
-    if(frame.x !== 0 || frame.y !== y) {
-      frame.x = 0; frame.y = y;
+    if(frame.x !== x || frame.y !== 0) {
+      frame.x = x; frame.y = 0;
       moved++;
     }
-    y += (frame.height || 0) + categoryGap;
+    x += (frame.width || 0) + categoryGap;
   }
   return {schemaVersion:1,frames:frames.length,moved,messages:[]};
 }
@@ -781,12 +785,20 @@ function syncComparePage(page: PageNode, items: Map<string, CompareItem>, api: P
     created.instances.push(copy);
     added++;
   }
-  // Stack group frames top to bottom after their contents define the height.
-  let y = 0;
+  // Keep many source-atlas groups browseable: three columns, then a new row.
+  // Row height follows the tallest frame in that row.
+  let column = 0, rowY = 0, rowHeight = 0;
   for(const key of keys) {
     const frame = frames.get(key)!;
-    frame.x = 0; frame.y = y;
-    y += (frame.height || 0) + 24;
+    frame.x = column * (1200 + compareGap);
+    frame.y = rowY;
+    rowHeight = Math.max(rowHeight, frame.height || 0);
+    column++;
+    if(column === compareColumns) {
+      column = 0;
+      rowY += rowHeight + compareGap;
+      rowHeight = 0;
+    }
   }
   return {added, removed, kept, groups: keys.length, messages};
 }

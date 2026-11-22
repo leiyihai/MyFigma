@@ -232,3 +232,26 @@ test('没有导入主组件时拒绝创建对照页', async () => {
     assert.equal(workflow.state.busy, false);
   } finally { await f.cleanup(); }
 });
+
+
+test('对照页图集分组按三列网格排列，超过三组后换行', async () => {
+  const { f, workflow, root } = await setup();
+  try {
+    // Add two more source atlases so the comparison page has four groups.
+    for(const name of ['extra_a', 'extra_b']) {
+      await writeAtlas(join(f.project, 'res/imageset/Static', name + '.json'), {
+        image: 'buttons.png', size: { w: 4, h: 1 },
+        frames: { [name]: { frame: { x: 0, y: 0, w: 1, h: 1 } } }
+      });
+    }
+    await workflow.scan();
+    await workflow.import();
+    await workflow.comparePage();
+    const page = comparePage(root);
+    const frames = page.children.filter(node => node.type === 'FRAME');
+    assert.equal(frames.length, 4);
+    assert.deepEqual(frames.slice(0, 3).map(frame => [frame.x, frame.y]), [[0, 0], [1224, 0], [2448, 0]]);
+    assert.equal(frames[3].x, 0);
+    assert.equal(frames[3].y, Math.max(...frames.slice(0, 3).map(frame => frame.height)) + 24);
+  } finally { await f.cleanup(); }
+});

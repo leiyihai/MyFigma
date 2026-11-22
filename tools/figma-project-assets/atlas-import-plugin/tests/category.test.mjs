@@ -106,9 +106,9 @@ test('按名称、九宫格用法与尺寸比例归入分类 Frame，唯一主�
 });
 
 function assertNoOverlap(frames) {
-  const sorted = [...frames].sort((left, right) => left.y - right.y);
+  const sorted = [...frames].sort((left, right) => left.x - right.x);
   for (let index = 1; index < sorted.length; index += 1) {
-    assert.ok(sorted[index - 1].y + sorted[index - 1].height <= sorted[index].y,
+    assert.ok(sorted[index - 1].x + sorted[index - 1].width <= sorted[index].x,
       `${sorted[index - 1].name} 与 ${sorted[index].name} 重叠`);
   }
 }
@@ -223,17 +223,17 @@ test('重新整理按分类顺序摆放分类 Frame 消除重叠，不重建主�
     const constraints = { ...center.constraints };
 
     // A user (or earlier placements) can leave every category frame stacked at the same spot.
-    for (const frame of frames) { frame.x = 120; frame.y = 0; }
+    for (const frame of frames) { frame.x = 120; frame.y = 30; }
     await workflow.tidy();
     assert.equal(workflow.state.tidy.schemaVersion, 1);
     assert.equal(workflow.state.tidy.frames, 4);
     assert.equal(workflow.state.tidy.moved, 4);
     assert.equal(workflow.state.phase, '就绪');
-    const ordered = [...frames].sort((left, right) => left.y - right.y);
+    const ordered = [...frames].sort((left, right) => left.x - right.x);
     assert.deepEqual(ordered.map(frame => frame.name), ['按钮', '九宫格底板', '图标', '背景']);
-    assert.ok(ordered.every(frame => frame.x === 0));
+    assert.ok(ordered.every(frame => frame.y === 0));
     for (let index = 1; index < ordered.length; index += 1) {
-      assert.equal(ordered[index].y, ordered[index - 1].y + ordered[index - 1].height + 48);
+      assert.equal(ordered[index].x, ordered[index - 1].x + ordered[index - 1].width + 48);
     }
     // Only frame positions change: the same main components stay in the same parents.
     assert.deepEqual(page.findAll(node => node.type === 'COMPONENT').map(node => node.id), components.map(node => node.id));
