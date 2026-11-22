@@ -20,7 +20,7 @@ test('built main script loads in an import-rejecting sandbox, stores pairing loc
   sandbox.evaluate(code);
   assert.equal(shownHtml, '<p>plugin UI</p>');
   assert.equal(shownOptions.width, 350);
-  assert.equal(shownOptions.height, 540);
+  assert.equal(shownOptions.height, 600);
   const pairing={schemaVersion:1,address:'http://localhost:38473',token:'a'.repeat(64)};
   await figma.ui.onmessage({type:'pairing-load',requestId:10});
   assert.equal(replies.find(reply=>reply.requestId===10).result,null);

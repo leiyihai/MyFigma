@@ -703,3 +703,74 @@ test('旧分类不迁移：unsorted 仍读作未分类，未知旧 Frame 不被�
     assert.equal(unclassified.name, 'unsorted');
   } finally { await f.cleanup(); }
 });
+
+test('点击已高亮的当前类别不产生写入，混合选择点标签批量移动实例映射的主组件', async () => {
+  const f = await projectFixture();
+  const fixture = figmaFixture();
+  const platform = api.createFigmaPlatform(fixture.api);
+  // 只换掉计数用的公开平台方法，流程仍从 Workflow 入口走。
+  let writes = 0;
+  const counted = { ...platform, setCategory: (...args) => { writes++; return platform.setCategory(...args); } };
+  const workflow = new api.Workflow(new api.HelperClient(f.base, f.token), counted);
+  try {
+    await workflow.connect();
+    await workflow.saveProject({ id: 'g8', name: '分类测试', path: f.project, maintained: true });
+    await workflow.selectProject('g8');
+    await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    await workflow.scan();
+    await workflow.import();
+    const button = fixture.page.findAll(node => node.type === 'COMPONENT' && node.name === '按钮/btn_ok')[0];
+    const icon = fixture.page.findAll(node => node.type === 'COMPONENT' && node.name === '图标/icon_coin')[0];
+    assert.ok(button && icon);
+
+    // 单选：点击与当前类别一致的标签不移动、不写人工覆盖。
+    fixture.page.selection = [button];
+    await workflow.loadSelection();
+    assert.equal(workflow.state.selection.mixed, false);
+    assert.equal(workflow.state.selection.members[0].category, '按钮');
+    await workflow.setCategory('按钮');
+    assert.equal(writes, 0);
+    assert.equal(button.parent.name, '按钮');
+    assert.equal(button.name, '按钮/btn_ok');
+    assert.equal(button.getPluginData('atlas.category.manual'), '');
+    assert.equal(workflow.state.phase, '就绪');
+
+    // 混合选择：实例定位到主组件后与另一个主组件一起批量移动。
+    const instance = button.createInstance();
+    fixture.page.appendChild(instance);
+    fixture.page.selection = [instance, icon];
+    await workflow.loadSelection();
+    assert.equal(workflow.state.selection.mixed, true);
+    assert.deepEqual(workflow.state.selection.members.map(member => member.id).sort(), [button.id, icon.id].sort());
+    assert.equal(workflow.state.selection.members.find(member => member.id === button.id).viaInstance, true);
+    await workflow.setCategory('艺术字');
+    assert.equal(writes, 1);
+    assert.equal(button.parent.name, '艺术字');
+    assert.equal(icon.parent.name, '艺术字');
+    assert.equal(button.name, '艺术字/btn_ok');
+    assert.equal(icon.name, '艺术字/icon_coin');
+    assert.equal(button.getPluginData('atlas.category.manual'), '艺术字');
+    assert.equal(icon.getPluginData('atlas.category.manual'), '艺术字');
+    assert.equal(await instance.getMainComponentAsync(), button);
+
+    // 再次点击已高亮的标签：不再写入。
+    await workflow.setCategory('艺术字');
+    assert.equal(writes, 1);
+    assert.equal(workflow.state.selection.mixed, false);
+
+    // 无关对象仍只计数；没有可修改组件时不写入也不报成功。
+    const foreign = fixture.api.createComponent();
+    fixture.page.appendChild(foreign);
+    foreign.name = '用户自己的组件';
+    fixture.page.selection = [foreign];
+    await workflow.loadSelection();
+    assert.equal(workflow.state.selection.members.length, 0);
+    assert.equal(workflow.state.selection.ignored, 1);
+    await assert.rejects(() => workflow.setCategory('按钮'), /没有可修改/);
+    assert.equal(writes, 1);
+    assert.equal(foreign.parent, fixture.page);
+    assert.equal(foreign.name, '用户自己的组件');
+    assert.equal(foreign.getPluginData('atlas.category.manual'), '');
+  } finally { await f.cleanup(); }
+});

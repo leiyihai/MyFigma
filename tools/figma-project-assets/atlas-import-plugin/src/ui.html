@@ -108,8 +108,18 @@ dialog::backdrop{background:#0006}
 .form-head h3{font-size:12px}
 .form-actions{display:flex;gap:7px;margin-top:auto;padding-top:4px}
 .form-actions .primary{flex:1}
-.category-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;margin-top:6px}
-.category-row button{margin-bottom:0}
+/* 类别标签区：四行可视高度，超出只在标签区内部滚动，主面板不整体滚动。 */
+.category-card{padding:9px 10px}
+.category-card .card-head{margin-bottom:6px}
+.category-tags{--tag-height:24px;--tag-gap:6px;display:flex;flex-wrap:wrap;gap:var(--tag-gap);max-height:calc(var(--tag-height) * 4 + var(--tag-gap) * 3);overflow-y:auto;overflow-x:hidden;padding-right:2px;scrollbar-width:thin;overscroll-behavior:contain}
+.category-tags .action{display:inline-block;flex:none}
+.category-tags .tooltip{min-width:0;max-width:220px}
+.category-tag{display:inline-flex;align-items:center;gap:5px;height:var(--tag-height);padding:0 8px;border:1px solid var(--figma-color-border,#dedede);border-radius:99px;background:var(--figma-color-bg-secondary,#f5f5f5);color:var(--figma-color-text,#222);font-size:11px;font-weight:600;line-height:1}
+.category-tag .tag-dot{width:7px;height:7px;border-radius:50%;background:var(--tag,#8b8d98);flex:none;box-shadow:0 0 0 1px #00000014}
+.category-tag .tag-check{font-size:10px;font-weight:700;line-height:1}
+.category-tag:hover:not(:disabled){background:var(--figma-color-bg-hover,#ececec);border-color:var(--figma-color-border-strong,#999)}
+.category-tag[aria-pressed=true]{border-color:var(--tag);box-shadow:inset 0 0 0 1px var(--tag);background:var(--figma-color-bg,#fff);font-weight:700}
+.category-tag:disabled{opacity:.45;cursor:not-allowed}
 </style></head><body>
 <main class="app-main">
 <div class="app-content">
@@ -135,12 +145,9 @@ dialog::backdrop{background:#0006}
   <p id="action-result" class="notice hidden" data-testid="action-result"></p>
 </section>
 
-<section class="card" aria-label="选中主组件分类">
-  <div class="card-head"><h2>选中主组件分类 <span class="help-wrap"><span class="help" tabindex="0" role="note" aria-label="分类更正说明" title="按 Figma 当前选择处理主组件或实例；实例会定位主组件，无关对象不会被改造。人工分类优先于自动规则；恢复自动分类会清除人工覆盖。">?</span><span class="tooltip" role="tooltip">按 Figma 当前选择处理主组件或实例；实例会定位主组件，无关对象不会被改造。人工分类优先于自动规则；恢复自动分类会清除人工覆盖。</span></span></h2><span id="selection-status" data-testid="selection-status" class="chip">先选择游戏</span></div>
-  <div class="category-row">
-    <label><span>目标分类</span><select id="category-select" aria-label="选中主组件分类" title="选择人工分类后立即移动主组件到对应分类 Frame，并保留来源和实例关系；选择恢复自动分类会按当前名称、尺寸和九宫格规则重新归类。"><option value="">选择目标分类</option></select></label>
-    <button id="apply-category" class="quiet" title="只修改带本工具来源记录的主组件；实例会先定位主组件。混合选择中无关对象不会被改造，并在状态中说明。" disabled>应用</button>
-  </div>
+<section class="card category-card" aria-label="选中主组件分类">
+  <div class="card-head"><h2>选中主组件分类 <span class="help-wrap"><span class="help" tabindex="0" role="note" aria-label="分类更正说明" title="按 Figma 当前选择处理主组件或实例；实例会定位主组件，无关对象不会被改造。点击其他类别标签立即把选中主组件移入该类别并更新显示名；点击当前高亮标签不会改写组件；混合选择不高亮单一类别。人工分类优先于自动规则。">?</span><span class="tooltip" role="tooltip">按 Figma 当前选择处理主组件或实例；实例会定位主组件，无关对象不会被改造。点击其他类别标签立即把选中主组件移入该类别并更新显示名；点击当前高亮标签不会改写组件；混合选择不高亮单一类别。人工分类优先于自动规则。</span></span></h2><span id="selection-status" data-testid="selection-status" class="chip">先选择游戏</span></div>
+  <div id="category-tags" data-testid="category-tags" class="category-tags" role="group" aria-label="类别标签" data-mixed="false" data-disabled="true"></div>
 </section>
 </div>
 

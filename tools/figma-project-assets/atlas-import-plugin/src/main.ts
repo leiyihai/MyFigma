@@ -1,7 +1,7 @@
 import {createFigmaPlatform} from './platform';
 import {Cancellation} from './api';
 import type {PublicProject,Scan} from './api';
-figma.showUI(__html__,{width:350,height:540,themeColors:true});
+figma.showUI(__html__,{width:350,height:600,themeColors:true});
 const platform=createFigmaPlatform(figma);
 const pairingKey='atlas.pairing.v1';
 const helperPathKey='resourceHelperPath.v1';
