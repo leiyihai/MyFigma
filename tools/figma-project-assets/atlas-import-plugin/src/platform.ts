@@ -1,4 +1,4 @@
-import type { CategoryResult, ImportPlan, ImportReport, LayoutUsage, Platform, Progress, PublicProject, Resource, Scan, SelectionState, Source, TidyResult } from './api';
+import type { CategoryOverride, CategoryRestoreResult, CategoryResult, ImportPlan, ImportReport, LayoutUsage, Platform, Progress, PublicProject, Resource, Scan, SelectionState, Source, TidyResult } from './api';
 import { Cancellation } from './api';
 import { categoryConfigKey, categoryIndex, categoryOr, classify, componentName, knownCategory, readCategoryConfig,
   serializeCategories, unsortedCategory, type CategoryConfig } from './category';
@@ -1067,7 +1067,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
       let layouts: CategoryLayout[] = [];
       const messages: string[] = [];
       try {
-        const jobs: Array<{component:ComponentNode;page:PageNode;target:string;targetFrame?:FrameNode;previous:string}> = [];
+        const jobs: Array<{component:ComponentNode;page:PageNode;target:string;targetFrame?:FrameNode;previousData:string;previous:CategoryOverride}> = [];
         for(const id of [...new Set(ids)]) {
           const node = await api.getNodeByIdAsync(id);
           if(!node || node.type !== 'COMPONENT') { messages.push(`${id}：不是主组件，已跳过`); continue; }
@@ -1084,7 +1084,12 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
             messages.push(`${component.name}：该页面没有分类「${category}」，已跳过`);
             continue;
           }
-          jobs.push({component,page:host,target,previous:component.getPluginData(manualCategoryKey)});
+          // 操作前的类别按与 selection 相同的优先级解析，并同时快照人工覆盖；
+          // 撤销只按这份字符串写回，不会再次调用 classify。
+          const manual = manualCategory(component, hostConfig);
+          const previousCategory = manual || currentCategory(component, hostConfig) || automaticCategory(component, source, hostConfig);
+          jobs.push({component,page:host,target,previousData:component.getPluginData(manualCategoryKey),
+            previous:{id:component.id,category:previousCategory,manual:!!manual}});
         }
         if(!jobs.length) throw new Error('当前选择中没有可修改的本工具主组件');
         const frames = new Set<FrameNode>();
@@ -1094,19 +1099,82 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         }
         layouts = pauseCategoryLayouts(frames);
         let moved = 0, updated = 0;
+        const previous: CategoryOverride[] = [];
         for(const job of jobs) {
           try {
             if(job.component.parent !== job.targetFrame) { job.targetFrame!.appendChild(job.component); moved++; }
             job.component.setPluginData(manualCategoryKey,category === 'auto' ? '' : job.target);
             updated++;
+            previous.push(job.previous);
           } catch(error) {
-            job.component.setPluginData(manualCategoryKey,job.previous);
+            job.component.setPluginData(manualCategoryKey,job.previousData);
             messages.push(`${job.component.name}：${error instanceof Error ? error.message : '分类移动失败'}`);
           }
         }
         restoreCategoryLayouts(layouts); layouts = [];
         for(const page of new Set(jobs.map(job=>job.page))) refreshDisplayNames(page,project,messages);
-        return {schemaVersion:1,action:category === 'auto' ? 'auto' : 'manual',updated,moved,messages};
+        return {schemaVersion:1,action:category === 'auto' ? 'auto' : 'manual',updated,moved,messages,previous};
+      } finally {
+        restoreCategoryLayouts(layouts);
+        busy = false;
+      }
+    },
+    async restoreCategory(project, entries): Promise<CategoryRestoreResult> {
+      if(busy) throw new Error('任务执行中，请等待完成');
+      if(!project || typeof project.id !== 'string' || !project.name) throw new Error('项目信息无效');
+      if(!Array.isArray(entries) || !entries.length || entries.length > 200 ||
+         entries.some(entry=>!entry || typeof entry.id !== 'string' || !/^[A-Za-z0-9:_;-]{1,128}$/.test(entry.id) ||
+           typeof entry.category !== 'string' || typeof entry.manual !== 'boolean')) throw new Error('撤销记录无效');
+      const page = api.currentPage;
+      await loadPage(page);
+      busy = true;
+      const createdFrames: FrameNode[] = [];
+      let layouts: CategoryLayout[] = [];
+      const messages: string[] = [];
+      let skipped = 0;
+      try {
+        const jobs: Array<{component:ComponentNode;page:PageNode;target:string;targetFrame?:FrameNode;manual:boolean}> = [];
+        for(const entry of entries) {
+          const node = await api.getNodeByIdAsync(entry.id);
+          if(!node || node.type !== 'COMPONENT') {
+            skipped++; messages.push(`${entry.id}：主组件已不存在，已跳过`); continue;
+          }
+          const component = node as ComponentNode;
+          const source = parseStoredSource(component, project);
+          const host = hostPage(component);
+          if(!source || !host || !validate(host, project).valid) {
+            skipped++; messages.push(`${component.name}：不是本项目资源页中的工具主组件，已跳过`); continue;
+          }
+          const target = knownCategory(categoriesFor(host), entry.category);
+          if(!target) {
+            skipped++; messages.push(`${component.name}：该页面没有分类「${entry.category}」，已跳过`); continue;
+          }
+          jobs.push({component,page:host,target,manual:entry.manual});
+        }
+        if(jobs.length) {
+          const frames = new Set<FrameNode>();
+          for(const job of jobs) {
+            job.targetFrame = ensureCategoryFrame(job.page,api,job.target,createdFrames);
+            frames.add(job.targetFrame);
+          }
+          layouts = pauseCategoryLayouts(frames);
+          let moved = 0, restored = 0;
+          for(const job of jobs) {
+            try {
+              if(job.component.parent !== job.targetFrame) { job.targetFrame!.appendChild(job.component); moved++; }
+              // 原样写回人工覆盖：false 清除覆盖，但不再按自动规则推算新类别。
+              job.component.setPluginData(manualCategoryKey,job.manual ? job.target : '');
+              restored++;
+            } catch(error) {
+              skipped++;
+              messages.push(`${job.component.name}：${error instanceof Error ? error.message : '撤销恢复失败'}`);
+            }
+          }
+          restoreCategoryLayouts(layouts); layouts = [];
+          for(const host of new Set(jobs.map(job=>job.page))) refreshDisplayNames(host,project,messages);
+          return {schemaVersion:1,restored,skipped,moved,messages};
+        }
+        return {schemaVersion:1,restored:0,skipped,moved:0,messages};
       } finally {
         restoreCategoryLayouts(layouts);
         busy = false;
