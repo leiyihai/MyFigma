@@ -43,8 +43,20 @@ export interface SelectionMember {
 export interface SelectionState {
   schemaVersion: 1; members: SelectionMember[]; ignored: number; mixed: boolean;
 }
+// 人工分类前每个组件的类别与人工覆盖状态；撤销只按这份快照写回，不重跑自动规则。
+export interface CategoryOverride {
+  id: string; category: string; manual: boolean;
+}
 export interface CategoryResult {
   schemaVersion: 1; action: 'manual' | 'auto'; updated: number; moved: number; messages: string[];
+  previous: CategoryOverride[];
+}
+export interface CategoryRestoreResult {
+  schemaVersion: 1; restored: number; skipped: number; moved: number; messages: string[];
+}
+// 只活在工作流会话内；不写入页面或 clientStorage，插件重开即丢弃。
+export interface CategoryUndo {
+  schemaVersion: 1; entries: CategoryOverride[];
 }
 // The page is the source of truth for categories; the UI only renders this
 // ordered readback and never keeps a second list of its own.
@@ -90,6 +102,7 @@ export interface Platform {
   addCategory(project: PublicProject, name: string): Promise<CategoryChange>;
   removeCategory(project: PublicProject, name: string): Promise<CategoryChange>;
   setCategory(project: PublicProject, ids: string[], category: string): Promise<CategoryResult>;
+  restoreCategory(project: PublicProject, entries: CategoryOverride[]): Promise<CategoryRestoreResult>;
 }
 
 class HelperConnectionError extends Error {}
@@ -134,7 +147,7 @@ export class HelperClient {
 }
 export interface State {
   connected: boolean; busy: boolean; phase: string; error: string;
-  selected?: PublicProject; page?: PageStatus; scan?: Scan; plan?: ImportPlan; result?: ImportReport; compare?: CompareResult; tidy?: TidyResult; selection?: SelectionState; notice?: string; scanDurationMs?: number; importDurationMs?: number; progress: Progress;
+  selected?: PublicProject; page?: PageStatus; scan?: Scan; plan?: ImportPlan; result?: ImportReport; compare?: CompareResult; tidy?: TidyResult; selection?: SelectionState; undo?: CategoryUndo; notice?: string; scanDurationMs?: number; importDurationMs?: number; progress: Progress;
 }
 export class Workflow {
   readonly state: State = {connected:false,busy:false,phase:'未连接',error:'',progress:{done:0,total:0}};
@@ -170,7 +183,7 @@ export class Workflow {
   }
   async connect(): Promise<void> {
     await this.task('连接中',async () => {
-      this.state.connected = false; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined; this.state.notice = undefined; this.state.scanDurationMs = undefined; this.state.importDurationMs = undefined;
+      this.state.connected = false; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined; this.state.undo = undefined; this.state.notice = undefined; this.state.scanDurationMs = undefined; this.state.importDurationMs = undefined;
       await this.helper.health(); this.projects = await this.helper.projects(); this.state.connected = true;
     });
   }
@@ -186,12 +199,12 @@ export class Workflow {
   async deleteProject(id: string): Promise<void> {
     await this.task('删除登记',async () => {
       this.projects = await this.helper.deleteProject(id);
-      if (this.state.selected?.id === id) {this.state.selected = undefined; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.page = undefined; this.state.compare = undefined; this.state.tidy = undefined; this.state.notice = undefined;}
+      if (this.state.selected?.id === id) {this.state.selected = undefined; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.page = undefined; this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined; this.state.undo = undefined; this.state.notice = undefined;}
     });
   }
   async selectProject(id: string): Promise<void> {
     await this.task('页面校验',async () => {
-      this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined; this.state.notice = undefined; this.state.scanDurationMs = undefined; this.state.importDurationMs = undefined;
+      this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined; this.state.undo = undefined; this.state.notice = undefined; this.state.scanDurationMs = undefined; this.state.importDurationMs = undefined;
       if(!id) {this.state.selected=undefined;this.state.scan=undefined;this.state.plan=undefined;this.state.result=undefined;this.state.page=undefined;this.state.progress={done:0,total:0};return;}
       const project = this.projects.find(p=>p.id===id);
       if (!project) throw new Error('请选择已登记的游戏');
@@ -238,9 +251,27 @@ export class Workflow {
       const selection = this.state.selection;
       if(!project) throw new Error('请选择游戏');
       if(!selection?.members.length) throw new Error('当前选择中没有可修改的本工具主组件');
-      await this.platform.setCategory(project,selection.members.map(member=>member.id),category);
+      const result = await this.platform.setCategory(project,selection.members.map(member=>member.id),category);
+      // 最近一次人工分类是一个撤销单元；恢复自动分类不是撤销单元，并让旧记录失效。
+      this.state.undo = result.action === 'manual' && result.previous.length
+        ? {schemaVersion:1,entries:result.previous} : undefined;
       this.invalidateScan();
       this.state.selection = await this.platform.selection(project);
+    });
+  }
+  async undoCategory(): Promise<void> {
+    const undo = this.state.undo;
+    await this.task('撤销分类',async () => {
+      const project = this.state.selected;
+      if(!project) throw new Error('请选择游戏');
+      if(!undo?.entries.length) throw new Error('没有可撤销的人工分类');
+      const result = await this.platform.restoreCategory(project,undo.entries);
+      // 恢复失败会抛出并保留记录；成功（含安全跳过）才清空，只保留最近一次。
+      this.state.undo = undefined;
+      this.invalidateScan();
+      this.state.selection = await this.platform.selection(project);
+      const skipped = result.skipped ? ` · 跳过 ${result.skipped} 个（已不存在或不再属于本工具）` : '';
+      this.state.notice = `撤销：已恢复 ${result.restored} 个组件${skipped}`;
     });
   }
   async scan(): Promise<void> {

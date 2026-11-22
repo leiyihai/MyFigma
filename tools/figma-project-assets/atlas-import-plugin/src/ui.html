@@ -172,7 +172,7 @@ dialog::backdrop{background:#0006}
   <div id="category-tags" data-testid="category-tags" class="category-tags" role="group" aria-label="类别标签" data-mixed="false" data-disabled="true"></div>
   <!-- 分类动作行：撤销（#17）、类别管理（#16）、提交训练样本（#18）各自在这里追加一个按钮，
        保持右对齐、单行、不换行，未实现时该容器为空且不占高度。 -->
-  <div id="category-actions" data-testid="category-actions" class="category-actions"><button id="category-manager-open" type="button" title="新增或删除当前资源页的类别；删除类别前其中的主组件会先移到未分类。">类别管理</button></div>
+  <div id="category-actions" data-testid="category-actions" class="category-actions"><button id="undo-category" type="button" class="quiet" disabled title="暂无可撤销的人工分类">撤销</button><button id="category-manager-open" type="button" title="新增或删除当前资源页的类别；删除类别前其中的主组件会先移到未分类。">类别管理</button></div>
 </section>
 </div>
 

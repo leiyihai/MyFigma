@@ -37,7 +37,8 @@ const platform:Platform={
   categories:()=>rpc('categories',{}),
   addCategory:(project,name)=>rpc('add-category',{project,name}),
   removeCategory:(project,name)=>rpc('remove-category',{project,name}),
-  setCategory:(project,ids,category)=>rpc('set-category',{project,ids,category})
+  setCategory:(project,ids,category)=>rpc('set-category',{project,ids,category}),
+  restoreCategory:(project,entries)=>rpc('restore-category',{project,entries})
 };
 let workflow:Workflow|undefined;
 // Category choices come from the page; the default seven are only a fallback.
@@ -318,6 +319,12 @@ function render() {
   if(selection?.ignored)selectionNotes.push(`已忽略 ${selection.ignored} 个非本工具对象`);
   selectionStatusEl.title=selectionNotes.length?selectionNotes.join('；'):'按 Figma 当前选择处理；实例会定位主组件，无关对象不改动。';
   renderTags(selection,busy);
+  const undoButton=el<HTMLButtonElement>('undo-category');
+  const undoCount=s?.undo?.entries.length||0;
+  undoButton.disabled=busy||!undoCount;
+  setTagHint(undoButton,undoCount
+    ?`撤销上一次人工分类，恢复 ${undoCount} 个组件到操作前的类别与人工覆盖状态；不会重新运行自动分类。`
+    :'暂无可撤销的人工分类');
   const managerOpen=el<HTMLButtonElement>('category-manager-open');
   managerOpen.disabled=busy||!connected;
   renderCategoryManager(busy,connected);
@@ -480,6 +487,7 @@ el('import').onclick=()=>void run(()=>workflow!.import());
 el('cancel').onclick=()=>{workflow?.cancel();};
 el('compare').onclick=()=>void run(()=>workflow!.comparePage());
 el('tidy').onclick=()=>void run(()=>workflow!.tidy());
+el('undo-category').onclick=()=>void run(()=>workflow!.undoCategory());
 el('helper-path').oninput=()=>{helperFolderOpened=false;render();};
 el('registration').onsubmit=event=>event.preventDefault();
 el('save').onclick=()=>{if(!el<HTMLFormElement>('registration').reportValidity())return;void run(async()=>{

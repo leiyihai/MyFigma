@@ -1,6 +1,6 @@
 import {createFigmaPlatform} from './platform';
 import {Cancellation} from './api';
-import type {PublicProject,Scan} from './api';
+import type {CategoryOverride,PublicProject,Scan} from './api';
 figma.showUI(__html__,{width:350,height:600,themeColors:true});
 const platform=createFigmaPlatform(figma);
 const pairingKey='atlas.pairing.v1';
@@ -23,7 +23,7 @@ function validPairing(value:unknown):value is Pairing {
     && typeof pairing.token==='string' && /^[a-f0-9]{64}$/.test(pairing.token);
 }
 let active: Cancellation | undefined;
-figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicProject;scan:Scan;pairing?:Pairing;ids?:string[];category?:string;name?:string;path?:string})=>{
+figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicProject;scan:Scan;pairing?:Pairing;ids?:string[];category?:string;name?:string;entries?:CategoryOverride[];path?:string})=>{
   if(!message)return;
   // Cancellation is a control message, not a task reply; it may arrive while import is running.
   if(message.type==='cancel') {active?.cancel(); if(Number.isInteger(message.requestId)) figma.ui.postMessage({type:'result',requestId:message.requestId,result:true}); return;}
@@ -53,6 +53,10 @@ figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicPro
     else if(message.type==='set-category') {
       if(!Array.isArray(message.ids) || !message.category) throw new Error('分类参数无效');
       reply(await platform.setCategory(message.project,message.ids,message.category));
+    }
+    else if(message.type==='restore-category') {
+      if(!Array.isArray(message.entries) || !message.entries.length) throw new Error('撤销参数无效');
+      reply(await platform.restoreCategory(message.project,message.entries));
     }
     else if(message.type==='pairing-load') {
       const stored=await figma.clientStorage.getAsync(pairingKey);

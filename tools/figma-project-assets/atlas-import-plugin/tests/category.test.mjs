@@ -389,6 +389,157 @@ test('批量人工分类保留身份和实例，源更新后仍保留，恢复�
   } finally { await f.cleanup(); }
 });
 
+test('撤销人工分类恢复操作前类别与人工覆盖，不重跑自动规则', async () => {
+  const { f, workflow, platform, page } = await setup();
+  const project = { id: 'g8', name: '分类测试' };
+  try {
+    await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    await sprite(f, 'panel_base.json', 'panel_base', 40, 30);
+    await workflow.scan();
+    await workflow.import();
+    const button = page.findAll(node => node.type === 'COMPONENT' && node.name === '按钮/btn_ok')[0];
+    const icon = page.findAll(node => node.type === 'COMPONENT' && node.name === '图标/icon_coin')[0];
+    const panel = page.findAll(node => node.type === 'COMPONENT' && node.name === '底板/panel_base')[0];
+    assert.ok(button && icon && panel);
+    // panel 的自动规则是底板，先人工改成背景；撤销必须回到人工值，不能重跑规则。
+    await platform.setCategory(project, [panel.id], '背景');
+    const sources = new Map([button, icon, panel].map(node => [node.id, node.getPluginData('atlas.source')]));
+    const instance = panel.createInstance();
+    page.appendChild(instance);
+
+    const applied = await platform.setCategory(project, [button.id, icon.id, panel.id], '艺术字');
+    assert.equal(applied.action, 'manual');
+    assert.equal(applied.updated, 3);
+    assert.deepEqual(applied.previous.map(item => [item.id, item.category, item.manual]).sort(), [
+      [button.id, '按钮', false],
+      [icon.id, '图标', false],
+      [panel.id, '背景', true]
+    ].sort());
+    // 单次人工分类同样返回操作前的类别与人工覆盖状态。
+    const single = await platform.setCategory(project, [icon.id], '进度条');
+    assert.deepEqual(single.previous, [{ id: icon.id, category: '艺术字', manual: true }]);
+
+    const restored = await platform.restoreCategory(project, applied.previous);
+    assert.equal(restored.restored, 3);
+    assert.equal(restored.skipped, 0);
+    assert.equal(button.parent.name, '按钮');
+    assert.equal(icon.parent.name, '图标');
+    assert.equal(panel.parent.name, '背景');
+    assert.equal(button.name, '按钮/btn_ok');
+    assert.equal(icon.name, '图标/icon_coin');
+    assert.equal(panel.name, '背景/panel_base');
+    assert.equal(button.getPluginData('atlas.category.manual'), '');
+    assert.equal(icon.getPluginData('atlas.category.manual'), '');
+    assert.equal(panel.getPluginData('atlas.category.manual'), '背景');
+    // 恢复不改变来源身份、同步记录和实例关联。
+    for (const node of [button, icon, panel]) assert.equal(node.getPluginData('atlas.source'), sources.get(node.id));
+    assert.equal(await instance.getMainComponentAsync(), panel);
+  } finally { await f.cleanup(); }
+});
+
+test('撤销后再次分类覆盖旧记录，已删除与无关组件安全跳过并计数', async () => {
+  const { f, workflow, platform, page, api: figma } = await setup();
+  const project = { id: 'g8', name: '分类测试' };
+  try {
+    await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    await workflow.scan();
+    await workflow.import();
+    const button = page.findAll(node => node.type === 'COMPONENT' && node.name === '按钮/btn_ok')[0];
+    const icon = page.findAll(node => node.type === 'COMPONENT' && node.name === '图标/icon_coin')[0];
+    const first = await platform.setCategory(project, [button.id, icon.id], '艺术字');
+    await platform.restoreCategory(project, first.previous);
+    // 再次人工分类返回的是撤销后的状态，旧记录不会残留。
+    const second = await platform.setCategory(project, [button.id, icon.id], '背景');
+    assert.deepEqual(second.previous.map(item => [item.id, item.category, item.manual]).sort(), [
+      [button.id, '按钮', false],
+      [icon.id, '图标', false]
+    ].sort());
+
+    const foreign = figma.createComponent();
+    page.appendChild(foreign);
+    foreign.name = '用户自己的组件';
+    const skipped = await platform.restoreCategory(project, [
+      { id: button.id, category: '图标', manual: true },
+      { id: 'component-999', category: '按钮', manual: false },
+      { id: foreign.id, category: '按钮', manual: false }
+    ]);
+    assert.equal(skipped.restored, 1);
+    assert.equal(skipped.skipped, 2);
+    assert.match(skipped.messages.join('\n'), /已跳过/);
+    assert.equal(button.parent.name, '图标');
+    assert.equal(button.getPluginData('atlas.category.manual'), '图标');
+    assert.equal(foreign.parent, page);
+    assert.equal(foreign.name, '用户自己的组件');
+    assert.equal(foreign.getPluginData('atlas.category.manual'), '');
+  } finally { await f.cleanup(); }
+});
+
+// 合并回归（#16 × #17）：撤销快照里的类别可能已被「类别管理」删掉，这种项按跳过计数，不抛错。
+test('撤销快照指向的类别已被删除时跳过计数，不抛错也不移动组件', async () => {
+  const { f, workflow, platform, page } = await setup();
+  const project = { id: 'g8', name: '分类测试' };
+  try {
+    await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    const button = page.findAll(node => node.type === 'COMPONENT' && node.name === '按钮/btn_ok')[0];
+    // 先人工归到「艺术字」，再归到「背景」——撤销快照记录的类别是「艺术字」。
+    await platform.setCategory(project, [button.id], '艺术字');
+    const second = await platform.setCategory(project, [button.id], '背景');
+    assert.deepEqual(second.previous.map(item => [item.category, item.manual]), [['艺术字', true]]);
+    // 删除「艺术字」后该快照已无法写回：跳过并计数，组件保持「背景」。
+    await platform.removeCategory(project, '艺术字');
+    const result = await platform.restoreCategory(project, second.previous);
+    assert.equal(result.restored, 0);
+    assert.equal(result.skipped, 1);
+    assert.match(result.messages.join('\n'), /没有分类「艺术字」，已跳过/);
+    assert.equal(button.parent.name, '背景');
+    assert.equal(button.getPluginData('atlas.category.manual'), '背景');
+  } finally { await f.cleanup(); }
+});
+
+test('工作流只保留最近一次人工分类的撤销记录，撤销后清空', async () => {
+  const { f, workflow, page } = await setup();
+  try {
+    await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    await workflow.scan();
+    await workflow.import();
+    const button = page.findAll(node => node.type === 'COMPONENT' && node.name === '按钮/btn_ok')[0];
+    const icon = page.findAll(node => node.type === 'COMPONENT' && node.name === '图标/icon_coin')[0];
+    page.selection = [button, icon];
+    await workflow.loadSelection();
+
+    await workflow.setCategory('艺术字');
+    assert.deepEqual(workflow.state.undo.entries.map(item => [item.id, item.category, item.manual]).sort(), [
+      [button.id, '按钮', false],
+      [icon.id, '图标', false]
+    ].sort());
+    // 下一次人工分类替换而不是追加旧记录。
+    await workflow.setCategory('背景');
+    assert.deepEqual(workflow.state.undo.entries.map(item => [item.id, item.category, item.manual]).sort(), [
+      [button.id, '艺术字', true],
+      [icon.id, '艺术字', true]
+    ].sort());
+
+    await workflow.undoCategory();
+    assert.equal(workflow.state.undo, undefined);
+    assert.equal(button.parent.name, '艺术字');
+    assert.equal(icon.parent.name, '艺术字');
+    assert.equal(workflow.state.selection.members.every(member => member.category === '艺术字' && member.manual), true);
+    assert.match(workflow.state.notice, /撤销：已恢复 2 个组件/);
+
+    // 恢复自动分类不是撤销单元，旧记录会失效；没有记录时撤销直接拒绝。
+    await workflow.setCategory('背景');
+    assert.ok(workflow.state.undo);
+    await workflow.setCategory('auto');
+    assert.equal(workflow.state.undo, undefined);
+    await assert.rejects(() => workflow.undoCategory(), /没有可撤销/);
+  } finally { await f.cleanup(); }
+});
+
 test('批量分类同类重名补充来源，混合无关对象只跳过不改造', async () => {
   const { f, workflow, platform, page, api: figma } = await setup();
   const project = { id: 'g8', name: '分类测试' };
