@@ -23,7 +23,7 @@ test('a remembered pairing connects automatically and can be forgotten', async (
         else if (m.type === 'pairing-clear') { window.pairing = null; reply(true); }
         else if (m.type === 'validate') reply({valid:true,message:'空白页可导入'});
       });
-    </script><iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:380px;height:540px"></iframe>`);
+    </script><iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:350px;height:540px"></iframe>`);
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   try {

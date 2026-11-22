@@ -12,7 +12,7 @@ npm run typecheck
 npm run build
 ```
 
-构建产物：`dist/code.js`（Figma 主线程）、`dist/ui.html`（内联 UI 脚本）；无需开发服务器。主界面固定为 380×540 且不滚动，静态说明收进 hover，任务阶段、进度和取消固定在底部。Figma 的开发插件入口选择此目录 `manifest.json`。manifest 只在开发模式放行 `http://localhost:38473`；不承诺发布模式/远端助手，不要把域名改成 `*`。不同端口的测试只在浏览器沙箱运行，并未改变 manifest。
+构建产物：`dist/code.js`（Figma 主线程）、`dist/ui.html`（内联 UI 脚本）；无需开发服务器。主界面固定为 350×540 且不滚动，静态说明收进 hover，任务阶段、进度和取消固定在底部。Figma 的开发插件入口选择此目录 `manifest.json`。manifest 只在开发模式放行 `http://localhost:38473`；不承诺发布模式/远端助手，不要把域名改成 `*`。不同端口的测试只在浏览器沙箱运行，并未改变 manifest。
 
 1. 首次使用时手动启动助手（托盘图标悬停时应显示「资源助手运行中」），从本机 `%LOCALAPPDATA%\MyFigmaAssets\token` 读取令牌。点击底栏连接状态左侧的齿轮打开「资源助手设置」，填写配对令牌和资源助手文件夹（例如当前构建的 `local-helper\target\release`）并保存。未连接时点击底栏「启动资源助手」打开该文件夹，双击 `resource-helper.exe` 后再点击「连接资源助手」；地址固定为 `localhost:38473`，成功后自动记住。之后重新打开插件会自动连接，无需再次粘贴；资源助手文件夹也会保留。若连接失败，先确认托盘里的助手仍在运行（否则从构建产物重新启动），再检查端口及 Figma/浏览器本地网络权限。
 

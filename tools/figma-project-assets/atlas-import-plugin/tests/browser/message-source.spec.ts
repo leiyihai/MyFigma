@@ -15,11 +15,11 @@ for(const origin of ['https://www.figma.com','https://untrusted.example']) {
       contentType:'text/html; charset=utf-8',body:await readFile(new URL('../../dist/ui.html',import.meta.url),'utf8')}));
     await page.route(origin+'/acceptance-bridge.html',route=>route.fulfill({
       contentType:'text/html; charset=utf-8',body:`
-        <iframe title="plugin" sandbox="allow-scripts" src="${origin}/acceptance-ui.html" style="width:380px;height:540px"></iframe>
+        <iframe title="plugin" sandbox="allow-scripts" src="${origin}/acceptance-ui.html" style="width:350px;height:540px"></iframe>
         <script>addEventListener('message',e=>{if(e.source===frames[0]&&e.data?.pluginMessage)parent.postMessage(e.data,'*');else if(e.source===parent&&e.data?.pluginMessage)frames[0].postMessage(e.data,'*');});</script>`}));
     const host=origin+'/plugin-message-acceptance';
     await page.route(host,route=>route.fulfill({contentType:'text/html; charset=utf-8',body:`
-      <iframe title="bridge" src="${origin}/acceptance-bridge.html" style="width:400px;height:540px"></iframe>
+      <iframe title="bridge" src="${origin}/acceptance-bridge.html" style="width:370px;height:540px"></iframe>
       <script>addEventListener('message',e=>{
         const m=e.data?.pluginMessage;
         if(!m?.requestId||e.source!==frames[0])return;

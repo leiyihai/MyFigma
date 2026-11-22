@@ -7,7 +7,7 @@ test('unconnected start action opens the saved helper folder, then offers pairin
   const server = createServer(async (req,res) => {
     res.setHeader('Content-Type','text/html; charset=utf-8');
     if (req.url === '/ui.html') return res.end(await readFile(new URL('../../dist/ui.html',import.meta.url)));
-    res.end(`<iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:380px;height:540px"></iframe>
+    res.end(`<iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:350px;height:540px"></iframe>
     <script>
     window.helperPath=${JSON.stringify(helperPath)};window.openedPath=null;
     addEventListener('message',e=>{

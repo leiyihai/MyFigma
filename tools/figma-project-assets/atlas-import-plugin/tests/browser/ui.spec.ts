@@ -9,7 +9,7 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
   const f=await fixture();
   const server=createServer(async(req,res)=>{
     if(req.url==='/ui.html') {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(await readFile(new URL('../../dist/ui.html',import.meta.url)));}
-    else {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:380px;height:540px"></iframe>
+    else {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:350px;height:540px"></iframe>
     <script>
     window.imported=null;window.pairing=null;
     addEventListener('message',e=>{
