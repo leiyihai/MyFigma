@@ -3,6 +3,7 @@ export function figmaFixture() {
   let nodeSequence=0,pageSequence=0,instanceSequence=0;
   const images=[];
   const storage=new Map();
+  const externalUrls=[];
   const removeFromParent=node=>{
     if(node.parent&&Array.isArray(node.parent.children))node.parent.children=node.parent.children.filter(child=>child!==node);
   };
@@ -56,6 +57,7 @@ export function figmaFixture() {
     root,
     clientStorage:{async getAsync(k){return storage.get(k);},async setAsync(k,v){storage.set(k,v);},async deleteAsync(k){storage.delete(k);}},
     base64Decode:s=>Uint8Array.from(Buffer.from(s,'base64')),
+    openExternal(url){externalUrls.push(url);},
     createImage(bytes){images.push(bytes);return {hash:'image-'+images.length};},
     async getNodeByIdAsync(id){
       let found=null;
@@ -93,5 +95,5 @@ export function figmaFixture() {
       return n;
     }
   };
-  return {api,page,root,images,storage};
+  return {api,page,root,images,storage,externalUrls};
 }

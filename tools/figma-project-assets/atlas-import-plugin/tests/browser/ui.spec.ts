@@ -9,7 +9,7 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
   const f=await fixture();
   const server=createServer(async(req,res)=>{
     if(req.url==='/ui.html') {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(await readFile(new URL('../../dist/ui.html',import.meta.url)));}
-    else {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:440px;height:540px"></iframe>
+    else {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:380px;height:540px"></iframe>
     <script>
     window.imported=null;window.pairing=null;
     addEventListener('message',e=>{
@@ -17,6 +17,9 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
       const reply=result=>e.source.postMessage({pluginMessage:{type:'result',requestId:m.requestId,result}},'*');
       if(m.type==='cancel'){window.cancelRequests=(window.cancelRequests||0)+1;if(m.requestId)reply(true);return;}
       if(!m.requestId)return;
+      if(m.type==='helper-path-load'){reply(window.helperPath||'');return;}
+      if(m.type==='helper-path-save'){window.helperPath=m.path;reply(true);return;}
+      if(m.type==='open-helper-folder'){window.openHelperPath=m.path;reply(true);return;}
       if(m.type==='pairing-load'){reply(window.pairing);return;}
       if(m.type==='pairing-save'){window.pairing=m.pairing;reply(true);return;}
       if(m.type==='pairing-clear'){window.pairing=null;reply(true);return;}
@@ -34,7 +37,7 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
   try {
     await page.goto('http://127.0.0.1:'+ (server.address() as {port:number}).port);
     const ui=page.frameLocator('iframe');
-    await ui.getByRole('button',{name:'连接资源助手',exact:true}).click();
+    await ui.getByRole('button',{name:'启动资源助手',exact:true}).click();
     await expect(ui.locator('#pairing')).toBeVisible();
     await ui.locator('#address').evaluate((el, base) => { (el as HTMLInputElement).value = base; }, f.base);
     await ui.getByLabel('配对令牌').fill(f.token);

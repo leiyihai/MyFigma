@@ -7,7 +7,7 @@ import { figmaFixture } from './platform-fixture.mjs';
 
 test('built main script loads in an import-rejecting sandbox, stores pairing locally, and handles validate/import', async () => {
   const code = await readFile(new URL('../dist/code.js', import.meta.url), 'utf8');
-  const { api: figma, page, root } = figmaFixture();
+  const { api: figma, page, root, storage, externalUrls } = figmaFixture();
   const replies = [];
   const events = new Map();
   let shownHtml,shownOptions;
@@ -19,7 +19,7 @@ test('built main script loads in an import-rejecting sandbox, stores pairing loc
   const sandbox = new globalThis.Compartment({ figma, __html__: '<p>plugin UI</p>', setTimeout });
   sandbox.evaluate(code);
   assert.equal(shownHtml, '<p>plugin UI</p>');
-  assert.equal(shownOptions.width, 440);
+  assert.equal(shownOptions.width, 380);
   assert.equal(shownOptions.height, 540);
   const pairing={schemaVersion:1,address:'http://localhost:38473',token:'a'.repeat(64)};
   await figma.ui.onmessage({type:'pairing-load',requestId:10});
@@ -35,6 +35,16 @@ test('built main script loads in an import-rejecting sandbox, stores pairing loc
   assert.equal(replies.find(reply=>reply.requestId===14).result,true);
   await figma.ui.onmessage({type:'pairing-load',requestId:15});
   assert.equal(replies.find(reply=>reply.requestId===15).result,null);
+  await figma.ui.onmessage({type:'helper-path-load',requestId:16});
+  assert.equal(replies.find(reply=>reply.requestId===16).result,'');
+  await figma.ui.onmessage({type:'helper-path-save',requestId:17,path:'E:\\Tools\\resource-helper'});
+  assert.equal(replies.find(reply=>reply.requestId===17).result,'E:\\Tools\\resource-helper');
+  await figma.ui.onmessage({type:'helper-path-load',requestId:18});
+  assert.equal(replies.find(reply=>reply.requestId===18).result,'E:\\Tools\\resource-helper');
+  await figma.ui.onmessage({type:'open-helper-folder',requestId:19,path:'E:\\Tools\\resource-helper'});
+  assert.equal(replies.find(reply=>reply.requestId===19).result,true);
+  assert.equal(externalUrls.length,1);
+  assert.match(externalUrls[0],/^file:\/\/\/E:/);
   await figma.ui.onmessage({ type: 'validate', requestId: 1, project: { id: 'g2', name: '测试游戏' } });
   assert.equal(replies.find(reply => reply.requestId === 1).result.valid, true);
 

@@ -40,6 +40,7 @@ let workflow:Workflow|undefined;
 let uiError='';
 let pageValidationPending=false;
 let remembered=false;
+let helperFolderOpened=false;
 let editingId:string|undefined;
 const dialog=el<HTMLDialogElement>('management');
 const pairingDialog=el<HTMLDialogElement>('pairing');
@@ -78,8 +79,10 @@ function render() {
   el('phase').textContent=uiError?'失败':s?.phase||'未连接';
   el('error').textContent=uiError||s?.error||'';
   const connectButton=el<HTMLButtonElement>('connect');connectButton.disabled=busy;
-  connectButton.textContent='连接资源助手';
-  input('address').disabled=busy;input('token').disabled=busy;
+  const hasHelperPath=!!input('helper-path').value.trim();
+  const hasToken=!!input('token').value.trim();
+  connectButton.textContent=connected||helperFolderOpened||(!hasHelperPath&&hasToken)?'连接资源助手':'启动资源助手';
+  input('address').disabled=busy;input('token').disabled=busy;input('helper-path').disabled=busy;
   el<HTMLButtonElement>('forget').disabled=busy||!remembered;
   const pairingError=el('pairing-error');pairingError.textContent=el<HTMLDialogElement>('pairing').open?uiError:'';
   for(const id of ['manage','project']) (el(id) as HTMLInputElement).disabled=busy||!connected;
@@ -174,6 +177,24 @@ async function refreshSelection() {
   try{await workflow?.loadSelection();}catch{ /* a changed page clears the transient selection panel */ }
   render();
 }
+async function saveHelperPath():Promise<string> {
+  const path=input('helper-path').value.trim();
+  await rpc('helper-path-save',{path});
+  return path;
+}
+async function openHelperFolder():Promise<void> {
+  const path=input('helper-path').value.trim();
+  if(!path){openPairing();return;}
+  try {
+    await saveHelperPath();
+    await rpc('open-helper-folder',{path});
+    helperFolderOpened=true;
+  } catch {
+    try{await navigator.clipboard.writeText(path);}catch{/* sandbox clipboard may be unavailable */}
+    openPairing();
+    throw new Error(`无法打开资源助手文件夹，路径已填入配对窗口，请手动打开：${path}`);
+  }
+}
 async function connectHelper(address:string,token:string) {
   if(workflow?.state.busy)return;
   if(!token) throw new Error('请输入配对令牌');
@@ -191,7 +212,7 @@ function openPairing() {
   if(workflow?.state.busy)return;
   uiError='';render();
   if(!pairingDialog.open)pairingDialog.showModal();
-  input('token').focus();
+  (input('helper-path').value.trim()?input('token'):input('helper-path')).focus();
 }
 async function run(action:()=>Promise<void>) {
   uiError='';
@@ -210,11 +231,19 @@ async function run(action:()=>Promise<void>) {
 }
 el('connect').onclick=()=>{
   if(workflow?.state.connected) {openPairing();return;}
+  const path=input('helper-path').value.trim();
   const token=input('token').value.trim();
+  if(!path) {
+    if(token)void run(()=>connectHelper(input('address').value.trim(),token));
+    else openPairing();
+    return;
+  }
+  if(!helperFolderOpened) {void run(openHelperFolder);return;}
   if(!token) {openPairing();return;}
   void run(()=>connectHelper(input('address').value.trim(),token));
 };
 const submitPairing=()=>void run(async()=>{
+  await saveHelperPath();
   await connectHelper(input('address').value.trim(),input('token').value.trim());
   pairingDialog.close();
 });
@@ -237,6 +266,7 @@ el('cancel').onclick=()=>{workflow?.cancel();};
 el('compare').onclick=()=>void run(()=>workflow!.comparePage());
 el('tidy').onclick=()=>void run(()=>workflow!.tidy());
 el('category-select').onchange=render;
+el('helper-path').oninput=()=>{helperFolderOpened=false;render();};
 el('apply-category').onclick=()=>void run(async()=>{
   const choice=el<HTMLSelectElement>('category-select').value as CategoryName|'auto'|'';
   if(!workflow?.state.selected||!workflow.state.selection?.members.length||!choice)return;
@@ -264,6 +294,10 @@ window.addEventListener('message',event=>{
 });
 render();
 async function bootstrap() {
+  try {
+    const path=await rpc<string>('helper-path-load',{});
+    if(typeof path==='string')input('helper-path').value=path;
+  } catch { /* optional local setting */ }
   try {
     const pairing=await rpc<Pairing|null>('pairing-load',{});
     if(!pairing)return;

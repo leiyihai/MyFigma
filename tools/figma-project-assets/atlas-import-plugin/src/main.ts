@@ -2,10 +2,20 @@ import {createFigmaPlatform} from './platform';
 import {Cancellation} from './api';
 import type {PublicProject,Scan} from './api';
 import type {CategoryName} from './category';
-figma.showUI(__html__,{width:440,height:540,themeColors:true});
+figma.showUI(__html__,{width:380,height:540,themeColors:true});
 const platform=createFigmaPlatform(figma);
 const pairingKey='atlas.pairing.v1';
+const helperPathKey='resourceHelperPath.v1';
 type Pairing={schemaVersion:1;address:string;token:string};
+function helperFolder(value:unknown):string {
+  if(typeof value!=='string')return '';
+  const path=value.trim();
+  return path.length>0 && path.length<=1024 && !/[\x00-\x1f]/.test(path) ? path : '';
+}
+function helperFileUrl(path:string):string {
+  const normalized=path.replace(/\\/g,'/').replace(/\/+$/,'');
+  return 'file:///' + encodeURI(normalized) + '/';
+}
 function validPairing(value:unknown):value is Pairing {
   if(!value || typeof value!=='object')return false;
   const pairing=value as Partial<Pairing>;
@@ -14,7 +24,7 @@ function validPairing(value:unknown):value is Pairing {
     && typeof pairing.token==='string' && /^[a-f0-9]{64}$/.test(pairing.token);
 }
 let active: Cancellation | undefined;
-figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicProject;scan:Scan;pairing?:Pairing;ids?:string[];category?:CategoryName|'auto'})=>{
+figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicProject;scan:Scan;pairing?:Pairing;ids?:string[];category?:CategoryName|'auto';path?:string})=>{
   if(!message)return;
   // Cancellation is a control message, not a task reply; it may arrive while import is running.
   if(message.type==='cancel') {active?.cancel(); if(Number.isInteger(message.requestId)) figma.ui.postMessage({type:'result',requestId:message.requestId,result:true}); return;}
@@ -47,6 +57,24 @@ figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicPro
     }
     else if(message.type==='pairing-clear') {
       await figma.clientStorage.deleteAsync(pairingKey);
+      reply(true);
+    }
+    else if(message.type==='helper-path-load') {
+      const stored=await figma.clientStorage.getAsync(helperPathKey);
+      reply(typeof stored==='string'?stored:'');
+    }
+    else if(message.type==='helper-path-save') {
+      const raw=typeof message.path==='string'?message.path.trim():'';
+      const path=raw?helperFolder(raw):'';
+      if(raw&&!path)throw new Error('资源助手文件夹路径无效');
+      await figma.clientStorage.setAsync(helperPathKey,path);
+      reply(path);
+    }
+    else if(message.type==='open-helper-folder') {
+      const path=helperFolder(message.path);
+      if(!path)throw new Error('资源助手文件夹路径无效');
+      if(typeof figma.openExternal!=='function')throw new Error('当前环境不支持打开文件夹，请手动打开：'+path);
+      figma.openExternal(helperFileUrl(path));
       reply(true);
     }
     else reply(null,'未知插件任务');

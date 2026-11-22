@@ -27,8 +27,8 @@ h3{font-size:13px}
 .resource-card .card-head{margin-bottom:4px}
 .actions{display:flex;flex-direction:column;gap:6px;margin-top:7px}
 .actions .primary{width:100%}
-.actions-secondary{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.actions-secondary button{min-width:0}
+.actions-secondary{display:flex;justify-content:flex-end;gap:6px}
+.actions-secondary button{flex:none}
 .notice{margin-top:5px;font-size:10px;line-height:1.35;color:var(--figma-color-text-secondary,#666);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .status-card{flex:none;padding:8px 10px;background:var(--figma-color-bg-secondary,#f7f7f7)}
 .status-card .status-line{margin-bottom:2px}
@@ -149,7 +149,7 @@ dialog::backdrop{background:#0006}
 
 <footer class="app-footer">
   <span id="connection" data-testid="connection" class="badge">资源助手：未连接</span>
-  <button id="connect" title="连接本机资源助手。首次使用或需要重新配对时打开配对窗口；已连接时可用于重新连接或忘记配对。">连接资源助手</button>
+  <button id="connect" title="资源助手未运行时打开其文件夹；启动后再次点击连接。已连接时打开配对窗口。">启动资源助手</button>
 </footer>
 
 <dialog id="pairing" aria-labelledby="pairing-title">
@@ -159,6 +159,7 @@ dialog::backdrop{background:#0006}
       <p class="muted small">首次使用需粘贴本机配对令牌；地址固定为 localhost:38473，连接成功后会自动记住。</p>
       <input id="address" value="http://localhost:38473" type="hidden">
       <label><span>配对令牌</span><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴配对令牌"></label>
+      <label><span>资源助手文件夹（用于启动）</span><input id="helper-path" spellcheck="false" placeholder="例如 E:\MyFigma\tools\figma-project-assets\local-helper\target\release"></label>
       <p id="pairing-error" role="alert"></p>
       <div class="dialog-actions">
         <button id="connect-submit" type="button" class="primary">连接</button>

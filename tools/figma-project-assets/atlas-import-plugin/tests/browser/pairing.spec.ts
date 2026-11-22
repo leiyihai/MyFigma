@@ -15,12 +15,15 @@ test('a remembered pairing connects automatically and can be forgotten', async (
       addEventListener('message', e => {
         const m = e.data?.pluginMessage; if (!m?.requestId || e.source !== frames[0]) return;
         const reply = result => e.source.postMessage({pluginMessage:{type:'result',requestId:m.requestId,result}},'*');
-        if (m.type === 'pairing-load') reply(window.pairing);
+        if (m.type === 'helper-path-load') reply('');
+        else if (m.type === 'helper-path-save') reply(true);
+        else if (m.type === 'open-helper-folder') reply(true);
+        else if (m.type === 'pairing-load') reply(window.pairing);
         else if (m.type === 'pairing-save') { window.pairing = m.pairing; reply(true); }
         else if (m.type === 'pairing-clear') { window.pairing = null; reply(true); }
         else if (m.type === 'validate') reply({valid:true,message:'空白页可导入'});
       });
-    </script><iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:440px;height:540px"></iframe>`);
+    </script><iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:380px;height:540px"></iframe>`);
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
