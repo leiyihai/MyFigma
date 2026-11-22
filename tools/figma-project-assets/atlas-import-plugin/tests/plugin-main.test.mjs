@@ -47,6 +47,14 @@ test('built main script loads in an import-rejecting sandbox, stores pairing loc
   assert.match(externalUrls[0],/^file:\/\/\/E:/);
   await figma.ui.onmessage({ type: 'validate', requestId: 1, project: { id: 'g2', name: '测试游戏' } });
   assert.equal(replies.find(reply => reply.requestId === 1).result.valid, true);
+  // The UI reads the ordered page categories over RPC; a blank page uses the default seven.
+  await figma.ui.onmessage({ type: 'categories', requestId: 5 });
+  const categoriesReply = replies.find(reply => reply.requestId === 5);
+  assert.equal(categoriesReply.error, undefined);
+  assert.equal(categoriesReply.result.schemaVersion, 1);
+  assert.deepEqual(categoriesReply.result.categories.map(category => category.name),
+    ['按钮','底板','图标','背景','艺术字','进度条','未分类']);
+  assert.equal(page.getPluginData('atlas.categories.v1'), '');
 
   const f = await fixture();
   try {

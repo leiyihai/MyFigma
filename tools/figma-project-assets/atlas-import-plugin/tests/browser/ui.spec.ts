@@ -23,6 +23,10 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
       if(m.type==='pairing-load'){reply(window.pairing);return;}
       if(m.type==='pairing-save'){window.pairing=m.pairing;reply(true);return;}
       if(m.type==='pairing-clear'){window.pairing=null;reply(true);return;}
+      if(m.type==='categories'){reply({schemaVersion:1,categories:window.categoryConfig||[
+        {name:'按钮',color:'#e5484d'},{name:'底板',color:'#8e4ec6'},{name:'图标',color:'#f2a900'},
+        {name:'背景',color:'#3e63dd'},{name:'艺术字',color:'#d6409f'},{name:'进度条',color:'#30a46c'},
+        {name:'未分类',color:'#8b8d98'}]});return;}
       if(m.type==='selection'){const members=window.selectionMembers||[];reply({schemaVersion:1,members,ignored:window.selectionIgnored||0,mixed:new Set(members.map(x=>x.category)).size>1});return;}
       if(m.type==='set-category'){window.categoryRequest=m;const members=(window.categoryMembers||window.selectionMembers||[]).map(x=>({...x,category:m.category,manual:m.category!=='auto'}));window.selectionMembers=members;reply({schemaVersion:1,action:m.category==='auto'?'auto':'manual',updated:members.length,moved:members.length,messages:[]});return;}
       if(m.type==='validate')reply(window.currentPageInvalid?{valid:false,message:'非空且未绑定页面不可导入'}:{valid:true,message:'空白页可导入'});
@@ -181,6 +185,15 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
     await expect(ui.getByTestId('selection-status')).toContainText('当前分类：艺术字');
     expect(await page.evaluate(()=>(window as any).categoryRequest.category)).toBe('艺术字');
     expect(await page.evaluate(()=>(window as any).categoryRequest.ids.length)).toBe(2);
+    expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
+    // The option list is the page configuration read back over RPC, not a hardcoded set.
+    await page.evaluate(()=>{
+      const w=window as any;
+      w.categoryConfig=[{name:'特殊按钮',color:'#0091ff'},{name:'未分类',color:'#8b8d98'}];
+      document.querySelector('iframe')!.contentWindow!.postMessage({pluginMessage:{type:'page-changed'}},'*');
+    });
+    await expect(ui.locator('#category-select option[value="特殊按钮"]')).toHaveCount(1);
+    await expect(ui.locator('#category-select option[value="按钮"]')).toHaveCount(0);
     expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
     let releaseFailedScan!:()=>void;
     let failedScanStarted!:()=>void;

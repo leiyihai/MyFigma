@@ -16,6 +16,7 @@ test('unconnected start action opens the saved helper folder, then offers pairin
       if(m.type==='pairing-load'){reply(null);return;}
       if(!m.requestId)return;
       if(m.type==='helper-path-load'){reply(window.helperPath);return;}
+      if(m.type==='categories'){reply({schemaVersion:1,categories:[{name:'按钮',color:'#e5484d'},{name:'未分类',color:'#8b8d98'}]});return;}
       if(m.type==='helper-path-save'){window.helperPath=m.path;reply(true);return;}
       if(m.type==='open-helper-folder'){window.openedPath=m.path;reply(true);return;}
       if(m.type==='pairing-save'||m.type==='pairing-clear'){reply(true);return;}
@@ -56,6 +57,7 @@ test('when Figma rejects file URLs the start action copies and selects the path 
       if(m.type==='pairing-load'){reply(null);return;}
       if(!m.requestId)return;
       if(m.type==='helper-path-load'){reply(window.helperPath);return;}
+      if(m.type==='categories'){reply({schemaVersion:1,categories:[{name:'按钮',color:'#e5484d'},{name:'未分类',color:'#8b8d98'}]});return;}
       if(m.type==='helper-path-save'){window.helperPath=m.path;reply(true);return;}
       if(m.type==='pairing-save'||m.type==='pairing-clear'){reply(true);return;}
       if(m.type==='open-helper-folder'){reply(null,'invalid url protocol "file:"');return;}

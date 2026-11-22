@@ -27,6 +27,7 @@ for(const origin of ['https://www.figma.com','https://untrusted.example']) {
         if(m.type==='helper-path-save'){frames[0].postMessage({pluginMessage:{type:'result',requestId:m.requestId,result:true}},'*');return;}
         if(m.type==='open-helper-folder'){window.openedPath=m.path;frames[0].postMessage({pluginMessage:{type:'result',requestId:m.requestId,result:true}},'*');return;}
         if(m.type==='pairing-load'){frames[0].postMessage({pluginMessage:{type:'result',requestId:m.requestId,result:null}},'*');return;}
+        if(m.type==='categories'){frames[0].frames[0].postMessage({pluginMessage:{type:'result',requestId:m.requestId,result:{schemaVersion:1,categories:[{name:'按钮',color:'#e5484d'},{name:'未分类',color:'#8b8d98'}]}}},'*');return;}
         if(m.type==='pairing-save'||m.type==='pairing-clear'){frames[0].postMessage({pluginMessage:{type:'result',requestId:m.requestId,result:true}},'*');return;}
         if(m.type==='validate'){
           window.validationRequest=m.requestId;

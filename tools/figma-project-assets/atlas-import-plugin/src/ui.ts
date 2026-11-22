@@ -1,7 +1,7 @@
 import {HelperAuthError,HelperClient,Workflow} from './api';
-import type {Platform,Progress,Project} from './api';
-import {categories} from './category';
-import type {CategoryName} from './category';
+import type {CategoryState,Platform,Progress,Project} from './api';
+import {defaultCategories} from './category';
+import type {Category} from './category';
 type Pairing={schemaVersion:1;address:string;token:string};
 function el<T extends HTMLElement>(id:string):T {const node=document.getElementById(id);if(!node)throw new Error('界面元素缺失');return node as T;}
 function input(id:string) {return el<HTMLInputElement>(id);}
@@ -34,9 +34,12 @@ const platform:Platform={
   compare:project=>rpc('compare',{project}),
   tidy:project=>rpc('tidy',{project}),
   selection:project=>rpc('selection',{project}),
+  categories:()=>rpc('categories',{}),
   setCategory:(project,ids,category)=>rpc('set-category',{project,ids,category})
 };
 let workflow:Workflow|undefined;
+// Category choices come from the page; the default seven are only a fallback.
+let categoryChoices:readonly Category[]=defaultCategories;
 let uiError='';
 let pageValidationPending=false;
 let remembered=false;
@@ -122,7 +125,7 @@ function render() {
   const noticeEl=el('action-result');noticeEl.textContent=notice;noticeEl.classList.toggle('hidden',!notice);
   const categorySelect=el<HTMLSelectElement>('category-select');
   const previousCategory=categorySelect.value;
-  categorySelect.replaceChildren(new Option('选择目标分类',''),...categories.map(category=>new Option(category,category)),new Option('恢复自动分类','auto'));
+  categorySelect.replaceChildren(new Option('选择目标分类',''),...categoryChoices.map(category=>new Option(category.name,category.name)),new Option('恢复自动分类','auto'));
   if(previousCategory) categorySelect.value=previousCategory;
   const selection=workflow?.state.selection;
   const selectedMembers=selection?.members||[];
@@ -181,6 +184,20 @@ function resetForm() {el<HTMLFormElement>('registration').reset();editingId=unde
 async function clearPairing() {try{await rpc('pairing-clear',{});}catch{}remembered=false;}
 async function refreshSelection() {
   try{await workflow?.loadSelection();}catch{ /* a changed page clears the transient selection panel */ }
+  render();
+}
+// Page-level categories are the source of truth; the default seven only cover a
+// failed readback so the panel stays usable without a configurable page.
+async function loadCategories() {
+  let choices:readonly Category[]=defaultCategories;
+  try {
+    const state=await rpc<CategoryState>('categories',{});
+    const read=Array.isArray(state?.categories)
+      ? state.categories.filter(category=>category&&typeof category.name==='string'&&category.name&&typeof category.color==='string')
+      : [];
+    if(read.length)choices=read;
+  } catch { /* keep the default seven when the page readback fails */ }
+  categoryChoices=choices;
   render();
 }
 async function saveSettings():Promise<void> {
@@ -277,7 +294,7 @@ el('tidy').onclick=()=>void run(()=>workflow!.tidy());
 el('category-select').onchange=render;
 el('helper-path').oninput=()=>{helperFolderOpened=false;render();};
 el('apply-category').onclick=()=>void run(async()=>{
-  const choice=el<HTMLSelectElement>('category-select').value as CategoryName|'auto'|'';
+  const choice=el<HTMLSelectElement>('category-select').value;
   if(!workflow?.state.selected||!workflow.state.selection?.members.length||!choice)return;
   await workflow.setCategory(choice);
 });
@@ -292,6 +309,7 @@ window.addEventListener('message',event=>{
   const message=event.data?.pluginMessage;if(!message)return;
   if(message.type==='progress') {reportProgress?.(message.progress);return;}
   if(message.type==='page-changed'){
+    void loadCategories();
     if(workflow?.state.busy){pageValidationPending=true;render();}
     else if(workflow){workflow.invalidateScan();void run(()=>workflow!.validatePage());}
     return;
@@ -303,6 +321,7 @@ window.addEventListener('message',event=>{
 });
 render();
 async function bootstrap() {
+  await loadCategories();
   try {
     const path=await rpc<string>('helper-path-load',{});
     if(typeof path==='string')input('helper-path').value=path;
