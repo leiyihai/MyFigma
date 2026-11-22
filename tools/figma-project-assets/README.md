@@ -1,6 +1,6 @@
 # 资源导入器
 
-本批实现 GitHub [#1](https://github.com/leiyihai/MyFigma/issues/1)、[#2](https://github.com/leiyihai/MyFigma/issues/2)、[#3](https://github.com/leiyihai/MyFigma/issues/3)、[#4](https://github.com/leiyihai/MyFigma/issues/4)、[#5](https://github.com/leiyihai/MyFigma/issues/5)、[#6](https://github.com/leiyihai/MyFigma/issues/6)、[#8](https://github.com/leiyihai/MyFigma/issues/8)、[#10](https://github.com/leiyihai/MyFigma/issues/10)、[#11](https://github.com/leiyihai/MyFigma/issues/11)、[#13](https://github.com/leiyihai/MyFigma/issues/13)、[#14](https://github.com/leiyihai/MyFigma/issues/14)、[#15](https://github.com/leiyihai/MyFigma/issues/15)、[#16](https://github.com/leiyihai/MyFigma/issues/16)、[#17](https://github.com/leiyihai/MyFigma/issues/17) 与 [#18](https://github.com/leiyihai/MyFigma/issues/18)；已在用户授权的独立 Figma 测试文件完成小样客户端验收，仍不是完整资源管理版本。
+本批实现 GitHub [#1](https://github.com/leiyihai/MyFigma/issues/1)、[#2](https://github.com/leiyihai/MyFigma/issues/2)、[#3](https://github.com/leiyihai/MyFigma/issues/3)、[#4](https://github.com/leiyihai/MyFigma/issues/4)、[#5](https://github.com/leiyihai/MyFigma/issues/5)、[#6](https://github.com/leiyihai/MyFigma/issues/6)、[#8](https://github.com/leiyihai/MyFigma/issues/8)、[#10](https://github.com/leiyihai/MyFigma/issues/10)、[#11](https://github.com/leiyihai/MyFigma/issues/11)、[#13](https://github.com/leiyihai/MyFigma/issues/13)、[#14](https://github.com/leiyihai/MyFigma/issues/14)、[#15](https://github.com/leiyihai/MyFigma/issues/15)、[#16](https://github.com/leiyihai/MyFigma/issues/16)、[#17](https://github.com/leiyihai/MyFigma/issues/17)、[#18](https://github.com/leiyihai/MyFigma/issues/18) 与 [#21](https://github.com/leiyihai/MyFigma/issues/21)；已在用户授权的独立 Figma 测试文件完成小样客户端验收，仍不是完整资源管理版本。
 
 ## 组成与启动
 
@@ -13,7 +13,7 @@
 
 在两个插件目录分别执行 `npm ci` 和 `npm run build`。两个插件都导入各自根目录的 `manifest.json`；九宫格清单指向 `dist/` 下的构建产物。客户端要求有效开发插件身份时需自行注册。本次已在真实客户端验证两个开发插件加载及 localhost 配对连接。
 
-最小演示将助手的 `examples` 目录登记为资源目录，可得到红、绿两个独立素材。扫描支持登记游戏根（含 `res/imageset`）或直接 `imageset` 目录的递归范围，并额外导入未被打包的独立图片；导入后的主组件先按散图原名开头的前缀 token 定类（`btn`/`button`、`icon`、`bg`/`background`、`panel`、`progress`/`pbar`、`font`/`wordart`），再回退到完整名称关键词与尺寸比例，归入按钮、底板、图标、背景、艺术字、进度条或未分类的自动换行分类 Frame；九宫格只决定拉伸结构，不参与用途。类别顺序、名称与颜色由资源页的页面级配置（`atlas.categories.v1`）决定，缺省为上述默认七类，并可按需「重新整理」分类区域；在画布选中主组件或实例后，面板用这些彩色类别标签展示，点击其他标签即批量分类（不再有下拉框和「应用」按钮），当前类别高亮，混合选择只显示混合状态，面板固定 350×600 且标签区最多四行、超出在标签区内滚动；分类动作行共三个按钮：可新增自定义类别（调色板稳定配色、立即生成分类 Frame）、给未分类之外的类别改名（配置、分类 Frame、人工覆盖与显示名一起同步，来源与实例不变）或删除未分类之外的类别的「类别管理」（只把带工具来源记录的组件移到未分类；Frame 里还有用户自有对象时保留该 Frame 并清除类别标记）、会话内「撤销」上一次人工分类，以及「提交训练样本」——后者只把当前资源页中有**人工类别覆盖**的主组件按来源身份与类别写入本机助手的 `samples/<项目编号>.json`，自动分类结果不进入，不上传图片、不访问远端，重复提交按最新人工标签覆盖，成功显示标签数量，同一来源身份重复时另报忽略数量。登记游戏根时还会递归统计 `res/layout` 的图片引用与九宫格边距，导入插件据此生成唯一九宫格主组件。绑定一致的资源页可再次扫描并原位增量更新，源删除只标记、不删除组件。需要核对源图集时，可手动创建／更新只含主组件实例的对照页；默认导入不会创建该页。
+最小演示将助手的 `examples` 目录登记为资源目录，可得到红、绿两个独立素材。扫描支持登记游戏根（含 `res/imageset`）或直接 `imageset` 目录的递归范围，并额外导入未被打包的独立图片；导入后的主组件先看当前资源页从人工标签**学到的命名规律**（见下文与插件 README 第 15 条），命中即用它定类，未命中再按散图原名开头的前缀 token（`btn`/`button`、`icon`、`bg`/`background`、`panel`、`progress`/`pbar`、`font`/`wordart`）定类，再回退到完整名称关键词与尺寸比例，归入按钮、底板、图标、背景、艺术字、进度条或未分类的自动换行分类 Frame；九宫格只决定拉伸结构，不参与用途。类别顺序、名称与颜色由资源页的页面级配置（`atlas.categories.v1`）决定，缺省为上述默认七类，并可按需「重新整理」分类区域；在画布选中主组件或实例后，面板用这些彩色类别标签展示，点击其他标签即批量分类（不再有下拉框和「应用」按钮），当前类别高亮，混合选择只显示混合状态，面板固定 350×600 且标签区最多四行、超出在标签区内滚动；分类动作行共三个按钮：可新增自定义类别（调色板稳定配色、立即生成分类 Frame）、给未分类之外的类别改名（配置、分类 Frame、人工覆盖与显示名一起同步，来源与实例不变）或删除未分类之外的类别的「类别管理」（只把带工具来源记录的组件移到未分类；Frame 里还有用户自有对象时保留该 Frame 并清除类别标记）、会话内「撤销」上一次人工分类，以及「提交训练样本」——后者只把当前资源页中有**人工类别覆盖**的主组件按来源身份与类别写入本机助手的 `samples/<项目编号>.json`，自动分类结果不进入，不上传图片、不访问远端，重复提交按最新人工标签覆盖，成功显示标签数量，同一来源身份重复时另报忽略数量。类别管理弹窗还展示「命名规律 N 条 · 预计命中 M 条」并可「清空规律」：清空只写空规则、分类回退通用规则，下一次人工分类或类别变更时才重新学习；导入预览会写「按学习命名规律预分类 N 条」。登记游戏根时还会递归统计 `res/layout` 的图片引用与九宫格边距，导入插件据此生成唯一九宫格主组件。绑定一致的资源页可再次扫描并原位增量更新，源删除只标记、不删除组件。需要核对源图集时，可手动创建／更新只含主组件实例的对照页；默认导入不会创建该页。
 
 ## 验证
 
@@ -26,7 +26,7 @@
 | `packages/nine-slice` | `npm ci && npm run typecheck && npm test` | 公共切片规划 |
 | `nine-slice-plugin` | `npm ci && npm run typecheck && npm test` | 插件入口与真实浏览器预览交互 |
 | `local-helper` | `npm ci && cargo fmt --check && cargo check --locked && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked && npm test` | 构建检查、真实产物启动/托盘退出/重启持久化与真实 Rust 子进程 HTTP／像素集成测试（27 个 Node 用例，1 个按平台跳过） |
-| `atlas-import-plugin` | `npm ci && npm run test:all` | 助手至插件任务链路与浏览器管理界面（71 个 Node 用例 + 10 个 Playwright 浏览器用例） |
+| `atlas-import-plugin` | `npm ci && npm run test:all` | 助手至插件任务链路与浏览器管理界面（77 个 Node 用例 + 10 个 Playwright 浏览器用例） |
 
 浏览器测试需要 Playwright Chromium（九宫格）和系统 Chrome（图集导入）。Rust 原生测试当前没有单元用例；真实 HTTP 集成测试由 Node 驱动，不能把 `cargo test` 的构建通过当作全部行为验证。
 
@@ -55,6 +55,7 @@
 - #8 自动分类、分类 Frame 自动换行和重新整理已完成公开流程、浏览器及真实 Figma 验证：混合素材归入背景/按钮/图标/九宫格底板等分类，重新整理消除重叠；资源面板搜索/插入/交换及跨分类移动后的实例关联仍由公开流程覆盖。
 - 批量手动分类与页面级类别（#9、#13/#14）已完成公开流程；#15 把选中区改为彩色类别标签、点击即分类和 350×600 四行滚动标签区，由公开流程、浏览器交互与浅色/深色截图自检覆盖；#16 完成类别新增/删除/改名弹窗、调色板稳定配色与删除前向未分类迁移，由 10 个平台公开流程用例（含改名）、主线程 RPC 与浏览器交互覆盖；#17 在同一动作行加入会话内撤销（恢复操作前类别与人工覆盖、跳过已删除/无关组件、重开不保留），由公开流程与浏览器交互覆盖；真实 Figma 渲染下的标签点击、类别管理与撤销仍待串行客户端验收。真实项目性能验收属于 #12。
 - 人工训练样本提交（#18）已完成公开流程、真实 Rust HTTP 与浏览器验证：只导出人工覆盖、自动分类被过滤、重复提交覆盖、无覆盖提示、未连接/忙碌禁用、成功计数与失败提示、面板无整体滚动；模型训练/评估属于 #20，本次不涉及。真实 Figma 渲染下点击提交仍待串行客户端验收。
+- 页面级命名规律（#21）已完成公开流程与浏览器验证：从人工标签学出名称族规则（support ≥ 2、purity ≥ 0.6、多数票与冲突数、纯数字与 `number_*` 归字形族），导入/增量/「恢复自动分类」按「人工覆盖 > 命名规律 > 通用前缀/关键词/尺寸」应用；类别改名/删除联动、配置损坏回退与回写、未绑定页拒绝清空、条数与预计命中回读、清空后回退与再次分类重学、导入预览消息均已覆盖；浏览器验证弹窗展示条数与预计命中、清空按钮禁用/可用、清空后 350×600 面板不整体滚动。真实 Figma 渲染下点击「清空规律」与大批量导入的规律命中仍待串行客户端验收。**#20 规则基线口径变更**：不再用旧关键词规则在图集 g1108 的 74.3%，改用本机制在 g1048 的 920 条人工标签上的留出准确率（约 56–66%；本实现实测随机分层 20×70/30 为 64.2%、按图集分组 5 折为 59.9%，同口径通用规则 2.0%）。
 - 完整递归扫描／独立图片（#3）与 Windows 托盘助手（#11）已完成；真实鼠标托盘点击仍待人工验收。
 - 未操作测试文件以外的用户设计；未知图集格式、三个真实项目全量兼容与性能仍未验收。
 - 用户反馈的主面板排版、项目编号说明、编辑锁定态、免滚动及记住本机配对已完成；首次配对仍需手动复制令牌。

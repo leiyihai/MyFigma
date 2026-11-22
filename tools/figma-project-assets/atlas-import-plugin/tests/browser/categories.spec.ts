@@ -31,7 +31,11 @@ test('类别管理弹窗新增、重名提示、删除确认与关闭后标签�
       if(m.type==='pairing-load'){reply(window.pairing);return;}
       if(m.type==='pairing-save'){window.pairing=m.pairing;reply(true);return;}
       if(m.type==='pairing-clear'){window.pairing=null;reply(true);return;}
-      if(m.type==='categories'){reply({schemaVersion:1,categories:window.categoryConfig});return;}
+      if(m.type==='categories'){reply({schemaVersion:1,categories:window.categoryConfig,rules:window.categoryRules||{count:0,estimated:0}});return;}
+      if(m.type==='clear-category-rules'){
+        window.clearRuleRequests=(window.clearRuleRequests||0)+1;
+        window.categoryRules={count:0,estimated:0};
+        reply({schemaVersion:1,categories:window.categoryConfig,rules:window.categoryRules});return;}
       if(m.type==='add-category'){
         window.addRequests=(window.addRequests||0)+1;
         const name=typeof m.name==='string'?m.name.trim():'';
@@ -108,6 +112,29 @@ test('类别管理弹窗新增、重名提示、删除确认与关闭后标签�
     await ui.getByRole('button',{name:'关闭管理',exact:true}).click();
     await ui.locator('#project').selectOption('g2');
     await expect(ui.getByTestId('selection-status')).toContainText('当前分类：按钮');
+
+    // 命名规律：默认没学过时为 0 条且清空按钮禁用；有规律时展示条数与预计命中，
+    // 清空后回退 0 条且不撑高面板。
+    await manager.click();
+    await expect(dialog).toBeVisible();
+    const rulesLine=ui.getByTestId('category-rules');
+    const clearRules=ui.getByTestId('clear-category-rules');
+    await expect(rulesLine).toHaveText('命名规律 0 条 · 预计命中 0 条');
+    await expect(clearRules).toBeDisabled();
+    await page.evaluate(()=>{
+      (window as any).categoryRules={count:3,estimated:5};
+      document.querySelector('iframe')!.contentWindow!.postMessage({pluginMessage:{type:'page-changed'}},'*');
+    });
+    await expect(rulesLine).toHaveText('命名规律 3 条 · 预计命中 5 条');
+    await expect(clearRules).toBeEnabled();
+    expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
+    await clearRules.click();
+    await expect(ui.locator('#category-notice')).toContainText('命名规律已清空');
+    await expect(rulesLine).toHaveText('命名规律 0 条 · 预计命中 0 条');
+    await expect(clearRules).toBeDisabled();
+    expect(await page.evaluate(()=>(window as any).clearRuleRequests)).toBe(1);
+    await ui.getByRole('button',{name:'关闭类别管理',exact:true}).click();
+    await expect(dialog).not.toBeVisible();
 
     // 打开弹窗：列出当前类别，未分类没有删除按钮。
     await manager.click();

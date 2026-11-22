@@ -65,7 +65,9 @@ export interface TrainingExport { schemaVersion: 1; projectId: string; samples: 
 export interface TrainingResult { schemaVersion: 1; count: number }
 // The page is the source of truth for categories; the UI only renders this
 // ordered readback and never keeps a second list of its own.
-export interface CategoryState { schemaVersion: 1; categories: Category[] }
+// `rules` 是页面学到的命名族规律摘要：条数与按规律能匹配到的未人工覆盖组件数。
+export interface CategoryRulesState { count: number; estimated: number }
+export interface CategoryState { schemaVersion: 1; categories: Category[]; rules: CategoryRulesState }
 // A category change reports the readback plus what happened to existing
 // components, so the UI can confirm the result without guessing.
 // `moved` 是本次操作影响的主组件数：新增为 0，删除为迁移到未分类的数，改名为分类与显示名同步的数。
@@ -105,6 +107,7 @@ export interface Platform {
   tidy(project: PublicProject): Promise<TidyResult>;
   selection(project: PublicProject): Promise<SelectionState>;
   categories(): Promise<CategoryState>;
+  clearCategoryRules(project: PublicProject): Promise<CategoryState>;
   addCategory(project: PublicProject, name: string): Promise<CategoryChange>;
   removeCategory(project: PublicProject, name: string): Promise<CategoryChange>;
   renameCategory(project: PublicProject, from: string, to: string): Promise<CategoryChange>;
@@ -286,6 +289,15 @@ export class Workflow {
       this.state.selection = await this.platform.selection(project);
     });
   }
+  // 清空当前页学到的命名规律：写空规则、不立即重学，分类回退通用规则。
+  async clearCategoryRules(): Promise<void> {
+    await this.task('清空命名规律',async () => {
+      const project = this.state.selected;
+      if(!project) throw new Error('请选择游戏');
+      await this.platform.clearCategoryRules(project);
+      this.state.notice = '已清空命名规律：分类回退通用规则，下次人工分类或类别变更时重新学习';
+    });
+  }
   async undoCategory(): Promise<void> {
     const undo = this.state.undo;
     await this.task('撤销分类',async () => {
@@ -393,3 +405,9 @@ export class Workflow {
   }
 }
 export { createFigmaPlatform } from './platform';
+// #21 学习/匹配的纯函数导出给真实数据校验脚本与跨包测试使用。
+export {
+  categoryRuleIndex, categoryTokens, classify, defaultCategories, learnCategoryRules, matchCategoryRule,
+  readCategoryRules, serializeCategoryRules
+} from './category';
+export type { CategoryRule, CategoryRuleIndex, CategoryRules, CategorySample } from './category';

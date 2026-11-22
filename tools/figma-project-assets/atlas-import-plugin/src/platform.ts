@@ -1,7 +1,9 @@
 import type { CategoryOverride, CategoryRestoreResult, CategoryResult, ImportPlan, ImportReport, LayoutUsage, Platform, Progress, PublicProject, Resource, Scan, SelectionState, Source, TidyResult, TrainingExport } from './api';
 import { Cancellation } from './api';
 import { categoryConfigKey, categoryIndex, categoryOr, classify, componentName, knownCategory, categoryNameProblem,
-  nextCategoryColor, readCategoryConfig, serializeCategories, unsortedCategory, type CategoryConfig, type CategoryName } from './category';
+  categoryRuleIndex, categoryRulesKey, learnCategoryRules, matchCategoryRule, nextCategoryColor, readCategoryConfig,
+  readCategoryRules, serializeCategories, serializeCategoryRules, unsortedCategory,
+  type CategoryConfig, type CategoryName, type CategoryRule, type CategoryRuleIndex, type CategorySample } from './category';
 import { createNineSlicePlan, type Margins } from '../../packages/nine-slice/src/index';
 import { applyNineSliceComponent, createNineSliceComponent } from '../../packages/nine-slice/src/figma';
 import {
@@ -208,6 +210,68 @@ function categoriesFor(node: BaseNode): CategoryConfig {
   const page = hostPage(node);
   return page ? pageCategories(page) : readCategoryConfig('').config;
 }
+// ---- 学到的命名族规律（#21）---------------------------------------------------
+// 规则存在资源页 `atlas.category.rules.v1`：有序、可回读，缺失时按现有标签惰性补算。
+type LearnedRules = {raw: string; rules: CategoryRule[]; index: CategoryRuleIndex};
+const rulesCache = new WeakMap<PageNode, LearnedRules>();
+// 学习/预计命中只读 `atlas.source` 里的散图原名，沿用导入时的损坏拦截语义。
+function storedFrameName(component: ComponentNode): string | undefined {
+  try {
+    const value = JSON.parse(component.getPluginData(sourceKey)) as {frameName?: unknown} | null;
+    const frameName = value?.frameName;
+    return typeof frameName === 'string' && frameName.length > 0 && frameName.length <= 256 ? frameName : undefined;
+  } catch { return undefined; }
+}
+// 训练信号只有人工覆盖：自动分类结果不会反过来成为规律依据。
+function learnedSample(component: ComponentNode, config: CategoryConfig): CategorySample | undefined {
+  const category = manualCategory(component, config);
+  const frameName = storedFrameName(component);
+  return category && frameName ? {frameName, category} : undefined;
+}
+function learnPageRules(page: PageNode): CategoryRule[] {
+  const config = pageCategories(page);
+  const samples: CategorySample[] = [];
+  for(const node of page.findAll(() => true)) {
+    if(node.type !== 'COMPONENT') continue;
+    const sample = learnedSample(node, config);
+    if(sample) samples.push(sample);
+  }
+  return learnCategoryRules(samples);
+}
+// 损坏/非法条目整份回退空规则并回写重建；缺失时按现有标签补算一次。
+// 与类别配置一样只在已绑定资源页写入，避免把空白页变成「非空未绑定页」。
+function rulesFor(page: PageNode): LearnedRules {
+  const raw = page.getPluginData(categoryRulesKey);
+  const cached = rulesCache.get(page);
+  if(cached && cached.raw === raw) return cached;
+  const read = readCategoryRules(raw);
+  const rules = !raw && !read.repaired ? learnPageRules(page) : read.rules;
+  if((read.repaired || (!raw && rules.length)) && page.getPluginData(bindingKey)) {
+    page.setPluginData(categoryRulesKey, serializeCategoryRules(rules));
+  }
+  const state = {raw:page.getPluginData(categoryRulesKey), rules, index:categoryRuleIndex(rules)};
+  rulesCache.set(page, state);
+  return state;
+}
+// 重算并落盘：人工标签或类别变化后调用。清空规律走单独入口，不会在这里被立即重学。
+function refreshCategoryRules(page: PageNode): void {
+  if(!page.getPluginData(bindingKey)) return;
+  const rules = learnPageRules(page);
+  const raw = serializeCategoryRules(rules);
+  page.setPluginData(categoryRulesKey, raw);
+  rulesCache.set(page, {raw, rules, index:categoryRuleIndex(rules)});
+}
+// 预计命中只统计当前页没有人工覆盖、且能被规律匹配到的组件。
+function estimatedHits(page: PageNode, config: CategoryConfig, index: CategoryRuleIndex): number {
+  if(!index.size) return 0;
+  let count = 0;
+  for(const node of page.findAll(() => true)) {
+    if(node.type !== 'COMPONENT' || manualCategory(node, config)) continue;
+    const frameName = storedFrameName(node);
+    if(frameName && matchCategoryRule(index, frameName, config)) count++;
+  }
+  return count;
+}
 function frameCategory(node: FrameNode, config: CategoryConfig): CategoryName | undefined {
   const raw = node.getPluginData(categoryKey);
   if(raw === 'unsorted') return knownCategory(config, unsortedCategory);
@@ -337,7 +401,11 @@ function applyCategoryJobs(api: Pick<PluginAPI,'createFrame'>, project: PublicPr
   } finally {
     restoreCategoryLayouts(layouts);
   }
-  for(const host of new Set(jobs.map(job => job.page))) refreshDisplayNames(host, project, messages);
+  for(const host of new Set(jobs.map(job => job.page))) {
+    refreshDisplayNames(host, project, messages);
+    // 人工标签变化后就地重学，下一次导入/恢复自动分类沿用同一份规则。
+    refreshCategoryRules(host);
+  }
   return {moved, done, failed};
 }
 function manualCategory(component: ComponentNode, config: CategoryConfig): CategoryName | undefined {
@@ -347,12 +415,17 @@ function currentCategory(component: ComponentNode, config: CategoryConfig): Cate
   const parent = component.parent;
   return parent && parent.type === 'FRAME' ? frameCategory(parent as FrameNode, config) : undefined;
 }
-function automaticCategory(component: ComponentNode, source: Source, config: CategoryConfig): CategoryName {
-  return categoryOr(config, classify({frameName:source.frameName,width:component.width,height:component.height}));
+function automaticCategory(component: ComponentNode, source: Source, config: CategoryConfig,
+  learned: CategoryRuleIndex): CategoryName {
+  return categoryOr(config, classify({frameName:source.frameName,width:component.width,height:component.height}, learned, config).category);
 }
-function plannedCategory(item: Candidate, config: CategoryConfig): CategoryName {
+// 优先级：人工覆盖 > 学到的命名族 > 通用前缀/关键词/尺寸。`learned` 标记供预览统计。
+function plannedCategory(item: Candidate, config: CategoryConfig,
+  learned: CategoryRuleIndex): {category: CategoryName; learned: boolean} {
   const manual = item.existing ? manualCategory(item.existing.component, config) : undefined;
-  return manual || categoryOr(config, classify({frameName:item.source.frameName,width:item.resource.width,height:item.resource.height}));
+  if(manual) return {category:manual, learned:false};
+  const classified = classify({frameName:item.source.frameName,width:item.resource.width,height:item.resource.height}, learned, config);
+  return {category:categoryOr(config, classified.category), learned:classified.learned};
 }
 function existingComponents(page: PageNode, project: PublicProject): { items: Existing[]; corrupt: string[] } {
   const result: Existing[] = [], corrupt: string[] = [];
@@ -511,14 +584,22 @@ function buildPlan(scan: Scan, page: PageNode): PlanState {
     if(!scan.complete) { plan.removalSuppressed = true; continue; }
     plan.removed++;
   }
+  const adds = [...scanItems.values()].filter(item => !groups.has(item.source.identity));
+  const updates = [...scanItems.values()].filter(item => {
+    const group = groups.get(item.source.identity);
+    return !!group && group.length === 1 && !group[0].blocked && !item.planned.blocked && !isUnchanged(group[0], item, item.planned);
+  });
+  // 预览先告知这批素材有多少条会被学习到的命名规律直接定类（0 时不加消息）。
+  const categoryConfig = pageCategories(page);
+  const learned = rulesFor(page).index;
+  const learnedCount = [...adds, ...updates]
+    .filter(item => plannedCategory(item, categoryConfig, learned).learned).length;
+  if(learnedCount) messages.add(`按学习命名规律预分类 ${learnedCount} 条`);
   plan.messages = [...messages];
   return {
     plan,
-    adds: [...scanItems.values()].filter(item => !groups.has(item.source.identity)),
-    updates: [...scanItems.values()].filter(item => {
-      const group = groups.get(item.source.identity);
-      return !!group && group.length === 1 && !group[0].blocked && !item.planned.blocked && !isUnchanged(group[0], item, item.planned);
-    }),
+    adds,
+    updates,
     removals: [...groups.values()].filter(group => group.length === 1 && !group[0].blocked &&
       !scanItems.has(group[0].source.identity) && scan.complete).map(group => group[0])
   };
@@ -894,7 +975,9 @@ function syncComparePage(page: PageNode, items: Map<string, CompareItem>, api: P
 }
 function readCategoryState(page: PageNode) {
   const config = pageCategories(page);
-  return {schemaVersion:1 as const, categories:config.categories.map(category => ({name:category.name, color:category.color}))};
+  const learned = rulesFor(page);
+  return {schemaVersion:1 as const, categories:config.categories.map(category => ({name:category.name, color:category.color})),
+    rules:{count:learned.rules.length, estimated:estimatedHits(page, config, learned.index)}};
 }
 // 类别管理只写已绑定的资源页：空白未绑定页写配置后会变成「非空未绑定页」，
 // 反而让后续导入被自己的守卫拒绝。
@@ -918,6 +1001,21 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
       if(repaired && page.getPluginData(bindingKey)) page.setPluginData(categoryConfigKey, serializeCategories(config));
       return readCategoryState(page);
     },
+    async clearCategoryRules(project) {
+      if(busy) throw new Error('任务执行中，请等待完成');
+      if(!project || typeof project.id !== 'string' || !project.name) throw new Error('项目信息无效');
+      const page = api.currentPage;
+      await loadPage(page);
+      assertEditableResourcePage(page, project);
+      busy = true;
+      try {
+        // 清空 = 写入空规则，不立即重学；下一次人工分类或类别变更才重新学习。
+        const raw = serializeCategoryRules([]);
+        page.setPluginData(categoryRulesKey, raw);
+        rulesCache.set(page, {raw, rules:[], index:categoryRuleIndex([])});
+        return readCategoryState(page);
+      } finally { busy = false; }
+    },
     async addCategory(project, name) {
       if(busy) throw new Error('任务执行中，请等待完成');
       if(!project || typeof project.id !== 'string' || !project.name) throw new Error('项目信息无效');
@@ -939,6 +1037,8 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         // 先建 Frame 再写配置：写配置后该 Frame 才被认领，失败时只回滚本次新建的空 Frame。
         ensureCategoryFrame(page, api, category, created);
         page.setPluginData(categoryConfigKey, serializeCategories(next));
+        // 新增类别本身不会产生新规则，但配置顺序变了，回读与预计命中要一起刷新。
+        refreshCategoryRules(page);
         return {...readCategoryState(page), moved:0, message:`已新增类别「${category}」`};
       } catch(error) {
         for(const frame of created) if(!frame.children.length) frame.remove();
@@ -993,6 +1093,8 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         const next: CategoryConfig = {schemaVersion:1,
           categories:config.categories.filter(existing => existing.name !== category)};
         page.setPluginData(categoryConfigKey, serializeCategories(next));
+        // 删除后重学：指向已删除类别的族随之失效，不会把组件重新引回该类别。
+        refreshCategoryRules(page);
         for(const frame of frames) {
           if(!frame.children.length) { frame.remove(); continue; }
           // 还留着非本工具对象：不删 Frame，只清除类别标记，使它不再被本工具认领。
@@ -1057,6 +1159,8 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
           existing.name === category ? {name, color:existing.color} : existing)};
         page.setPluginData(categoryConfigKey, serializeCategories(next));
         refreshDisplayNames(page, project, messages);
+        // 改名后重学：指向该类别的族同步改指新名称。
+        refreshCategoryRules(page);
         const notes = messages.length ? `；${messages.join('；')}` : '';
         return {...readCategoryState(page), moved:synced,
           message:`已将类别「${category}」改名为「${name}」${synced ? `，${synced} 个主组件的分类与显示名已同步` : ''}${notes}`};
@@ -1119,7 +1223,8 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         report.removalSuppressed = plan.removalSuppressed; report.messages = [...plan.messages];
         updatedIds = new Set(state.updates.map(item => item.existing!.component.id));
         const categoryConfig = pageCategories(page);
-        const categories = new Set([...state.adds,...state.updates].map(item => plannedCategory(item, categoryConfig)));
+        const learned = rulesFor(page).index;
+        const categories = new Set([...state.adds,...state.updates].map(item => plannedCategory(item, categoryConfig, learned).category));
         const categoryFrames = new Map<string,FrameNode>();
         for(const category of categories) categoryFrames.set(category,ensureCategoryFrame(page,api,category,createdFrames));
         // Bulk append into an active Auto Layout frame reflows the frame for
@@ -1151,7 +1256,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
           if(cancellation.cancelled) { report.cancelled = true; break; }
           if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已停止导入，已完成的项会保留');
           const component = item.existing?.component;
-          const category = plannedCategory(item, categoryConfig);
+          const category = plannedCategory(item, categoryConfig, learned).category;
           if(!component) { fail(describeCandidate(item,category),new Error('待更新组件已消失')); await step(); continue; }
           const snap = snapshot(component,item.existing!);
           try {
@@ -1173,7 +1278,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
           for(const item of state.adds) {
             if(cancellation.cancelled) { report.cancelled = true; break; }
             if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已停止导入，已完成的项会保留');
-            const category = plannedCategory(item, categoryConfig);
+            const category = plannedCategory(item, categoryConfig, learned).category;
             try {
               const image = api.createImage(api.base64Decode(item.resource.png));
               const target = ensureCategoryFrame(page,api,category,createdFrames);
@@ -1200,7 +1305,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         }
         const nameKeys = new Map<string,number>();
         for(const item of [...state.adds,...state.updates]) {
-          const key = plannedCategory(item, categoryConfig) + '\u0000' + item.source.frameName;
+          const key = plannedCategory(item, categoryConfig, learned).category + '\u0000' + item.source.frameName;
           nameKeys.set(key,(nameKeys.get(key)||0)+1);
         }
         // On a fresh page with unique category/name pairs, creation already
@@ -1250,7 +1355,8 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         const host = hostPage(component);
         if(!source || !host || !validate(host, project).valid) { ignored++; continue; }
         const manual = manualCategory(component, config);
-        const category = manual || currentCategory(component, config) || automaticCategory(component, source, config);
+        const category = manual || currentCategory(component, config) ||
+          automaticCategory(component, source, config, rulesFor(host).index);
         const member = {id:component.id,name:component.name,category,manual:!!manual,viaInstance};
         const previous = found.get(component.id);
         if(!previous) found.set(component.id, member);
@@ -1284,7 +1390,8 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
             continue;
           }
           const hostConfig = categoriesFor(host);
-          const target = category === 'auto' ? automaticCategory(component, source, hostConfig) : knownCategory(hostConfig, category);
+          const learnedRules = rulesFor(host).index;
+          const target = category === 'auto' ? automaticCategory(component, source, hostConfig, learnedRules) : knownCategory(hostConfig, category);
           if(!target) {
             messages.push(`${component.name}：该页面没有分类「${category}」，已跳过`);
             continue;
@@ -1292,7 +1399,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
           // 操作前的类别按与 selection 相同的优先级解析，并同时快照人工覆盖；
           // 撤销只按这份字符串写回，不会再次调用 classify。
           const manual = manualCategory(component, hostConfig);
-          const previousCategory = manual || currentCategory(component, hostConfig) || automaticCategory(component, source, hostConfig);
+          const previousCategory = manual || currentCategory(component, hostConfig) || automaticCategory(component, source, hostConfig, learnedRules);
           jobs.push({component, page:host, target, manualData:category === 'auto' ? '' : target,
             previousData:component.getPluginData(manualCategoryKey),
             previous:{id:component.id, category:previousCategory, manual:!!manual}});
