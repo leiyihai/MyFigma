@@ -38,12 +38,13 @@ function displayNames(page) {
   return page.children.flatMap(node => (node.children || []).map(child => child.name));
 }
 
-test('按名称、九宫格用法与尺寸比例归入分类 Frame，唯一主组件不复制', async () => {
+test('按名称与尺寸比例归入七类用途 Frame，九宫格不直接决定用途', async () => {
   const { f, workflow, page, root } = await setup();
   try {
-    // 名称规则：按钮 / 图标 / 背景 / 艺术字；九宫格底板由布局用法判定。
+    // 名称规则：按钮 / 进度条 / 底板 / 图标 / 背景 / 艺术字；九宫格只决定拉伸结构。
     await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
     await sprite(f, 'panel_base.json', 'panel_base', 40, 30);
+    await sprite(f, 'progress_hp.json', 'progress_hp', 160, 16);
     await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
     await sprite(f, 'bg_main.json', 'bg_main', 32, 32);
     await sprite(f, 'wordart_title.json', 'wordart_title', 32, 32);
@@ -68,7 +69,8 @@ test('按名称、九宫格用法与尺寸比例归入分类 Frame，唯一主�
         '图标/square_badge',
         '按钮/btn_ok',
         '按钮/wide_strip',
-        '九宫格底板/panel_base',
+        '底板/panel_base',
+        '进度条/progress_hp',
         '背景/bg_main',
         '背景/huge_scene',
         '艺术字/wordart_title'
@@ -76,10 +78,10 @@ test('按名称、九宫格用法与尺寸比例归入分类 Frame，唯一主�
     );
     // 每个分类 Frame 独立存在且带本工具标记；主组件只有一套，不创建对照页或副本。
     const components = page.findAll(node => node.type === 'COMPONENT');
-    assert.equal(components.length, 10);
-    assert.equal(page.children.filter(node => node.type === 'FRAME').length, 6);
+    assert.equal(components.length, 11);
+    assert.equal(page.children.filter(node => node.type === 'FRAME').length, 7);
     assert.equal(root.children.length, 1);
-    for (const category of ['按钮', '九宫格底板', '图标', '背景', '艺术字', '未分类']) {
+    for (const category of ['按钮', '底板', '图标', '背景', '艺术字', '进度条', '未分类']) {
       const frame = categoryFrame(page, category);
       assert.ok(frame, category);
       assert.equal(frame.getPluginData('atlas.category'), category);
@@ -164,7 +166,7 @@ test('同类同名补充来源信息消歧，重复导入复用分类 Frame 与�
   } finally { await f.cleanup(); }
 });
 
-test('尺寸比例或九宫格用法变化时移动主组件到新分类，保留身份、来源与实例关系统计', async () => {
+test('尺寸变化或九宫格用法出现时保留身份、来源、实例与九宫格结构', async () => {
   const { f, workflow, page } = await setup();
   try {
     await sprite(f, 'shape_thing.json', 'shape_thing', 1, 1);
@@ -195,8 +197,8 @@ test('尺寸比例或九宫格用法变化时移动主组件到新分类，保�
     await workflow.import();
     const slices = page.findAll(node => node.type === 'COMPONENT')[0];
     assert.equal(slices, component);
-    assert.equal(slices.name, '九宫格底板/shape_thing');
-    assert.equal(slices.parent.name, '九宫格底板');
+    assert.equal(slices.name, '图标/shape_thing');
+    assert.equal(slices.parent.name, '图标');
     assert.equal(slices.children.length, 9);
     assert.equal(JSON.parse(slices.getPluginData('atlas.source')).identity, identity);
     assert.equal(slices.children.find(child => child.name === '切片 2-2').constraints.horizontal, 'STRETCH');
@@ -209,6 +211,7 @@ test('重新整理按分类顺序摆放分类 Frame 消除重叠，不重建主�
   try {
     await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
     await sprite(f, 'panel_base.json', 'panel_base', 40, 30);
+    await sprite(f, 'progress_hp.json', 'progress_hp', 160, 16);
     await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
     await sprite(f, 'bg_main.json', 'bg_main', 32, 32);
     await writeLayout(layoutPath(f.project), [
@@ -218,7 +221,7 @@ test('重新整理按分类顺序摆放分类 Frame 消除重叠，不重建主�
     await workflow.import();
     const frames = page.children.filter(node => node.getPluginData('atlas.category'));
     const components = page.findAll(node => node.type === 'COMPONENT');
-    const panel = components.find(node => node.name === '九宫格底板/panel_base');
+    const panel = components.find(node => node.name === '底板/panel_base');
     const center = panel.children.find(child => child.name === '切片 2-2');
     const constraints = { ...center.constraints };
 
@@ -226,11 +229,11 @@ test('重新整理按分类顺序摆放分类 Frame 消除重叠，不重建主�
     for (const frame of frames) { frame.x = 120; frame.y = 30; }
     await workflow.tidy();
     assert.equal(workflow.state.tidy.schemaVersion, 1);
-    assert.equal(workflow.state.tidy.frames, 4);
-    assert.equal(workflow.state.tidy.moved, 4);
+    assert.equal(workflow.state.tidy.frames, 5);
+    assert.equal(workflow.state.tidy.moved, 5);
     assert.equal(workflow.state.phase, '就绪');
     const ordered = [...frames].sort((left, right) => left.x - right.x);
-    assert.deepEqual(ordered.map(frame => frame.name), ['按钮', '九宫格底板', '图标', '背景']);
+    assert.deepEqual(ordered.map(frame => frame.name), ['按钮', '底板', '图标', '背景', '进度条']);
     assert.ok(ordered.every(frame => frame.y === 0));
     for (let index = 1; index < ordered.length; index += 1) {
       assert.equal(ordered[index].x, ordered[index - 1].x + ordered[index - 1].width + 48);

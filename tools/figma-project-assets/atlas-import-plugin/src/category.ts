@@ -1,14 +1,15 @@
 // Purpose classification for imported main components. Rules are deliberately
 // deterministic: nine-slice usage, then original-name keywords, then a coarse
 // size ratio. Anything uncertain stays 未分类; no image recognition is involved.
-export const categories = ['按钮','九宫格底板','图标','背景','艺术字','未分类'] as const;
+export const categories = ['按钮','底板','图标','背景','艺术字','进度条','未分类'] as const;
 export type CategoryName = (typeof categories)[number];
 
-export type CategoryInput = { frameName: string; width: number; height: number; nineSlice: boolean };
+export type CategoryInput = { frameName: string; width: number; height: number };
 
 const nameRules: ReadonlyArray<{category: CategoryName; keywords: readonly string[]}> = [
-  {category:'九宫格底板', keywords:['九宫格','底板','nine']},
   {category:'按钮', keywords:['按钮','btn','button']},
+  {category:'进度条', keywords:['进度','progress','pbar','progressbar','loading']},
+  {category:'底板', keywords:['底板','面板','panel']},
   {category:'图标', keywords:['图标','icon']},
   {category:'背景', keywords:['背景','bg','background']},
   {category:'艺术字', keywords:['艺术字','wordart','artfont','font','title']}
@@ -23,9 +24,6 @@ export function isCategoryName(value: unknown): value is CategoryName {
 }
 
 export function classify(input: CategoryInput): CategoryName {
-  // An explicit nine-slice usage (or a retained nine-slice structure) is the
-  // strongest signal and wins over an incidental name keyword.
-  if(input.nineSlice) return '九宫格底板';
   const name = input.frameName.toLocaleLowerCase();
   for(const rule of nameRules) if(rule.keywords.some(keyword => name.includes(keyword))) return rule.category;
   const width = input.width, height = input.height;

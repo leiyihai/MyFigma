@@ -295,13 +295,11 @@ function componentPage(component: ComponentNode): PageNode | undefined {
   return node && node.type === 'PAGE' ? node as PageNode : undefined;
 }
 function automaticCategory(component: ComponentNode, source: Source): CategoryName {
-  return classify({frameName:source.frameName,width:component.width,height:component.height,
-    nineSlice:!!readNineSliceRecord(component)});
+  return classify({frameName:source.frameName,width:component.width,height:component.height});
 }
 function plannedCategory(item: Candidate): CategoryName {
   const manual = item.existing ? manualCategory(item.existing.component) : undefined;
-  return manual || classify({frameName:item.source.frameName,width:item.resource.width,height:item.resource.height,
-    nineSlice:item.planned.shape === 'slices'});
+  return manual || classify({frameName:item.source.frameName,width:item.resource.width,height:item.resource.height});
 }
 function existingComponents(page: PageNode, project: PublicProject): { items: Existing[]; corrupt: string[] } {
   const result: Existing[] = [], corrupt: string[] = [];
