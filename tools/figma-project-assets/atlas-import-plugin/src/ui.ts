@@ -37,6 +37,7 @@ const platform:Platform={
   categories:()=>rpc('categories',{}),
   addCategory:(project,name)=>rpc('add-category',{project,name}),
   removeCategory:(project,name)=>rpc('remove-category',{project,name}),
+  renameCategory:(project,from,to)=>rpc('rename-category',{project,from,to}),
   setCategory:(project,ids,category)=>rpc('set-category',{project,ids,category}),
   restoreCategory:(project,entries)=>rpc('restore-category',{project,entries}),
   trainingSamples:project=>rpc('training-samples',{project})
@@ -96,6 +97,9 @@ let tagSignature='';
 let lastCurrentTag='';
 // 类别管理弹窗的一次会话状态：删除确认与最近一次变更结果，关闭后不保留。
 let pendingCategoryRemoval='';
+let pendingCategoryRename='';
+// 改名输入框是静态节点：只在进入改名的类别变化时回写初值，不覆盖用户正在输入的内容。
+let renamePrefilledFor='';
 let categoryNotice='';
 function buildTags(container:HTMLElement) {
   container.replaceChildren();
@@ -180,9 +184,20 @@ async function classifyAs(category:string) {
   if(selection.members.every(member=>member.category===category))return;
   await workflow.setCategory(category);
 }
+function resetCategoryDraft() {
+  pendingCategoryRemoval='';
+  pendingCategoryRename='';
+  renamePrefilledFor='';
+}
 function renderCategoryManager(busy:boolean) {
   const names=categoryChoices.map(category=>category.name);
   if(pendingCategoryRemoval&&!names.includes(pendingCategoryRemoval))pendingCategoryRemoval='';
+  if(pendingCategoryRename&&!names.includes(pendingCategoryRename))resetCategoryDraft();
+  // 类别写回要经平台按当前项目校验页面绑定，所以新增/改名/删除需要已选游戏；
+  // 只用弹窗查看类别不需要连接助手。
+  const selected=!!workflow?.state.selected;
+  const locked=busy||!selected;
+  const lockedHint=busy?'任务执行中，请等待完成':'先选择游戏';
   const open=categoryManager.open;
   el('category-error').textContent=open?uiError:'';
   el('category-notice').textContent=categoryNotice;
@@ -198,17 +213,22 @@ function renderCategoryManager(busy:boolean) {
     row.append(dot,name);
     if(category.name===unsortedCategory) {
       const fallback=document.createElement('span');fallback.className='chip';fallback.textContent='兜底类别';
-      fallback.title='无法确定用途的组件归入此类别，因此不能删除。';
+      fallback.title='无法确定用途的组件归入此类别，因此不能删除也不能改名。';
       row.append(fallback);
     } else {
+      const rename=document.createElement('button');
+      rename.type='button';rename.className='quiet';rename.dataset.rename=category.name;rename.textContent='改名';
+      rename.title=lockedHint;
+      // 不用悬浮层：改名行紧跟在列表下方，浮层会盖住输入框。
+      rename.onclick=()=>{resetCategoryDraft();pendingCategoryRename=category.name;categoryNotice='';render();input('rename-value').focus();};
       const remove=document.createElement('button');
       remove.type='button';remove.className='quiet';remove.dataset.remove=category.name;remove.textContent='删除';
-      remove.title=`删除类别「${category.name}」：其中的主组件会先移到「未分类」，用户自有对象留在原处。`;
-      // 类别配置存在页面里，属本地操作：只要没有任务在跑就能删，不要求连接助手。
-      remove.disabled=busy;
+      remove.title=lockedHint;
       // 不用悬浮提示：删除后确认条紧贴在列表下方出现，浮层会盖住它；改用原生 title。
-      remove.onclick=()=>{pendingCategoryRemoval=category.name;categoryNotice='';render();};
-      row.append(remove);
+      remove.onclick=()=>{resetCategoryDraft();pendingCategoryRemoval=category.name;categoryNotice='';render();};
+      rename.disabled=locked;
+      remove.disabled=locked;
+      row.append(rename,remove);
     }
     list.append(row);
   }
@@ -226,7 +246,8 @@ function renderCategoryManager(busy:boolean) {
     const actions=document.createElement('span');actions.className='confirm-actions';
     const confirm=document.createElement('button');
     confirm.type='button';confirm.className='primary';confirm.textContent='删除类别';
-    confirm.disabled=busy||!workflow?.state.selected;
+    confirm.disabled=locked;
+    confirm.title=lockedHint;
     const removing=pendingCategoryRemoval;
     confirm.onclick=()=>void run(()=>deleteCategory(removing));
     const cancel=document.createElement('button');
@@ -238,10 +259,9 @@ function renderCategoryManager(busy:boolean) {
   const value=input('new-category').value.trim();
   const problem=categoryNameProblem(value);
   const duplicate=!!value&&names.includes(value);
-  const selected=!!workflow?.state.selected;
   const reason=busy?'任务执行中，请等待完成'
     :!selected?'先选择游戏':!value?'输入类别名称'
-    :problem||(duplicate?'已存在同名类别，请换一个名称':undefined);
+    :problem||(duplicate?`已存在类别「${value}」，请换一个名称`:undefined);
   el<HTMLButtonElement>('add-category').disabled=!!reason;
   const note=el('new-category-note');
   note.textContent=reason||'颜色按调色板顺序自动分配，已用颜色不会被改写';
@@ -250,21 +270,67 @@ function renderCategoryManager(busy:boolean) {
   const dot=el('new-category-dot');
   dot.style.setProperty('--tag',color);
   el('new-category-color').textContent=color;
+  renderCategoryRename(busy,locked,lockedHint);
+}
+// 改名行与删除确认一样固定在列表外：类别再多也不会被滚动区遮住。
+function renderCategoryRename(busy:boolean, locked:boolean, lockedHint:string) {
+  const bar=el('category-rename');
+  bar.hidden=!pendingCategoryRename;
+  if(!pendingCategoryRename) {delete bar.dataset.rename;return;}
+  bar.dataset.rename=pendingCategoryRename;
+  const field=input('rename-value');
+  if(renamePrefilledFor!==pendingCategoryRename) {renamePrefilledFor=pendingCategoryRename;field.value=pendingCategoryRename;}
+  const value=field.value.trim();
+  const problem=categoryNameProblem(value);
+  const same=value===pendingCategoryRename;
+  const duplicate=!!value&&categoryChoices.some(category=>category.name===value);
+  const reason=locked?lockedHint
+    :!value?'输入新名称'
+    :problem?problem
+    :same?'新名称与当前名称相同，无需改名'
+    :duplicate?`已存在类别「${value}」，请换一个名称`
+    :'';
+  el<HTMLButtonElement>('rename-save').disabled=!!reason;
+  // 提示行只在需要时占位：合法状态下不留空白，避免把类别列表挤短。
+  const note=el('rename-note');
+  note.hidden=!reason;
+  note.textContent=reason;
+  el('rename-dot').style.setProperty('--tag',
+    categoryChoices.find(category=>category.name===pendingCategoryRename)?.color||'#8b8d98');
+}
+// 类别写回经平台按项目校验页面绑定，没选项目就没有可写目标；直接报错，
+// 不要静默当成“操作成功但什么都没改”。
+function requireSelectedProject() {
+  if(!workflow?.state.selected) throw new Error('先选择游戏并连接资源助手，再管理类别');
+  return workflow;
 }
 async function addCategory() {
+  const current=requireSelectedProject();
   const name=input('new-category').value.trim();
   categoryNotice='';
-  const change=await workflow?.addCategory(name);
+  const change=await current.addCategory(name);
   input('new-category').value='';
   categoryNotice=change?.message||'';
   // 页面配置是唯一来源：变更后重新回读，标签区与本弹窗共用同一份列表。
   await loadCategories();
 }
 async function deleteCategory(name:string) {
+  const current=requireSelectedProject();
   categoryNotice='';
-  const change=await workflow?.removeCategory(name);
-  pendingCategoryRemoval='';
-  categoryNotice=change?.message||'';
+  const change=await current.removeCategory(name);
+  resetCategoryDraft();
+  categoryNotice=change.message;
+  await loadCategories();
+}
+async function renameCategory() {
+  const from=pendingCategoryRename;
+  if(!from)return;
+  const current=requireSelectedProject();
+  const to=input('rename-value').value.trim();
+  categoryNotice='';
+  const change=await current.renameCategory(from,to);
+  resetCategoryDraft();
+  categoryNotice=change.message;
   await loadCategories();
 }
 function render() {
@@ -481,15 +547,25 @@ el('details-open').onclick=()=>{if(!detailsDialog.open)detailsDialog.showModal()
 el('details-close').onclick=()=>detailsDialog.close();
 el('category-manager-open').onclick=()=>{
   if(workflow?.state.busy)return;
-  pendingCategoryRemoval='';categoryNotice='';uiError='';
+  resetCategoryDraft();categoryNotice='';uiError='';
   render();
   if(!categoryManager.open)categoryManager.showModal();
   input('new-category').focus();
 };
 el('category-manager-close').onclick=()=>{if(!workflow?.state.busy)categoryManager.close();};
-categoryManager.addEventListener('cancel',event=>{if(workflow?.state.busy)event.preventDefault();else{pendingCategoryRemoval='';categoryNotice='';}});
+categoryManager.addEventListener('cancel',event=>{if(workflow?.state.busy){event.preventDefault();return;}
+  resetCategoryDraft();});
 input('new-category').oninput=()=>render();
 el('add-category').onclick=()=>void run(addCategory);
+el('rename-save').onclick=()=>void run(renameCategory);
+el('rename-cancel').onclick=()=>{resetCategoryDraft();render();};
+input('rename-value').oninput=()=>render();
+input('rename-value').addEventListener('keydown',event=>{
+  if(event.key!=='Enter')return;
+  if(el<HTMLButtonElement>('rename-save').disabled)return;
+  event.preventDefault();
+  void run(renameCategory);
+});
 pairingDialog.addEventListener('cancel',event=>{if(workflow?.state.busy)event.preventDefault();});
 el('manage').onclick=()=>dialog.showModal();
 el('close').onclick=()=>{if(!workflow?.state.busy)dialog.close();};

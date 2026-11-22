@@ -23,7 +23,7 @@ function validPairing(value:unknown):value is Pairing {
     && typeof pairing.token==='string' && /^[a-f0-9]{64}$/.test(pairing.token);
 }
 let active: Cancellation | undefined;
-figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicProject;scan:Scan;pairing?:Pairing;ids?:string[];category?:string;name?:string;entries?:CategoryOverride[];path?:string})=>{
+figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicProject;scan:Scan;pairing?:Pairing;ids?:string[];category?:string;name?:string;from?:string;to?:string;entries?:CategoryOverride[];path?:string})=>{
   if(!message)return;
   // Cancellation is a control message, not a task reply; it may arrive while import is running.
   if(message.type==='cancel') {active?.cancel(); if(Number.isInteger(message.requestId)) figma.ui.postMessage({type:'result',requestId:message.requestId,result:true}); return;}
@@ -49,6 +49,11 @@ figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicPro
     else if(message.type==='remove-category') {
       if(typeof message.name!=='string') throw new Error('类别名称无效');
       reply(await platform.removeCategory(message.project,message.name));
+    }
+    else if(message.type==='rename-category') {
+      // 两个名称都必须是文本，交给平台做名称形状与唯一性校验。
+      if(typeof message.from!=='string' || typeof message.to!=='string') throw new Error('类别名称无效');
+      reply(await platform.renameCategory(message.project,message.from,message.to));
     }
     else if(message.type==='training-samples')reply(await platform.trainingSamples(message.project));
     else if(message.type==='set-category') {

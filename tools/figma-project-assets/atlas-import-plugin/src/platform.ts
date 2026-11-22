@@ -1011,6 +1011,68 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         busy = false;
       }
     },
+    async renameCategory(project, from, to) {
+      if(busy) throw new Error('任务执行中，请等待完成');
+      if(!project || typeof project.id !== 'string' || !project.name) throw new Error('项目信息无效');
+      const page = api.currentPage;
+      await loadPage(page);
+      assertEditableResourcePage(page, project);
+      const config = pageCategories(page);
+      const category = knownCategory(config, from);
+      if(!category) throw new Error(`当前页没有类别「${typeof from === 'string' ? from : ''}」`);
+      // 「未分类」是兜底类别：名称在代码与旧数据里都是约定值，改名会弄丢兜底桶。
+      if(category === unsortedCategory) throw new Error('「未分类」是兜底类别，不能改名');
+      const problem = categoryNameProblem(to);
+      if(problem) throw new Error(problem);
+      const name = (to as string).trim();
+      if(name === category) throw new Error('新名称与当前名称相同，无需改名');
+      if(config.categories.some(existing => existing.name === name)) throw new Error(`已存在类别「${name}」，请换一个名称`);
+      const frames = managedCategoryFrames(page).filter(frame => frameCategory(frame, config) === category);
+      // 改名只动名字：Frame 名与类别标记、人工覆盖、派生显示名一起换，身份与实例不动。
+      // 回滚快照要记下每个 Frame 原有的名字与标记（用户可能手改过 Frame 名），
+      // 以及页面配置原文，失败时按原样写回。
+      const frameSnapshots = frames.map(frame => ({frame, name:frame.name, marker:frame.getPluginData(categoryKey)}));
+      const overrides: Array<{node:SceneNode;previous:string}> = [];
+      const previousConfig = page.getPluginData(categoryConfigKey);
+      const messages: string[] = [];
+      let layouts: CategoryLayout[] = [];
+      let synced = 0;
+      busy = true;
+      try {
+        layouts = pauseCategoryLayouts(frames);
+        for(const frame of frames) {
+          frame.name = name;
+          frame.setPluginData(categoryKey, name);
+          for(const child of frame.children) {
+            if(!carriesToolRecord(child)) continue;
+            synced++;
+            if(child.getPluginData(manualCategoryKey) !== category) continue;
+            overrides.push({node:child as SceneNode, previous:category});
+            child.setPluginData(manualCategoryKey, name);
+          }
+        }
+        // 显示名由父 Frame 的类别标记推导，所以必须先写配置让新名称被认领，再刷新显示名；
+        // 写配置之后的任何失败都要把配置原文一并回滚。
+        const next: CategoryConfig = {schemaVersion:1, categories:config.categories.map(existing =>
+          existing.name === category ? {name, color:existing.color} : existing)};
+        page.setPluginData(categoryConfigKey, serializeCategories(next));
+        refreshDisplayNames(page, project, messages);
+        const notes = messages.length ? `；${messages.join('；')}` : '';
+        return {...readCategoryState(page), moved:synced,
+          message:`已将类别「${category}」改名为「${name}」${synced ? `，${synced} 个主组件的分类与显示名已同步` : ''}${notes}`};
+      } catch(error) {
+        // 失败时把配置、Frame 名与标记、人工覆盖都改回原值，不留下半改的页面。
+        for(const item of overrides) { try { item.node.setPluginData(manualCategoryKey, item.previous); } catch { /* 保留可见错误 */ } }
+        for(const snapshot of frameSnapshots) {
+          try { snapshot.frame.name = snapshot.name; snapshot.frame.setPluginData(categoryKey, snapshot.marker); } catch { /* 保留可见错误 */ }
+        }
+        try { page.setPluginData(categoryConfigKey, previousConfig); } catch { /* 保留可见错误 */ }
+        throw error;
+      } finally {
+        restoreCategoryLayouts(layouts);
+        busy = false;
+      }
+    },
     async preview(scan) {
       if(busy) throw new Error('导入任务正在执行');
       const page = api.currentPage;

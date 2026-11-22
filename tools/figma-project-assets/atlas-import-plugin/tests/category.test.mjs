@@ -1025,6 +1025,120 @@ test('未绑定页面不能新增类别，绑定其他项目的页面也不写�
   } finally { await f.cleanup(); }
 });
 
+// #16 补充：类别管理支持改名。改名只换名称，不换组件身份与实例关系。
+test('重命名类别同步配置、分类 Frame、人工覆盖与显示名，来源与实例不变', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    await platform.addCategory(project16, '特效');
+    const icon = page.findAll(node => node.type === 'COMPONENT' && node.name === '图标/icon_coin')[0];
+    const button = page.findAll(node => node.type === 'COMPONENT' && node.name === '按钮/btn_ok')[0];
+    page.selection = [icon, button];
+    await workflow.loadSelection();
+    await workflow.setCategory('特效');
+    const instance = icon.createInstance();
+    page.appendChild(instance);
+    const iconSource = icon.getPluginData('atlas.source');
+    const before = (await platform.categories()).categories;
+
+    const renamed = await platform.renameCategory(project16, '特效', '特效字');
+    // 配置同名换名：顺序与颜色不变，且真的写进了页面。
+    assert.deepEqual(renamed.categories.map(category => category.name),
+      before.map(category => category.name === '特效' ? '特效字' : category.name));
+    assert.deepEqual(renamed.categories.find(category => category.name === '特效字'),
+      { name: '特效字', color: before.find(category => category.name === '特效').color });
+    assert.deepEqual(JSON.parse(page.getPluginData('atlas.categories.v1')).categories, renamed.categories);
+    assert.deepEqual((await platform.categories()).categories, renamed.categories);
+    // 分类 Frame 原地改名并更新类别标记，没有留下旧名称的空 Frame。
+    assert.equal(categoryFrame(page, '特效'), undefined);
+    const frame = categoryFrame(page, '特效字');
+    assert.ok(frame);
+    assert.equal(frame.name, '特效字');
+    assert.equal(frame.getPluginData('atlas.category'), '特效字');
+    // 组件仍在原 Frame，显示名与人工覆盖一起同步。
+    assert.equal(icon.parent, frame);
+    assert.equal(button.parent, frame);
+    assert.equal(icon.name, '特效字/icon_coin');
+    assert.equal(button.name, '特效字/btn_ok');
+    assert.equal(button.getPluginData('atlas.category.manual'), '特效字');
+    assert.equal(renamed.moved, 2);
+    assert.match(renamed.message, /已将类别「特效」改名为「特效字」/);
+    // 来源身份、实例关系与组件数量不变。
+    assert.equal(icon.getPluginData('atlas.source'), iconSource);
+    assert.equal(await instance.getMainComponentAsync(), icon);
+    assert.equal(page.findAll(node => node.type === 'INSTANCE').length, 1);
+    assert.equal(page.findAll(node => node.type === 'COMPONENT').length, 2);
+    // 标签与分类读回使用新名称，旧名称不再可应用。
+    page.selection = [button];
+    await workflow.loadSelection();
+    assert.equal(workflow.state.selection.members[0].category, '特效字');
+    assert.equal(workflow.state.selection.members[0].manual, true);
+    await assert.rejects(() => workflow.setCategory('特效'), /分类无效/);
+    await workflow.setCategory('特效字');
+    assert.equal(button.getPluginData('atlas.category.manual'), '特效字');
+  } finally { await f.cleanup(); }
+});
+
+test('重命名类别拒绝未分类、未知、重名、相同与非法名称，失败不改页面', async () => {
+  const { f, platform, page } = await setup();
+  try {
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    const workflow = new api.Workflow(new api.HelperClient(f.base, f.token), platform);
+    await workflow.connect();
+    await workflow.saveProject({ id: 'g8', name: '分类测试', path: f.project, maintained: true });
+    await workflow.selectProject('g8');
+    await workflow.scan();
+    await workflow.import();
+    await platform.addCategory(project16, '特效');
+    const written = page.getPluginData('atlas.categories.v1');
+    // 「未分类」是兜底类别，名称在代码与旧数据里是约定值，不能改名。
+    await assert.rejects(() => platform.renameCategory(project16, '未分类', '其它'), /兜底类别，不能改名/);
+    await assert.rejects(() => platform.renameCategory(project16, '不存在的类别', '特效字'), /当前页没有类别/);
+    await assert.rejects(() => platform.renameCategory(project16, '特效', '按钮'), /已存在类别「按钮」/);
+    await assert.rejects(() => platform.renameCategory(project16, '特效', '  按钮  '), /已存在类别「按钮」/);
+    await assert.rejects(() => platform.renameCategory(project16, '特效', ' 特效 '), /新名称与当前名称相同/);
+    await assert.rejects(() => platform.renameCategory(project16, '特效', ''), /类别名称不能为空/);
+    await assert.rejects(() => platform.renameCategory(project16, '特效', 'a/b'), /不能包含/);
+    await assert.rejects(() => platform.renameCategory(project16, '特效', 'x'.repeat(25)), /最多 24 个字符/);
+    await assert.rejects(() => platform.renameCategory(project16, '特效', 42), /类别名称必须是文本/);
+    // 失败后配置、Frame 名与标签回读都没有变化。
+    assert.equal(page.getPluginData('atlas.categories.v1'), written);
+    assert.equal(categoryFrame(page, '特效').name, '特效');
+    assert.deepEqual((await platform.categories()).categories, JSON.parse(written).categories);
+  } finally { await f.cleanup(); }
+});
+
+test('重命名类别后撤销快照跟着指向新名称，撤销按新类别恢复', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    await workflow.scan();
+    await workflow.import();
+    const icon = page.findAll(node => node.type === 'COMPONENT' && node.name === '图标/icon_coin')[0];
+    page.selection = [icon];
+    await workflow.loadSelection();
+    // 两次人工分类：最近的撤销快照记录操作前类别「艺术字」与人工覆盖状态。
+    await workflow.setCategory('艺术字');
+    await workflow.setCategory('背景');
+    assert.equal(workflow.state.undo.entries[0].category, '艺术字');
+
+    const renamed = await workflow.renameCategory('艺术字', '艺术标题');
+    assert.match(renamed.message, /改名为「艺术标题」/);
+    // 撤销快照按名称记录：改名后旧快照必须指向新名称，否则恢复会被当作未知类别跳过。
+    assert.equal(workflow.state.undo.entries[0].category, '艺术标题');
+
+    await workflow.undoCategory();
+    // 恢复不重跑规则，也不落在已不存在的旧名称上。
+    assert.equal(icon.parent, categoryFrame(page, '艺术标题'));
+    assert.equal(icon.name, '艺术标题/icon_coin');
+    assert.equal(icon.getPluginData('atlas.category.manual'), '艺术标题');
+    assert.equal(workflow.state.undo, undefined);
+  } finally { await f.cleanup(); }
+});
+
 test('删除类别先把主组件与实例关系安全移到未分类，再删配置与分类 Frame', async () => {
   const { f, workflow, platform, page } = await setup();
   try {

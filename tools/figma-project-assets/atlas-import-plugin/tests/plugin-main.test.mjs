@@ -115,6 +115,17 @@ test('built main script loads in an import-rejecting sandbox, stores pairing loc
     assert.equal(removedCategory.result.moved, 0);
     await figma.ui.onmessage({ type: 'remove-category', requestId: 25, project: { id: 'g2', name: '测试游戏' }, name: '未分类' });
     assert.match(replies.find(reply => reply.requestId === 25).error, /不能删除/);
+    // 改名走同一主线程入口：未分类拒绕，成功后分类 Frame 与配置一起换名。
+    await figma.ui.onmessage({ type: 'rename-category', requestId: 27, project: { id: 'g2', name: '测试游戏' }, from: '未分类', to: '其它' });
+    assert.match(replies.find(reply => reply.requestId === 27).error, /不能改名/);
+    await figma.ui.onmessage({ type: 'add-category', requestId: 28, project: { id: 'g2', name: '测试游戏' }, name: '特效' });
+    await figma.ui.onmessage({ type: 'rename-category', requestId: 29, project: { id: 'g2', name: '测试游戏' }, from: '特效', to: '特效字' });
+    const renamedCategory = replies.find(reply => reply.requestId === 29);
+    assert.equal(renamedCategory.error, undefined);
+    assert.equal(renamedCategory.result.categories.at(-1).name, '特效字');
+    assert.equal(page.children.at(-1).name, '特效字');
+    await figma.ui.onmessage({ type: 'rename-category', requestId: 30, project: { id: 'g2', name: '测试游戏' }, from: '特效字' });
+    assert.match(replies.find(reply => reply.requestId === 30).error, /类别名称无效/);
     await figma.ui.onmessage({ type: 'compare', requestId: 3, project: { id: 'g2', name: '测试游戏' } });
     const compared = replies.find(reply => reply.requestId === 3);
     assert.equal(compared.error, undefined);

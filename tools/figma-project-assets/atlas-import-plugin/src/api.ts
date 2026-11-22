@@ -68,6 +68,7 @@ export interface TrainingResult { schemaVersion: 1; count: number }
 export interface CategoryState { schemaVersion: 1; categories: Category[] }
 // A category change reports the readback plus what happened to existing
 // components, so the UI can confirm the result without guessing.
+// `moved` 是本次操作影响的主组件数：新增为 0，删除为迁移到未分类的数，改名为分类与显示名同步的数。
 export interface CategoryChange extends CategoryState { moved: number; message: string }
 // Import is not one atomic transaction: every item commits or is isolated and
 // reported, so a later incremental run can fill only what is still missing.
@@ -106,6 +107,7 @@ export interface Platform {
   categories(): Promise<CategoryState>;
   addCategory(project: PublicProject, name: string): Promise<CategoryChange>;
   removeCategory(project: PublicProject, name: string): Promise<CategoryChange>;
+  renameCategory(project: PublicProject, from: string, to: string): Promise<CategoryChange>;
   setCategory(project: PublicProject, ids: string[], category: CategoryName | 'auto'): Promise<CategoryResult>;
   restoreCategory(project: PublicProject, entries: CategoryOverride[]): Promise<CategoryRestoreResult>;
   trainingSamples(project: PublicProject): Promise<TrainingExport>;
@@ -251,6 +253,20 @@ export class Workflow {
   }
   async removeCategory(name: string): Promise<CategoryChange> {
     return this.categoryChange('删除类别',name,(project,value) => this.platform.removeCategory(project,value));
+  }
+  async renameCategory(from: string, to: string): Promise<CategoryChange> {
+    const change = await this.categoryChange('重命名类别',to,
+      (project,value) => this.platform.renameCategory(project,from,value));
+    // 撤销快照按类别名记录：改名后旧快照要指向新名称，否则撤销会被当作未知类别跳过。
+    // 走到这里平台已经接受了名称，所以 `to` 必为字符串。
+    this.retargetUndo(from,to.trim());
+    return change;
+  }
+  private retargetUndo(from: string, to: string): void {
+    const undo = this.state.undo;
+    if(!undo) return;
+    this.state.undo = {schemaVersion:1,
+      entries:undo.entries.map(entry => entry.category === from ? {...entry, category:to} : entry)};
   }
   async setCategory(category: CategoryName): Promise<void> {
     const selection = this.state.selection;
