@@ -9,7 +9,7 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
   const f=await fixture();
   const server=createServer(async(req,res)=>{
     if(req.url==='/ui.html') {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(await readFile(new URL('../../dist/ui.html',import.meta.url)));}
-    else {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:350px;height:540px"></iframe>
+    else {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:350px;height:600px"></iframe>
     <script>
     window.imported=null;window.pairing=null;
     addEventListener('message',e=>{
@@ -28,7 +28,7 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
         {name:'背景',color:'#3e63dd'},{name:'艺术字',color:'#d6409f'},{name:'进度条',color:'#30a46c'},
         {name:'未分类',color:'#8b8d98'}]});return;}
       if(m.type==='selection'){const members=window.selectionMembers||[];reply({schemaVersion:1,members,ignored:window.selectionIgnored||0,mixed:new Set(members.map(x=>x.category)).size>1});return;}
-      if(m.type==='set-category'){window.categoryRequest=m;const members=(window.categoryMembers||window.selectionMembers||[]).map(x=>({...x,category:m.category,manual:m.category!=='auto'}));window.selectionMembers=members;reply({schemaVersion:1,action:m.category==='auto'?'auto':'manual',updated:members.length,moved:members.length,messages:[]});return;}
+      if(m.type==='set-category'){window.categoryRequest=m;window.categoryRequests=(window.categoryRequests||0)+1;const members=(window.categoryMembers||window.selectionMembers||[]).map(x=>({...x,category:m.category==='auto'?'未分类':m.category,manual:m.category!=='auto'}));window.selectionMembers=members;reply({schemaVersion:1,action:m.category==='auto'?'auto':'manual',updated:members.length,moved:members.length,messages:[]});return;}
       if(m.type==='validate')reply(window.currentPageInvalid?{valid:false,message:'非空且未绑定页面不可导入'}:{valid:true,message:'空白页可导入'});
       if(m.type==='preview'){window.plan={schemaVersion:1,added:m.scan.resources.length,updated:0,removed:0,unchanged:0,blocked:0,removalSuppressed:false,messages:[]};reply(window.plan);}
       if(m.type==='import'){window.imported=m.scan;e.source.postMessage({pluginMessage:{type:'progress',progress:{done:1,total:2}}},'*');window.finish=cancelled=>reply({...window.plan,applied:{added:cancelled?1:window.plan.added,updated:0,removed:0},failures:[],cancelled:!!cancelled});}
@@ -165,7 +165,23 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
     await expect(ui.getByTestId('action-result')).toContainText('移动 2 个');
     await expect(ui.locator('#phase')).toHaveText('就绪');
     expect(await page.evaluate(()=>(window as any).tidyCalls)).toBe(1);
-    // Manual category controls use the live Figma selection; mixed choices stay explicit.
+    // 分类区是页面配置回读的彩色标签，不是下拉框；点击即分类，没有应用按钮。
+    const tags=ui.locator('#category-tags');
+    const tag=(name:string)=>ui.locator(`#category-tags button[data-category="${name}"]`);
+    await expect(tags).toBeVisible();
+    await expect(ui.locator('#category-tags button')).toHaveCount(8);
+    await expect(tag('按钮')).toContainText('按钮');
+    await expect(tag('未分类')).toContainText('未分类');
+    await expect(ui.getByRole('button',{name:'应用',exact:true})).toHaveCount(0);
+    await expect(ui.locator('#category-select')).toHaveCount(0);
+    // 面板固定 350×600（showUI 尺寸由主线程测试断言），UI 恰好填满且不整体滚动。
+    expect(await ui.locator('body').evaluate(el=>[el.clientWidth,el.clientHeight])).toEqual([350,600]);
+    // 颜色来自页面配置（不是写死）：每个标签有稳定色点，同时有名称，选中态不只靠颜色。
+    expect(await ui.locator('#category-tags .tag-dot').evaluateAll(nodes=>nodes.map(node=>getComputedStyle(node).backgroundColor)))
+      .toEqual(['rgb(229, 72, 77)','rgb(142, 78, 198)','rgb(242, 169, 0)','rgb(62, 99, 221)','rgb(214, 64, 159)','rgb(48, 164, 108)','rgb(139, 141, 152)']);
+    // 没有选中本工具主组件时整组标签禁用。
+    await expect(tag('按钮')).toBeDisabled();
+    await expect(tags).toHaveAttribute('data-disabled','true');
     await page.evaluate(()=>{
       const w=window as any;
       w.selectionMembers=[
@@ -178,23 +194,65 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
     await expect(ui.getByTestId('selection-status')).toContainText('混合分类：按钮 / 图标');
     await expect(ui.getByTestId('selection-status')).toHaveAttribute('title', /已从 1 个实例定位主组件/);
     await expect(ui.getByTestId('selection-status')).toHaveAttribute('title', /已忽略 1 个非本工具对象/);
-    await expect(ui.getByRole('button',{name:'应用',exact:true})).toBeDisabled();
-    await ui.locator('#category-select').selectOption('艺术字');
-    await expect(ui.getByRole('button',{name:'应用',exact:true})).toBeEnabled();
-    await ui.getByRole('button',{name:'应用',exact:true}).click();
+    // 混合选择明确显示混合，且不高亮任何单一类别。
+    await expect(tags).toHaveAttribute('data-mixed','true');
+    await expect(ui.locator('#category-tags button[aria-pressed="true"]')).toHaveCount(0);
+    await expect(tag('按钮')).toBeEnabled();
+    await tag('艺术字').click();
     await expect(ui.getByTestId('selection-status')).toContainText('当前分类：艺术字');
+    await expect(tag('艺术字')).toHaveAttribute('aria-pressed','true');
+    await expect(tag('艺术字')).toContainText('✓');
+    await expect(tags).toHaveAttribute('data-mixed','false');
     expect(await page.evaluate(()=>(window as any).categoryRequest.category)).toBe('艺术字');
     expect(await page.evaluate(()=>(window as any).categoryRequest.ids.length)).toBe(2);
+    expect(await page.evaluate(()=>(window as any).categoryRequests)).toBe(1);
+    // 再点已高亮的标签不发起分类请求，也不改写组件。
+    await tag('艺术字').click();
+    await expect(ui.getByTestId('selection-status')).toContainText('当前分类：艺术字');
+    expect(await page.evaluate(()=>(window as any).categoryRequests)).toBe(1);
+    // 恢复自动分类仍可达：清除人工覆盖，按当前规则重新归类。
+    await expect(ui.locator('#restore-auto')).toBeEnabled();
+    await ui.locator('#restore-auto').click();
+    await expect.poll(()=>page.evaluate(()=>(window as any).categoryRequest.category)).toBe('auto');
+    await expect(ui.getByTestId('selection-status')).toContainText('当前分类：未分类');
+    await expect(tag('未分类')).toHaveAttribute('aria-pressed','true');
+    await expect(tag('艺术字')).toHaveAttribute('aria-pressed','false');
     expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
-    // The option list is the page configuration read back over RPC, not a hardcoded set.
+    await expect(ui.locator('.status-card')).toBeInViewport();
+    await expect(ui.locator('.app-footer')).toBeInViewport();
+    // 类别列表仍来自页面配置回读，不是写死的七类。
     await page.evaluate(()=>{
       const w=window as any;
       w.categoryConfig=[{name:'特殊按钮',color:'#0091ff'},{name:'未分类',color:'#8b8d98'}];
       document.querySelector('iframe')!.contentWindow!.postMessage({pluginMessage:{type:'page-changed'}},'*');
     });
-    await expect(ui.locator('#category-select option[value="特殊按钮"]')).toHaveCount(1);
-    await expect(ui.locator('#category-select option[value="按钮"]')).toHaveCount(0);
+    await expect(ui.locator('#category-tags button')).toHaveCount(3);
+    await expect(tag('特殊按钮')).toContainText('特殊按钮');
+    await expect(tag('按钮')).toHaveCount(0);
     expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
+    // 类别多到超过四行时，只有标签区内部滚动，主面板不滚动也不被裁掉。
+    await page.evaluate(()=>{
+      const w=window as any;
+      w.categoryConfig=[...Array(20)].map((_,index)=>({name:`活动道具${String.fromCharCode(65+index)}`,color:'#0091ff'}));
+      w.categoryConfig.push({name:'未分类',color:'#8b8d98'});
+      document.querySelector('iframe')!.contentWindow!.postMessage({pluginMessage:{type:'page-changed'}},'*');
+    });
+    await expect(ui.locator('#category-tags button')).toHaveCount(22);
+    const scrollBox=await tags.evaluate(node=>{
+      const style=getComputedStyle(node);
+      const button=node.querySelector('button')!;
+      return {overflowY:style.overflowY,scrollHeight:node.scrollHeight,clientHeight:node.clientHeight,
+        rowHeight:button.getBoundingClientRect().height,gap:parseFloat(style.rowGap||style.gap||'0')};
+    });
+    expect(['auto','scroll'].includes(scrollBox.overflowY)).toBe(true);
+    expect(scrollBox.scrollHeight).toBeGreaterThan(scrollBox.clientHeight);
+    expect(scrollBox.clientHeight).toBeLessThanOrEqual(Math.round(4*(scrollBox.rowHeight+scrollBox.gap)-scrollBox.gap+1));
+    expect(scrollBox.clientHeight).toBeGreaterThanOrEqual(Math.round(3*(scrollBox.rowHeight+scrollBox.gap)-scrollBox.gap));
+    await tags.evaluate(node=>{node.scrollTop=node.scrollHeight;});
+    expect(await tags.evaluate(node=>node.scrollTop>0)).toBe(true);
+    expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
+    await expect(ui.locator('.status-card')).toBeInViewport();
+    await expect(ui.locator('.app-footer')).toBeInViewport();
     let releaseFailedScan!:()=>void;
     let failedScanStarted!:()=>void;
     const failedHeld=new Promise<void>(resolve=>{releaseFailedScan=resolve;});

@@ -204,6 +204,9 @@ export class Workflow {
     this.changed();
   }
   async setCategory(category: string): Promise<void> {
+    const selection = this.state.selection;
+    // 点击已高亮的当前类别是空操作：不移动组件，也不写人工覆盖。
+    if(selection?.members.length && selection.members.every(member => member.category === category)) return;
     await this.task('应用分类',async () => {
       const project = this.state.selected;
       const selection = this.state.selection;

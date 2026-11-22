@@ -1,5 +1,5 @@
 import {HelperAuthError,HelperClient,Workflow} from './api';
-import type {CategoryState,Platform,Progress,Project} from './api';
+import type {CategoryState,Platform,Progress,Project,SelectionState} from './api';
 import {defaultCategories} from './category';
 import type {Category} from './category';
 type Pairing={schemaVersion:1;address:string;token:string};
@@ -58,8 +58,8 @@ function placeTooltip(wrap:HTMLElement) {
   if(top<margin)top=Math.min(innerHeight-height-margin,anchor.bottom+6);
   tip.style.left=`${left}px`;tip.style.top=`${top}px`;
 }
-function tooltip(button:HTMLButtonElement) {
-  const text=button.title;if(!text)return;
+function tooltip(button:HTMLButtonElement):HTMLElement {
+  const text=button.title;if(!text)return button;
   button.removeAttribute('title');
   const wrap=document.createElement('span');wrap.className='action';
   button.replaceWith(wrap);wrap.append(button);
@@ -68,6 +68,7 @@ function tooltip(button:HTMLButtonElement) {
   wrap.addEventListener('focusin',()=>placeTooltip(wrap));
   const hide=()=>{tip.style.display='none';};
   wrap.addEventListener('mouseleave',hide);wrap.addEventListener('focusout',hide);
+  return wrap;
 }
 document.querySelectorAll<HTMLButtonElement>('button').forEach(tooltip);
 document.querySelectorAll<HTMLElement>('.help-wrap').forEach(wrap=>{
@@ -76,6 +77,92 @@ document.querySelectorAll<HTMLElement>('.help-wrap').forEach(wrap=>{
   const tip=wrap.querySelector<HTMLElement>('.tooltip');
   if(tip){const hide=()=>{tip.style.display='none';};wrap.addEventListener('mouseleave',hide);wrap.addEventListener('focusout',hide);}
 });
+// 类别标签：页面配置回读的顺序与颜色平铺，名称与选中态不只依赖颜色。
+// 标签节点只在配置变化时重建，选中/混合/禁用只更新属性，保留键盘焦点。
+let tagSignature='';
+let lastCurrentTag='';
+function buildTags(container:HTMLElement) {
+  container.replaceChildren();
+  for(const category of categoryChoices) {
+    const button=document.createElement('button');
+    button.type='button';
+    button.className='category-tag';
+    button.dataset.category=category.name;
+    button.style.setProperty('--tag',category.color);
+    button.setAttribute('aria-pressed','false');
+    const dot=document.createElement('span');dot.className='tag-dot';dot.setAttribute('aria-hidden','true');
+    const name=document.createElement('span');name.className='tag-name';name.textContent=category.name;
+    button.append(dot,name);
+    button.onclick=()=>void run(()=>classifyAs(category.name));
+    button.title='点击把选中的主组件移到该类别';
+    container.append(tooltip(button));
+  }
+  // 恢复自动分类原先挂在被移除的下拉框里，属于 #8 已确认的能力，仍需可达。
+  // 它放在标签区内部的末端，跟随标签区一起滚动，不额外撑高面板。
+  const restore=document.createElement('button');
+  restore.type='button';
+  restore.id='restore-auto';
+  restore.className='category-tag category-action';
+  restore.textContent='恢复自动分类';
+  restore.title='清除人工分类覆盖，按当前名称前缀与尺寸规则重新归类；不确定时回到未分类。';
+  restore.onclick=()=>void run(restoreAuto);
+  container.append(tooltip(restore));
+}
+function setTagHint(button:HTMLButtonElement,text:string) {
+  const wrap=button.parentElement;
+  const tip=wrap&&wrap.classList.contains('action')?wrap.querySelector<HTMLElement>('.tooltip'):undefined;
+  if(tip) tip.textContent=text;else button.title=text;
+}
+function renderTags(selection:SelectionState|undefined,busy:boolean) {
+  const container=el('category-tags');
+  const signature=categoryChoices.map(category=>`${category.name}\u0000${category.color}`).join('\u0001');
+  if(signature!==tagSignature) {tagSignature=signature;buildTags(container);}
+  const members=selection?.members||[];
+  const inSelection=new Set(members.map(member=>member.category));
+  const mixed=!!selection?.mixed||inSelection.size>1;
+  const disabled=busy||!members.length;
+  container.dataset.mixed=String(mixed);
+  container.dataset.disabled=String(disabled);
+  container.setAttribute('aria-disabled',String(disabled));
+  let currentTag:HTMLButtonElement|undefined;
+  container.querySelectorAll<HTMLButtonElement>('button[data-category]').forEach(button=>{
+    const name=button.dataset.category!;
+    const current=!mixed&&inSelection.has(name);
+    button.setAttribute('aria-pressed',String(current));
+    button.disabled=disabled;
+    setTagHint(button,disabled?'先选中本工具主组件':current?'当前类别，点击不改写':`移到「${name}」`);
+    const check=button.querySelector('.tag-check');
+    if(current&&!check) {const mark=document.createElement('span');mark.className='tag-check';mark.textContent='✓';mark.setAttribute('aria-hidden','true');button.append(mark);}
+    else if(!current&&check) check.remove();
+    if(current) currentTag=button;
+  });
+  const restore=container.querySelector<HTMLButtonElement>('#restore-auto');
+  if(restore) {
+    restore.disabled=disabled;
+    setTagHint(restore,disabled?'先选中本工具主组件':'清除人工覆盖并按当前规则重新归类');
+  }
+  // 只调整标签区自身的滚动位置：高亮切换后当前类别在四行窗口外时滚到可见，
+  // 主面板仍不滚动；同一高亮不反复夺回用户主动滚动的位置。
+  const currentName=currentTag?.dataset.category||'';
+  if(currentTag&&currentName!==lastCurrentTag&&container.scrollHeight>container.clientHeight) {
+    const box=container.getBoundingClientRect(),tag=currentTag.getBoundingClientRect();
+    if(tag.top<box.top) container.scrollTop-=(box.top-tag.top);
+    else if(tag.bottom>box.bottom) container.scrollTop+=(tag.bottom-box.bottom);
+  }
+  lastCurrentTag=currentName;
+}
+async function restoreAuto() {
+  const selection=workflow?.state.selection;
+  if(!workflow?.state.selected||!selection?.members.length)return;
+  await workflow.setCategory('auto');
+}
+async function classifyAs(category:string) {
+  const selection=workflow?.state.selection;
+  if(!workflow?.state.selected||!selection?.members.length)return;
+  // 点击已高亮的标签不产生写入。
+  if(selection.members.every(member=>member.category===category))return;
+  await workflow.setCategory(category);
+}
 function render() {
   const s=workflow?.state,busy=!!s?.busy,connected=!!s?.connected;
   const connection=el('connection');connection.textContent=connected?'资源助手：已连接':'资源助手：未连接';connection.classList.toggle('connected',connected);
@@ -123,10 +210,6 @@ function render() {
   let notice=s?.notice||'';
   if(notice.startsWith('导入')&&s?.importDurationMs!==undefined)notice+=` · 导入耗时 ${formatDuration(s.importDurationMs)}`;
   const noticeEl=el('action-result');noticeEl.textContent=notice;noticeEl.classList.toggle('hidden',!notice);
-  const categorySelect=el<HTMLSelectElement>('category-select');
-  const previousCategory=categorySelect.value;
-  categorySelect.replaceChildren(new Option('选择目标分类',''),...categoryChoices.map(category=>new Option(category.name,category.name)),new Option('恢复自动分类','auto'));
-  if(previousCategory) categorySelect.value=previousCategory;
   const selection=workflow?.state.selection;
   const selectedMembers=selection?.members||[];
   const categoriesInSelection=[...new Set(selectedMembers.map(member=>member.category))];
@@ -141,8 +224,7 @@ function render() {
   if(viaInstances)selectionNotes.push(`已从 ${viaInstances} 个实例定位主组件`);
   if(selection?.ignored)selectionNotes.push(`已忽略 ${selection.ignored} 个非本工具对象`);
   selectionStatusEl.title=selectionNotes.length?selectionNotes.join('；'):'按 Figma 当前选择处理；实例会定位主组件，无关对象不改动。';
-  categorySelect.disabled=busy||!selectedMembers.length;
-  el<HTMLButtonElement>('apply-category').disabled=busy||!selectedMembers.length||!categorySelect.value;
+  renderTags(selection,busy);
   const detailLines=[...(s?.scan?.errors||[]),...(plan?.messages||[]),...(s?.result?.failures||[]).map(failure=>`失败 ${failure.name}：${failure.reason}`),...(s?.compare?.messages||[])];
   el('details-body').textContent=detailLines.join('\n');
   const detailsButton=el<HTMLButtonElement>('details-open');
@@ -291,13 +373,7 @@ el('import').onclick=()=>void run(()=>workflow!.import());
 el('cancel').onclick=()=>{workflow?.cancel();};
 el('compare').onclick=()=>void run(()=>workflow!.comparePage());
 el('tidy').onclick=()=>void run(()=>workflow!.tidy());
-el('category-select').onchange=render;
 el('helper-path').oninput=()=>{helperFolderOpened=false;render();};
-el('apply-category').onclick=()=>void run(async()=>{
-  const choice=el<HTMLSelectElement>('category-select').value;
-  if(!workflow?.state.selected||!workflow.state.selection?.members.length||!choice)return;
-  await workflow.setCategory(choice);
-});
 el('registration').onsubmit=event=>event.preventDefault();
 el('save').onclick=()=>{if(!el<HTMLFormElement>('registration').reportValidity())return;void run(async()=>{
   const project:Project={id:input('game-id').value.trim(),name:input('game-name').value.trim(),path:input('game-path').value.trim(),maintained:input('maintained').checked};
