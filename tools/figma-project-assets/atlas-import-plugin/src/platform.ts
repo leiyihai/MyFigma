@@ -95,7 +95,7 @@ type Candidate = { resource: Resource; source: Source; hash: string; layout?: La
 type PlanState = {
   plan: ImportPlan; adds: Candidate[]; updates: Candidate[]; removals: Existing[];
 };
-function validStoredSource(s: Partial<Source>, project: PublicProject): s is Source {
+function validStoredSource(s: Partial<Source>, project: Pick<PublicProject,'id'>): s is Source {
   if(s.schemaVersion !== 1 || s.projectId !== project.id || (s.kind !== 'atlas' && s.kind !== 'standalone') ||
      !relativePath(s.relativePath) || !safeName(s.frameName) || typeof s.identity !== 'string') return false;
   if(s.kind === 'atlas') return s.identity === JSON.stringify([project.id,'atlas',s.relativePath,s.frameName]);
@@ -108,7 +108,7 @@ function sourceRecord(component: ComponentNode): {source?: Partial<Source>; sync
     return {source:value, sync:value.sync};
   } catch { return {}; }
 }
-function parseStoredSource(component: ComponentNode, project: PublicProject): Source | undefined {
+function parseStoredSource(component: ComponentNode, project: Pick<PublicProject,'id'>): Source | undefined {
   const source = sourceRecord(component).source;
   return source && validStoredSource(source,project) ? source as Source : undefined;
 }
@@ -214,61 +214,83 @@ function categoriesFor(node: BaseNode): CategoryConfig {
 // 规则存在资源页 `atlas.category.rules.v1`：有序、可回读，缺失时按现有标签惰性补算。
 type LearnedRules = {raw: string; rules: CategoryRule[]; index: CategoryRuleIndex};
 const rulesCache = new WeakMap<PageNode, LearnedRules>();
-// 学习/预计命中只读 `atlas.source` 里的散图原名，沿用导入时的损坏拦截语义。
-function storedFrameName(component: ComponentNode): string | undefined {
-  try {
-    const value = JSON.parse(component.getPluginData(sourceKey)) as {frameName?: unknown} | null;
-    const frameName = value?.frameName;
-    return typeof frameName === 'string' && frameName.length > 0 && frameName.length <= 256 ? frameName : undefined;
-  } catch { return undefined; }
-}
-// 训练信号只有人工覆盖：自动分类结果不会反过来成为规律依据。
-function learnedSample(component: ComponentNode, config: CategoryConfig): CategorySample | undefined {
-  const category = manualCategory(component, config);
-  const frameName = storedFrameName(component);
-  return category && frameName ? {frameName, category} : undefined;
-}
-function learnPageRules(page: PageNode): CategoryRule[] {
-  const config = pageCategories(page);
+type PageComponentInput = {frameName: string; manual: boolean};
+// 一次全页遍历同时得到学习样本与预计命中的输入，避免阅读规律时扫两遍页面。
+type PageCategoryInputs = {samples: CategorySample[]; components: PageComponentInput[]};
+// 学习与预计命中都用 `atlas.source` 校验项目与来源完整性；损坏或无关组件跳过，
+// 不继承导入时的损坏拦截，也不让单条坏记录拖垮整页学习。
+// 同一来源身份只取第一条，避免重复节点把 support 虚增到阈值。
+function pageCategoryInputs(page: PageNode, config: CategoryConfig, projectId: string | undefined): PageCategoryInputs {
   const samples: CategorySample[] = [];
+  const components: PageComponentInput[] = [];
+  if(!projectId) return {samples, components};
+  const seen = new Set<string>();
   for(const node of page.findAll(() => true)) {
     if(node.type !== 'COMPONENT') continue;
-    const sample = learnedSample(node, config);
-    if(sample) samples.push(sample);
+    const source = parseStoredSource(node, {id: projectId});
+    if(!source) continue;
+    const category = manualCategory(node, config);
+    components.push({frameName:source.frameName, manual:!!category});
+    if(!category || seen.has(source.identity)) continue;
+    seen.add(source.identity);
+    samples.push({frameName:source.frameName, category});
   }
-  return learnCategoryRules(samples);
+  return {samples, components};
 }
-// 损坏/非法条目整份回退空规则并回写重建；缺失时按现有标签补算一次。
+function boundProjectId(page: PageNode): string | undefined {
+  const raw = page.getPluginData(bindingKey);
+  if(!raw) return undefined;
+  try {
+    const binding = JSON.parse(raw) as {schemaVersion?: unknown; projectId?: unknown} | null;
+    return binding?.schemaVersion === 1 && typeof binding.projectId === 'string' && binding.projectId
+      ? binding.projectId : undefined;
+  } catch { return undefined; }
+}
+function storeRules(page: PageNode, rules: readonly CategoryRule[]): void {
+  const raw = serializeCategoryRules(rules);
+  page.setPluginData(categoryRulesKey, raw);
+  rulesCache.set(page, {raw, rules:[...rules], index:categoryRuleIndex(rules)});
+}
+// 事务回滚用：把页面键恢复成操作前原文，并让下一次读取重新解析而不是沿用缓存。
+function restoreRules(page: PageNode, raw: string): void {
+  page.setPluginData(categoryRulesKey, raw);
+  if(!raw) { rulesCache.delete(page); return; }
+  const read = readCategoryRules(raw);
+  rulesCache.set(page, {raw, rules:read.rules, index:categoryRuleIndex(read.rules)});
+}
+// 缺失时按现有标签惰性补算一次；损坏时立即按标签重建，而不是读一次就永久清零。
 // 与类别配置一样只在已绑定资源页写入，避免把空白页变成「非空未绑定页」。
-function rulesFor(page: PageNode): LearnedRules {
+function rulesFromInputs(page: PageNode, inputs: PageCategoryInputs): LearnedRules {
   const raw = page.getPluginData(categoryRulesKey);
   const cached = rulesCache.get(page);
   if(cached && cached.raw === raw) return cached;
   const read = readCategoryRules(raw);
-  const rules = !raw && !read.repaired ? learnPageRules(page) : read.rules;
-  if((read.repaired || (!raw && rules.length)) && page.getPluginData(bindingKey)) {
-    page.setPluginData(categoryRulesKey, serializeCategoryRules(rules));
-  }
+  const rules = raw && !read.repaired ? read.rules : learnCategoryRules(inputs.samples);
+  if((read.repaired || (!raw && rules.length)) && page.getPluginData(bindingKey)) storeRules(page, rules);
   const state = {raw:page.getPluginData(categoryRulesKey), rules, index:categoryRuleIndex(rules)};
   rulesCache.set(page, state);
   return state;
 }
+function rulesFor(page: PageNode, projectId = boundProjectId(page)): LearnedRules {
+  const raw = page.getPluginData(categoryRulesKey);
+  const cached = rulesCache.get(page);
+  if(cached && cached.raw === raw) return cached;
+  const config = pageCategories(page);
+  return rulesFromInputs(page, pageCategoryInputs(page, config, projectId));
+}
 // 重算并落盘：人工标签或类别变化后调用。清空规律走单独入口，不会在这里被立即重学。
-function refreshCategoryRules(page: PageNode): void {
+function refreshCategoryRules(page: PageNode, projectId: string): void {
   if(!page.getPluginData(bindingKey)) return;
-  const rules = learnPageRules(page);
-  const raw = serializeCategoryRules(rules);
-  page.setPluginData(categoryRulesKey, raw);
-  rulesCache.set(page, {raw, rules, index:categoryRuleIndex(rules)});
+  storeRules(page, learnCategoryRules(pageCategoryInputs(page, pageCategories(page), projectId).samples));
 }
 // 预计命中只统计当前页没有人工覆盖、且能被规律匹配到的组件。
-function estimatedHits(page: PageNode, config: CategoryConfig, index: CategoryRuleIndex): number {
+function estimatedHits(components: readonly PageComponentInput[], config: CategoryConfig,
+  index: CategoryRuleIndex): number {
   if(!index.size) return 0;
   let count = 0;
-  for(const node of page.findAll(() => true)) {
-    if(node.type !== 'COMPONENT' || manualCategory(node, config)) continue;
-    const frameName = storedFrameName(node);
-    if(frameName && matchCategoryRule(index, frameName, config)) count++;
+  for(const component of components) {
+    if(component.manual) continue;
+    if(matchCategoryRule(index, component.frameName, config)) count++;
   }
   return count;
 }
@@ -404,7 +426,7 @@ function applyCategoryJobs(api: Pick<PluginAPI,'createFrame'>, project: PublicPr
   for(const host of new Set(jobs.map(job => job.page))) {
     refreshDisplayNames(host, project, messages);
     // 人工标签变化后就地重学，下一次导入/恢复自动分类沿用同一份规则。
-    refreshCategoryRules(host);
+    refreshCategoryRules(host, project.id);
   }
   return {moved, done, failed};
 }
@@ -591,7 +613,7 @@ function buildPlan(scan: Scan, page: PageNode): PlanState {
   });
   // 预览先告知这批素材有多少条会被学习到的命名规律直接定类（0 时不加消息）。
   const categoryConfig = pageCategories(page);
-  const learned = rulesFor(page).index;
+  const learned = rulesFor(page, scan.project.id).index;
   const learnedCount = [...adds, ...updates]
     .filter(item => plannedCategory(item, categoryConfig, learned).learned).length;
   if(learnedCount) messages.add(`按学习命名规律预分类 ${learnedCount} 条`);
@@ -973,11 +995,13 @@ function syncComparePage(page: PageNode, items: Map<string, CompareItem>, api: P
   }
   return {added, removed, kept, groups: keys.length, messages};
 }
-function readCategoryState(page: PageNode) {
+function readCategoryState(page: PageNode, projectId = boundProjectId(page)) {
   const config = pageCategories(page);
-  const learned = rulesFor(page);
+  // 一次遍历同时拿到学习样本与预计命中输入；规律损坏时也直接用同一份样本重建。
+  const inputs = pageCategoryInputs(page, config, projectId);
+  const learned = rulesFromInputs(page, inputs);
   return {schemaVersion:1 as const, categories:config.categories.map(category => ({name:category.name, color:category.color})),
-    rules:{count:learned.rules.length, estimated:estimatedHits(page, config, learned.index)}};
+    rules:{count:learned.rules.length, estimatedHits:estimatedHits(inputs.components, config, learned.index)}};
 }
 // 类别管理只写已绑定的资源页：空白未绑定页写配置后会变成「非空未绑定页」，
 // 反而让后续导入被自己的守卫拒绝。
@@ -999,7 +1023,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
       const raw = page.getPluginData(categoryConfigKey);
       const {config, repaired} = readCategoryConfig(raw);
       if(repaired && page.getPluginData(bindingKey)) page.setPluginData(categoryConfigKey, serializeCategories(config));
-      return readCategoryState(page);
+      return readCategoryState(page, boundProjectId(page));
     },
     async clearCategoryRules(project) {
       if(busy) throw new Error('任务执行中，请等待完成');
@@ -1010,10 +1034,9 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
       busy = true;
       try {
         // 清空 = 写入空规则，不立即重学；下一次人工分类或类别变更才重新学习。
-        const raw = serializeCategoryRules([]);
-        page.setPluginData(categoryRulesKey, raw);
-        rulesCache.set(page, {raw, rules:[], index:categoryRuleIndex([])});
-        return readCategoryState(page);
+        storeRules(page, []);
+        return {...readCategoryState(page, project.id), moved:0,
+          message:'已清空命名规律：分类回退通用规则，下次人工分类或类别变更时重新学习'};
       } finally { busy = false; }
     },
     async addCategory(project, name) {
@@ -1033,15 +1056,20 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         categories:[...config.categories, {name:category, color:nextCategoryColor(config.categories)}]};
       busy = true;
       const created: FrameNode[] = [];
+      // 配置与规律一起快照：写配置后重学失败时按原文回滚，不留下半改的页面。
+      const previousConfig = page.getPluginData(categoryConfigKey);
+      const previousRules = page.getPluginData(categoryRulesKey);
       try {
         // 先建 Frame 再写配置：写配置后该 Frame 才被认领，失败时只回滚本次新建的空 Frame。
         ensureCategoryFrame(page, api, category, created);
         page.setPluginData(categoryConfigKey, serializeCategories(next));
         // 新增类别本身不会产生新规则，但配置顺序变了，回读与预计命中要一起刷新。
-        refreshCategoryRules(page);
-        return {...readCategoryState(page), moved:0, message:`已新增类别「${category}」`};
+        refreshCategoryRules(page, project.id);
+        return {...readCategoryState(page, project.id), moved:0, message:`已新增类别「${category}」`};
       } catch(error) {
         for(const frame of created) if(!frame.children.length) frame.remove();
+        try { page.setPluginData(categoryConfigKey, previousConfig); } catch { /* 保留可见错误 */ }
+        try { restoreRules(page, previousRules); } catch { /* 保留可见错误 */ }
         throw error;
       } finally { busy = false; }
     },
@@ -1064,6 +1092,10 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
       let layouts: CategoryLayout[] = [];
       let movedCount = 0, retained = 0;
       busy = true;
+      // 删除会改配置、规律、子节点父级与人工覆盖：全部快照，失败时按原样恢复。
+      const previousConfig = page.getPluginData(categoryConfigKey);
+      const previousRules = page.getPluginData(categoryRulesKey);
+      const frameSnapshots = frames.map(frame => ({frame, marker:frame.getPluginData(categoryKey)}));
       try {
         // 迁移顺序：先把带工具记录的子节点移到未分类并修正人工覆盖，
         // 再刷新显示名，最后才写配置并处理 Frame——任何一步失败都能把已移动的节点放回原处。
@@ -1077,12 +1109,11 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
               fallback.appendChild(item.node);
               const previous = item.node.getPluginData(manualCategoryKey);
               moved.push({...item, manual:previous});
-              if(previous === category) item.node.setPluginData(manualCategoryKey, unsortedCategory);
+              // 人工覆盖指向被删类别时清除覆盖，而不是改写成「未分类」：
+              // 否则工具会把自己的迁移结果当成新的人工标签，学出假规律。
+              if(previous === category) item.node.setPluginData(manualCategoryKey, '');
               if(item.node.type === 'COMPONENT') movedCount++;
             } catch(error) {
-              for(const done of moved) {
-                try { done.frame.appendChild(done.node); done.node.setPluginData(manualCategoryKey, done.manual); } catch { /* 保留可见错误，不隐藏失败 */ }
-              }
               throw new Error(`删除类别失败：${item.node.name} 无法移动到未分类，本次未做任何修改（${error instanceof Error ? error.message : '移动失败'}）`);
             }
           }
@@ -1094,7 +1125,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
           categories:config.categories.filter(existing => existing.name !== category)};
         page.setPluginData(categoryConfigKey, serializeCategories(next));
         // 删除后重学：指向已删除类别的族随之失效，不会把组件重新引回该类别。
-        refreshCategoryRules(page);
+        refreshCategoryRules(page, project.id);
         for(const frame of frames) {
           if(!frame.children.length) { frame.remove(); continue; }
           // 还留着非本工具对象：不删 Frame，只清除类别标记，使它不再被本工具认领。
@@ -1103,9 +1134,22 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         }
         const kept = retained ? `，保留 ${retained} 个非本工具对象在原 Frame` : '';
         const skippedNotes = messages.length ? `；${messages.join('；')}` : '';
-        return {...readCategoryState(page), moved:movedCount,
+        return {...readCategoryState(page, project.id), moved:movedCount,
           message:(movedCount ? `已删除类别「${category}」，${movedCount} 个主组件移到「${unsortedCategory}」`
             : `已删除类别「${category}」`) + kept + skippedNotes};
+      } catch(error) {
+        // 把已移动的子节点、人工覆盖、Frame 标记、配置与规律一并恢复；
+        // 显示名由父 Frame 推导，回到原父级后重刷一遍。
+        for(const done of moved) {
+          try { done.frame.appendChild(done.node); done.node.setPluginData(manualCategoryKey, done.manual); } catch { /* 保留可见错误 */ }
+        }
+        for(const snapshot of frameSnapshots) {
+          try { snapshot.frame.setPluginData(categoryKey, snapshot.marker); } catch { /* 保留可见错误 */ }
+        }
+        try { page.setPluginData(categoryConfigKey, previousConfig); } catch { /* 保留可见错误 */ }
+        try { restoreRules(page, previousRules); } catch { /* 保留可见错误 */ }
+        try { refreshDisplayNames(page, project, []); } catch { /* 保留可见错误 */ }
+        throw error;
       } finally {
         restoreCategoryLayouts(layouts);
         // 只有本次新建且仍为空的未分类 Frame 需要回滚，已有 Frame 保留。
@@ -1136,6 +1180,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
       const frameSnapshots = frames.map(frame => ({frame, name:frame.name, marker:frame.getPluginData(categoryKey)}));
       const overrides: Array<{node:SceneNode;previous:string}> = [];
       const previousConfig = page.getPluginData(categoryConfigKey);
+      const previousRules = page.getPluginData(categoryRulesKey);
       const messages: string[] = [];
       let layouts: CategoryLayout[] = [];
       let synced = 0;
@@ -1160,9 +1205,9 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         page.setPluginData(categoryConfigKey, serializeCategories(next));
         refreshDisplayNames(page, project, messages);
         // 改名后重学：指向该类别的族同步改指新名称。
-        refreshCategoryRules(page);
+        refreshCategoryRules(page, project.id);
         const notes = messages.length ? `；${messages.join('；')}` : '';
-        return {...readCategoryState(page), moved:synced,
+        return {...readCategoryState(page, project.id), moved:synced,
           message:`已将类别「${category}」改名为「${name}」${synced ? `，${synced} 个主组件的分类与显示名已同步` : ''}${notes}`};
       } catch(error) {
         // 失败时把配置、Frame 名与标记、人工覆盖都改回原值，不留下半改的页面。
@@ -1171,6 +1216,8 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
           try { snapshot.frame.name = snapshot.name; snapshot.frame.setPluginData(categoryKey, snapshot.marker); } catch { /* 保留可见错误 */ }
         }
         try { page.setPluginData(categoryConfigKey, previousConfig); } catch { /* 保留可见错误 */ }
+        try { restoreRules(page, previousRules); } catch { /* 保留可见错误 */ }
+        try { refreshDisplayNames(page, project, []); } catch { /* 保留可见错误 */ }
         throw error;
       } finally {
         restoreCategoryLayouts(layouts);
@@ -1223,7 +1270,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         report.removalSuppressed = plan.removalSuppressed; report.messages = [...plan.messages];
         updatedIds = new Set(state.updates.map(item => item.existing!.component.id));
         const categoryConfig = pageCategories(page);
-        const learned = rulesFor(page).index;
+        const learned = rulesFor(page, scan.project.id).index;
         const categories = new Set([...state.adds,...state.updates].map(item => plannedCategory(item, categoryConfig, learned).category));
         const categoryFrames = new Map<string,FrameNode>();
         for(const category of categories) categoryFrames.set(category,ensureCategoryFrame(page,api,category,createdFrames));
@@ -1356,7 +1403,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         if(!source || !host || !validate(host, project).valid) { ignored++; continue; }
         const manual = manualCategory(component, config);
         const category = manual || currentCategory(component, config) ||
-          automaticCategory(component, source, config, rulesFor(host).index);
+          automaticCategory(component, source, config, rulesFor(host, project.id).index);
         const member = {id:component.id,name:component.name,category,manual:!!manual,viaInstance};
         const previous = found.get(component.id);
         if(!previous) found.set(component.id, member);
@@ -1390,7 +1437,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
             continue;
           }
           const hostConfig = categoriesFor(host);
-          const learnedRules = rulesFor(host).index;
+          const learnedRules = rulesFor(host, project.id).index;
           const target = category === 'auto' ? automaticCategory(component, source, hostConfig, learnedRules) : knownCategory(hostConfig, category);
           if(!target) {
             messages.push(`${component.name}：该页面没有分类「${category}」，已跳过`);

@@ -97,16 +97,18 @@ test('built main script loads in an import-rejecting sandbox, stores pairing loc
     await figma.ui.onmessage({ type: 'categories', requestId: 31 });
     const rulesReply = replies.find(reply => reply.requestId === 31);
     assert.equal(rulesReply.error, undefined);
-    assert.deepEqual(Object.keys(rulesReply.result.rules).sort(), ['count', 'estimated']);
+    assert.deepEqual(Object.keys(rulesReply.result.rules).sort(), ['count', 'estimatedHits']);
     assert.equal(Number.isInteger(rulesReply.result.rules.count), true);
-    assert.equal(Number.isInteger(rulesReply.result.rules.estimated), true);
+    assert.equal(Number.isInteger(rulesReply.result.rules.estimatedHits), true);
     await figma.ui.onmessage({ type: 'clear-category-rules', requestId: 32, project: { id: 'g2', name: '测试游戏' } });
     const clearedRules = replies.find(reply => reply.requestId === 32);
     assert.equal(clearedRules.error, undefined);
-    assert.deepEqual(clearedRules.result.rules, { count: 0, estimated: 0 });
+    assert.deepEqual(clearedRules.result.rules, { count: 0, estimatedHits: 0 });
+    // 清空提示只来自平台返回的 message，主线程不再另写一份文案。
+    assert.match(clearedRules.result.message, /已清空命名规律/);
     assert.deepEqual(JSON.parse(page.getPluginData('atlas.category.rules.v1')), { schemaVersion: 1, rules: [] });
     await figma.ui.onmessage({ type: 'categories', requestId: 33 });
-    assert.deepEqual(replies.find(reply => reply.requestId === 33).result.rules, { count: 0, estimated: 0 });
+    assert.deepEqual(replies.find(reply => reply.requestId === 33).result.rules, { count: 0, estimatedHits: 0 });
     await figma.ui.onmessage({ type: 'clear-category-rules', requestId: 34 });
     assert.match(replies.find(reply => reply.requestId === 34).error, /项目信息无效/);
     await figma.ui.onmessage({ type: 'tidy', requestId: 4, project: { id: 'g2', name: '测试游戏' } });

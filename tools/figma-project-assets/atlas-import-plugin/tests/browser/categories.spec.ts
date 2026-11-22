@@ -31,11 +31,12 @@ test('类别管理弹窗新增、重名提示、删除确认与关闭后标签�
       if(m.type==='pairing-load'){reply(window.pairing);return;}
       if(m.type==='pairing-save'){window.pairing=m.pairing;reply(true);return;}
       if(m.type==='pairing-clear'){window.pairing=null;reply(true);return;}
-      if(m.type==='categories'){reply({schemaVersion:1,categories:window.categoryConfig,rules:window.categoryRules||{count:0,estimated:0}});return;}
+      if(m.type==='categories'){reply({schemaVersion:1,categories:window.categoryConfig,rules:window.categoryRules||{count:0,estimatedHits:0}});return;}
       if(m.type==='clear-category-rules'){
         window.clearRuleRequests=(window.clearRuleRequests||0)+1;
-        window.categoryRules={count:0,estimated:0};
-        reply({schemaVersion:1,categories:window.categoryConfig,rules:window.categoryRules});return;}
+        window.categoryRules={count:0,estimatedHits:0};
+        reply({schemaVersion:1,categories:window.categoryConfig,rules:window.categoryRules,moved:0,
+          message:'已清空命名规律：分类回退通用规则，下次人工分类或类别变更时重新学习'});return;}
       if(m.type==='add-category'){
         window.addRequests=(window.addRequests||0)+1;
         const name=typeof m.name==='string'?m.name.trim():'';
@@ -122,14 +123,14 @@ test('类别管理弹窗新增、重名提示、删除确认与关闭后标签�
     await expect(rulesLine).toHaveText('命名规律 0 条 · 预计命中 0 条');
     await expect(clearRules).toBeDisabled();
     await page.evaluate(()=>{
-      (window as any).categoryRules={count:3,estimated:5};
+      (window as any).categoryRules={count:3,estimatedHits:5};
       document.querySelector('iframe')!.contentWindow!.postMessage({pluginMessage:{type:'page-changed'}},'*');
     });
     await expect(rulesLine).toHaveText('命名规律 3 条 · 预计命中 5 条');
     await expect(clearRules).toBeEnabled();
     expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
     await clearRules.click();
-    await expect(ui.locator('#category-notice')).toContainText('命名规律已清空');
+    await expect(ui.locator('#category-notice')).toContainText('已清空命名规律');
     await expect(rulesLine).toHaveText('命名规律 0 条 · 预计命中 0 条');
     await expect(clearRules).toBeDisabled();
     expect(await page.evaluate(()=>(window as any).clearRuleRequests)).toBe(1);

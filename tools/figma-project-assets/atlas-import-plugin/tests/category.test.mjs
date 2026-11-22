@@ -1176,25 +1176,30 @@ test('删除类别先把主组件与实例关系安全移到未分类，再删�
     assert.equal(button.parent, unsortedFrame);
     assert.equal(icon.name, '未分类/icon_coin');
     assert.equal(button.name, '未分类/btn_ok');
-    // 来源记录、人工覆盖与实例关系都不丢。
+    // 来源记录、实例关系都不丢；指向被删类别的人工覆盖被清除，而不是改写成一个假标签。
     assert.equal(icon.getPluginData('atlas.source'), sourceBefore);
-    assert.equal(button.getPluginData('atlas.category.manual'), '未分类');
+    assert.equal(icon.getPluginData('atlas.category.manual'), '');
+    assert.equal(button.getPluginData('atlas.category.manual'), '');
     assert.equal(await instance.getMainComponentAsync(), icon);
     assert.equal(page.findAll(node => node.type === 'INSTANCE').length, 1);
     assert.equal(page.findAll(node => node.type === 'COMPONENT').length, 3);
 
-    // 删除后标签与人工分类一致：选中组件读回未分类，且不再能定位被删类别。
+    // 删除后标签与人工分类一致：选中组件按当前父级读回未分类，但已无人工作覆盖。
     page.selection = [button];
     await workflow.loadSelection();
     assert.equal(workflow.state.selection.members[0].category, '未分类');
-    assert.equal(workflow.state.selection.members[0].manual, true);
+    assert.equal(workflow.state.selection.members[0].manual, false);
     await assert.rejects(() => workflow.setCategory('特效'), /分类无效/);
-    // 保留的人工覆盖不再指向已删除类别，重新导入不会把它读成无效值。
-    await workflow.scan();
-    await workflow.import();
-    assert.equal(button.getPluginData('atlas.category.manual'), '未分类');
-    assert.equal(button.parent, unsortedFrame);
-    assert.equal(button.name, '未分类/btn_ok');
+    // 覆盖清除后，「恢复自动分类」按通用规则重算：btn 前缀回到按钮，
+    // 而不是被工具写成「未分类」标签。
+    page.selection = [button];
+    await workflow.loadSelection();
+    await workflow.setCategory('auto');
+    assert.equal(button.getPluginData('atlas.category.manual'), '');
+    assert.equal(button.parent.name, '按钮');
+    assert.equal(button.name, '按钮/btn_ok');
+    // 迁移结果没有进入学习输入，页面规律里不会出现「btn → 未分类」这种工具自造标签。
+    assert.deepEqual(storedRules(page), { schemaVersion: 1, rules: [] });
   } finally { await f.cleanup(); }
 });
 
@@ -1355,7 +1360,7 @@ test('从人工标签学出名称族规则，导入预览与导入都优先于�
     assert.equal(component(page, '图标/btn_new').parent.name, '图标');
     assert.equal(component(page, '底板/panel_new').parent.name, '底板');
     // 回读条数与预计命中：人工覆盖的组件不计入预计命中。
-    assert.deepEqual((await platform.categories()).rules, { count: 1, estimated: 1 });
+    assert.deepEqual((await platform.categories()).rules, { count: 1, estimatedHits: 1 });
   } finally { await f.cleanup(); }
 });
 
@@ -1465,16 +1470,17 @@ test('类别改名与删除联动命名规律：改名同步改指，删除后�
     assert.equal(component(page, '图形/btn_new').parent.name, '图形');
 
     await platform.removeCategory(project21, '图形');
-    // 删除的类别不得继续出现在规律里；迁移到未分类的人工覆盖成为新的学习证据。
+    // 删除的类别不得继续出现在规律里；指向它的人工覆盖被清除，不写成「未分类」假标签。
     assert.equal(page.getPluginData(rulesKey).includes('图形'), false);
-    // 学习信号只有人工覆盖：btn_new 是按规律自动分类的，不贡献新样本。
-    assert.deepEqual(storedRules(page).rules, [
-      { kind: 'prefix', token: 'btn', category: '未分类', support: 3, purity: 1, conflicts: 0 }
-    ]);
+    assert.deepEqual(storedRules(page).rules, []);
+    // 学习信号只有人工覆盖：btn_new 是按规律自动分类的，不贡献新样本；
+    // 被删类别的覆盖已清除，不会让 btn 族学出「未分类」。
+    assert.equal(component(page, '未分类/btn_a').getPluginData('atlas.category.manual'), '');
     await sprite(f, 'btn_next.json', 'btn_next', 64, 24);
     await workflow.scan();
     await workflow.import();
-    assert.equal(component(page, '未分类/btn_next').parent.name, '未分类');
+    // 无学习规律可回退通用前缀规则：btn → 按钮。
+    assert.equal(component(page, '按钮/btn_next').parent.name, '按钮');
   } finally { await f.cleanup(); }
 });
 
@@ -1486,14 +1492,14 @@ test('命名规律配置损坏或含非法条目时整份回退无规律并回�
     await workflow.import();
     // 不可解析：回退空规则并回写，不抛错。
     page.setPluginData(rulesKey, '{不是 JSON');
-    assert.deepEqual((await platform.categories()).rules, { count: 0, estimated: 0 });
+    assert.deepEqual((await platform.categories()).rules, { count: 0, estimatedHits: 0 });
     assert.deepEqual(storedRules(page), { schemaVersion: 1, rules: [] });
     assert.equal((await platform.validate(project21)).valid, true);
     // 非法条目（未知种类）同样整份回退，不做部分采用。
     page.setPluginData(rulesKey, JSON.stringify({ schemaVersion: 1, rules: [
       { kind: 'word', token: 'btn', category: '图标', support: 2, purity: 1, conflicts: 0 }
     ] }));
-    assert.deepEqual((await platform.categories()).rules, { count: 0, estimated: 0 });
+    assert.deepEqual((await platform.categories()).rules, { count: 0, estimatedHits: 0 });
     assert.deepEqual(storedRules(page), { schemaVersion: 1, rules: [] });
     // 导入仍按通用规则工作。
     await sprite(f, 'btn_b.json', 'btn_b', 64, 24);
@@ -1524,11 +1530,11 @@ test('类别管理回读规律条数与预计命中，清空后回退通用规�
     await workflow.import();
     assert.equal(component(page, '图标/btn_f').parent.name, '图标');
     // 预计命中只统计没有人工覆盖、且能被规律匹配到的当前页组件：btn_d/btn_e/btn_f。
-    assert.deepEqual((await platform.categories()).rules, { count: 1, estimated: 3 });
+    assert.deepEqual((await platform.categories()).rules, { count: 1, estimatedHits: 3 });
 
     // 清空规律只写空规则，不立即重学。
     const cleared = await platform.clearCategoryRules(project21);
-    assert.deepEqual(cleared.rules, { count: 0, estimated: 0 });
+    assert.deepEqual(cleared.rules, { count: 0, estimatedHits: 0 });
     assert.deepEqual(storedRules(page), { schemaVersion: 1, rules: [] });
     await sprite(f, 'btn_g.json', 'btn_g', 64, 24);
     await workflow.scan();
@@ -1539,6 +1545,259 @@ test('类别管理回读规律条数与预计命中，清空后回退通用规�
 
     // 下一次人工分类重新学习（清空不等于永久关闭）。
     await label(workflow, page, ['按钮/btn_g'], '图标');
-    assert.deepEqual((await platform.categories()).rules, { count: 1, estimated: 3 });
+    assert.deepEqual((await platform.categories()).rules, { count: 1, estimatedHits: 3 });
+  } finally { await f.cleanup(); }
+});
+
+// #21 评审修复：学习输入校验、去重、阈值口径、token 上限、损坏重建与事务回滚。
+function sourceFor(frameName, projectId = 'g8', relativePath = 'res/imageset/Static/a.json') {
+  return { schemaVersion: 1, projectId, kind: 'atlas', relativePath, frameName,
+    identity: JSON.stringify([projectId, 'atlas', relativePath, frameName]) };
+}
+// 直接绑定资源页，避免导入预热规律缓存干扰「只读标签重学」的边界用例。
+function bindPage(page, projectId = 'g8') {
+  page.name = '分类测试（' + projectId + '）- 分类资源';
+  page.setPluginData('atlas.binding', JSON.stringify({ schemaVersion: 1, projectId }));
+}
+// 直接落地带来源与人工覆盖的主组件，绕过导入以构造学习输入边界。
+function rawComponent(fixture, frameName, category, source = sourceFor(frameName)) {
+  const component = fixture.api.createComponent();
+  fixture.page.appendChild(component);
+  component.name = frameName;
+  component.setPluginData('atlas.source', typeof source === 'string' ? source : JSON.stringify(source));
+  if (category) component.setPluginData('atlas.category.manual', category);
+  return component;
+}
+// 写入一次性的规律写入失败：先落盘再抛错，模拟「写了一半」的事务。
+function failOnceOnRulesWrite(page) {
+  const original = page.setPluginData.bind(page);
+  let armed = true;
+  page.setPluginData = (key, value) => {
+    original(key, value);
+    if (armed && key === rulesKey) { armed = false; throw new Error('模拟规律写入失败'); }
+  };
+  return () => { page.setPluginData = original; };
+}
+
+test('学习输入跳过无关项目、损坏与不完整来源的组件，不继承导入的损坏拦截', async () => {
+  const { f, platform, ...fixture } = await setup();
+  try {
+    bindPage(fixture.page);
+    // 外来项目的两条 btn 组件：旧实现只看原名，会学出 btn → 图标。
+    rawComponent(fixture, 'btn_a', '图标', sourceFor('btn_a', 'g2'));
+    rawComponent(fixture, 'btn_b', '图标', sourceFor('btn_b', 'g2'));
+    // 来源 JSON 损坏、缺少来源或来源不完整：跳过而不是抛错。
+    rawComponent(fixture, 'bad_json', '图标', '{不是 JSON');
+    rawComponent(fixture, 'no_source', '图标', undefined);
+    const incomplete = fixture.api.createComponent();
+    fixture.page.appendChild(incomplete);
+    incomplete.setPluginData('atlas.source', JSON.stringify({ schemaVersion: 1, projectId: 'g8', frameName: 'broken' }));
+    incomplete.setPluginData('atlas.category.manual', '图标');
+    assert.deepEqual((await platform.categories()).rules, { count: 0, estimatedHits: 0 });
+  } finally { await f.cleanup(); }
+});
+
+test('学习输入按来源身份去重，重复节点不虚增 support', async () => {
+  const { f, platform, ...fixture } = await setup();
+  try {
+    bindPage(fixture.page);
+    // 同一身份出现两次：只算一条样本，support 仍为 1，不够阈值。
+    rawComponent(fixture, 'dup_a', '图标');
+    rawComponent(fixture, 'dup_a', '图标');
+    assert.deepEqual((await platform.categories()).rules, { count: 0, estimatedHits: 0 });
+  } finally { await f.cleanup(); }
+});
+
+test('学习阶段丢弃超过 64 字符的 token，避免写盘后再读被判损坏', async () => {
+  const { f, platform, ...fixture } = await setup();
+  const page = fixture.page;
+  try {
+    bindPage(page);
+    // 一组正常规则 + 一组超长 token：超长 token 既不进规则，也不能让正常规则在下次读取时被整份清空。
+    rawComponent(fixture, 'btn_a', '图标');
+    rawComponent(fixture, 'btn_b', '图标');
+    const long = 'a'.repeat(70);
+    rawComponent(fixture, long + '_1', '图标');
+    rawComponent(fixture, long + '_2', '图标');
+    assert.deepEqual((await platform.categories()).rules, { count: 1, estimatedHits: 0 });
+    assert.deepEqual((await platform.categories()).rules, { count: 1, estimatedHits: 0 });
+    assert.equal(page.getPluginData(rulesKey).includes(long), false);
+    assert.deepEqual(storedRules(page).rules.map(rule => rule.token), ['btn']);
+  } finally { await f.cleanup(); }
+});
+
+test('学习阈值用未舍入比例：support=2 与恰好 0.6 命中，0.5995 不因四舍五入通过', async () => {
+  const { f, platform, ...fixture } = await setup();
+  const page = fixture.page;
+  try {
+    bindPage(page);
+    // support=2 时 purity 只能是 1 或 0.5，因此「support=2」与「purity 恰好 0.6」分开取边界：
+    // 公共 token 放在后缀位置，前缀各不相同，避免数字后缀互相串票。
+    // 恰好 support=2 且 purity=1：命中。
+    for (const name of ['a_pair', 'b_pair']) rawComponent(fixture, name, '图标');
+    // 恰好 purity=0.6（3/5）：命中，落盘保留 0.6。
+    for (const name of ['x_three', 'y_three', 'z_three']) rawComponent(fixture, name, '图标');
+    for (const name of ['u_three', 'v_three']) rawComponent(fixture, name, '按钮');
+    // 1199/2000 = 0.5995：四舍五入到 0.600，但未达阈值，不得学出 edge 族。
+    for (let index = 0; index < 2000; index++) {
+      rawComponent(fixture, `e${index}_edge`, index < 1199 ? '图标' : '按钮');
+    }
+    const state = await platform.categories();
+    // 只应有 pair 与 three 两条规则；旧实现会把 edge 也学进来。
+    assert.equal(state.rules.count, 2);
+    const rules = storedRules(page).rules.map(rule => rule.token).sort();
+    assert.deepEqual(rules, ['pair', 'three']);
+    assert.equal(storedRules(page).rules.find(rule => rule.token === 'three').purity, 0.6);
+  } finally { await f.cleanup(); }
+});
+
+test('规律损坏时立即按现有人工标签重建并落盘，而不是读一次就永久清零', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'btn_a.json', 'btn_a', 64, 24);
+    await sprite(f, 'btn_b.json', 'btn_b', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    await label(workflow, page, ['按钮/btn_a', '按钮/btn_b'], '图标');
+    page.setPluginData(rulesKey, '{不是 JSON');
+    const state = await platform.categories();
+    assert.deepEqual(state.rules, { count: 1, estimatedHits: 0 });
+    assert.deepEqual(storedRules(page).rules, [
+      { kind: 'prefix', token: 'btn', category: '图标', support: 2, purity: 1, conflicts: 0 }
+    ]);
+  } finally { await f.cleanup(); }
+});
+
+test('规律结构或条目非法时整份回退并按标签重建，不阻断导入与页面校验', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'btn_a.json', 'btn_a', 64, 24);
+    await sprite(f, 'btn_b.json', 'btn_b', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    await label(workflow, page, ['按钮/btn_a', '按钮/btn_b'], '图标');
+    const valid = { kind: 'prefix', token: 'btn', category: '图标', support: 2, purity: 1, conflicts: 0 };
+    const badPayloads = [
+      { schemaVersion: 2, rules: [] },
+      { schemaVersion: 1, rules: {} },
+      { schemaVersion: 1, rules: Array(401).fill(valid) },
+      { schemaVersion: 1, rules: [valid, { ...valid }] },
+      { schemaVersion: 1, rules: [{ ...valid, support: 0 }] },
+      { schemaVersion: 1, rules: [{ ...valid, purity: 0 }] },
+      { schemaVersion: 1, rules: [{ ...valid, purity: 1.5 }] },
+      { schemaVersion: 1, rules: [{ ...valid, token: 'a'.repeat(65) }] }
+    ];
+    for (const payload of badPayloads) {
+      page.setPluginData(rulesKey, JSON.stringify(payload));
+      const state = await platform.categories();
+      assert.deepEqual(state.rules, { count: 1, estimatedHits: 0 }, JSON.stringify(payload).slice(0, 80));
+      assert.deepEqual(storedRules(page).rules, [valid], JSON.stringify(payload).slice(0, 80));
+    }
+    // 导入与页面校验继续工作。
+    assert.equal((await platform.validate(project21)).valid, true);
+    await sprite(f, 'btn_c.json', 'btn_c', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    assert.equal(component(page, '图标/btn_c').parent.name, '图标');
+  } finally { await f.cleanup(); }
+});
+
+test('撤销人工分类后立即重学：没有人工标签时规律清空', async () => {
+  const { f, workflow, page } = await setup();
+  try {
+    await sprite(f, 'btn_a.json', 'btn_a', 64, 24);
+    await sprite(f, 'btn_b.json', 'btn_b', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    await label(workflow, page, ['按钮/btn_a', '按钮/btn_b'], '图标');
+    assert.equal(storedRules(page).rules.length, 1);
+    await workflow.undoCategory();
+    assert.deepEqual(storedRules(page).rules, []);
+  } finally { await f.cleanup(); }
+});
+
+test('新增类别后重学规律：已有规则保持有效，回读条数同步刷新', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'btn_a.json', 'btn_a', 64, 24);
+    await sprite(f, 'btn_b.json', 'btn_b', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    await label(workflow, page, ['按钮/btn_a', '按钮/btn_b'], '图标');
+    const added = await platform.addCategory(project21, '特效');
+    assert.deepEqual(added.rules, { count: 1, estimatedHits: 0 });
+    assert.deepEqual(storedRules(page).rules, [
+      { kind: 'prefix', token: 'btn', category: '图标', support: 2, purity: 1, conflicts: 0 }
+    ]);
+  } finally { await f.cleanup(); }
+});
+
+test('新增类别失败回滚配置与规律原文，不留下半改的页面', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'btn_a.json', 'btn_a', 64, 24);
+    await sprite(f, 'btn_b.json', 'btn_b', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    await label(workflow, page, ['按钮/btn_a', '按钮/btn_b'], '图标');
+    const configBefore = page.getPluginData('atlas.categories.v1');
+    const rulesBefore = page.getPluginData(rulesKey);
+    const restore = failOnceOnRulesWrite(page);
+    try {
+      await assert.rejects(() => platform.addCategory(project21, '特效'), /模拟规律写入失败/);
+    } finally { restore(); }
+    assert.equal(page.getPluginData('atlas.categories.v1'), configBefore);
+    assert.equal(page.getPluginData(rulesKey), rulesBefore);
+    assert.equal(page.children.some(node => node.type === 'FRAME' && node.name === '特效'), false);
+  } finally { await f.cleanup(); }
+});
+
+test('删除类别失败回滚配置、规律、子节点父级与人工覆盖原文', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'btn_a.json', 'btn_a', 64, 24);
+    await sprite(f, 'btn_b.json', 'btn_b', 64, 24);
+
+    await workflow.scan();
+    await workflow.import();
+    await label(workflow, page, ['按钮/btn_a', '按钮/btn_b'], '图标');
+    const configBefore = page.getPluginData('atlas.categories.v1');
+    const rulesBefore = page.getPluginData(rulesKey);
+    const icon = categoryFrame(page, '图标');
+    const restore = failOnceOnRulesWrite(page);
+    try {
+      await assert.rejects(() => platform.removeCategory(project21, '图标'), /模拟规律写入失败/);
+    } finally { restore(); }
+    assert.equal(page.getPluginData('atlas.categories.v1'), configBefore);
+    assert.equal(page.getPluginData(rulesKey), rulesBefore);
+    assert.ok(categoryFrame(page, '图标'));
+    for (const name of ['图标/btn_a', '图标/btn_b']) {
+      const item = component(page, name);
+      assert.ok(item);
+      assert.equal(item.parent, icon);
+      assert.equal(item.getPluginData('atlas.category.manual'), '图标');
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('改名类别失败回滚配置与规律原文，规律不指向已回滚的新名称', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'btn_a.json', 'btn_a', 64, 24);
+    await sprite(f, 'btn_b.json', 'btn_b', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    await label(workflow, page, ['按钮/btn_a', '按钮/btn_b'], '图标');
+    const configBefore = page.getPluginData('atlas.categories.v1');
+    const rulesBefore = page.getPluginData(rulesKey);
+    const restore = failOnceOnRulesWrite(page);
+    try {
+      await assert.rejects(() => platform.renameCategory(project21, '图标', '图形'), /模拟规律写入失败/);
+    } finally { restore(); }
+    assert.equal(page.getPluginData('atlas.categories.v1'), configBefore);
+    assert.equal(page.getPluginData(rulesKey), rulesBefore);
+    assert.deepEqual(storedRules(page).rules.map(rule => rule.category), ['图标']);
+    assert.ok(component(page, '图标/btn_a'));
+    assert.ok(component(page, '图标/btn_b'));
   } finally { await f.cleanup(); }
 });

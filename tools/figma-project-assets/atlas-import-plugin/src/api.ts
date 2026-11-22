@@ -66,7 +66,7 @@ export interface TrainingResult { schemaVersion: 1; count: number }
 // The page is the source of truth for categories; the UI only renders this
 // ordered readback and never keeps a second list of its own.
 // `rules` 是页面学到的命名族规律摘要：条数与按规律能匹配到的未人工覆盖组件数。
-export interface CategoryRulesState { count: number; estimated: number }
+export interface CategoryRulesState { count: number; estimatedHits: number }
 export interface CategoryState { schemaVersion: 1; categories: Category[]; rules: CategoryRulesState }
 // A category change reports the readback plus what happened to existing
 // components, so the UI can confirm the result without guessing.
@@ -107,7 +107,7 @@ export interface Platform {
   tidy(project: PublicProject): Promise<TidyResult>;
   selection(project: PublicProject): Promise<SelectionState>;
   categories(): Promise<CategoryState>;
-  clearCategoryRules(project: PublicProject): Promise<CategoryState>;
+  clearCategoryRules(project: PublicProject): Promise<CategoryChange>;
   addCategory(project: PublicProject, name: string): Promise<CategoryChange>;
   removeCategory(project: PublicProject, name: string): Promise<CategoryChange>;
   renameCategory(project: PublicProject, from: string, to: string): Promise<CategoryChange>;
@@ -290,13 +290,17 @@ export class Workflow {
     });
   }
   // 清空当前页学到的命名规律：写空规则、不立即重学，分类回退通用规则。
-  async clearCategoryRules(): Promise<void> {
+  // 提示文案只由平台返回，界面与工作流都直接展示这份 message，避免两处措辞分叉。
+  async clearCategoryRules(): Promise<CategoryChange> {
+    let change: CategoryChange | undefined;
     await this.task('清空命名规律',async () => {
       const project = this.state.selected;
       if(!project) throw new Error('请选择游戏');
-      await this.platform.clearCategoryRules(project);
-      this.state.notice = '已清空命名规律：分类回退通用规则，下次人工分类或类别变更时重新学习';
+      change = await this.platform.clearCategoryRules(project);
+      this.state.notice = change.message;
     });
+    if(!change) throw new Error('清空命名规律未完成');
+    return change;
   }
   async undoCategory(): Promise<void> {
     const undo = this.state.undo;
@@ -405,9 +409,3 @@ export class Workflow {
   }
 }
 export { createFigmaPlatform } from './platform';
-// #21 学习/匹配的纯函数导出给真实数据校验脚本与跨包测试使用。
-export {
-  categoryRuleIndex, categoryTokens, classify, defaultCategories, learnCategoryRules, matchCategoryRule,
-  readCategoryRules, serializeCategoryRules
-} from './category';
-export type { CategoryRule, CategoryRuleIndex, CategoryRules, CategorySample } from './category';

@@ -90,6 +90,8 @@ export type CategoryInput = { frameName: string; width: number; height: number }
 // 页面只有一个键，值有序（support 降序、同 support 按 token 升序），可回读。
 export const categoryRulesKey = 'atlas.category.rules.v1';
 export const categoryRuleLimit = 400;
+// 学习与读取共用同一长度上限：超长 token 在学习阶段就丢弃，避免写盘后再读被判损坏。
+const categoryRuleTokenLimit = 64;
 const categoryRuleMinSupport = 2;
 const categoryRuleMinPurity = 0.6;
 export type CategoryRuleKind = 'prefix' | 'suffix' | 'glyph';
@@ -134,6 +136,7 @@ export function learnCategoryRules(samples: readonly CategorySample[]): Category
   for(const sample of samples) {
     if(!sample || typeof sample.frameName !== 'string' || typeof sample.category !== 'string' || !sample.category) continue;
     for(const token of categoryTokens(sample.frameName)) {
+      if(token.token.length > categoryRuleTokenLimit) continue;
       const key = tokenKey(token);
       let entry = counts.get(key);
       if(!entry) { entry = {kind:token.kind, token:token.token, total:0, votes:new Map()}; counts.set(key, entry); }
@@ -148,9 +151,11 @@ export function learnCategoryRules(samples: readonly CategorySample[]): Category
     const ranked = [...entry.votes].sort((left,right) => right[1] - left[1] ||
       (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0));
     const [category, best] = ranked[0];
-    const purity = Math.round(best / entry.total * 1000) / 1000;
+    // 阈值用未舍入比例判断；舍入只影响落盘展示，0.5995 不能因四舍五入通过。
+    const purity = best / entry.total;
     if(purity < categoryRuleMinPurity) continue;
-    rules.push({kind:entry.kind, token:entry.token, category, support:entry.total, purity, conflicts:entry.total - best});
+    rules.push({kind:entry.kind, token:entry.token, category, support:entry.total,
+      purity:Math.round(purity * 1000) / 1000, conflicts:entry.total - best});
   }
   rules.sort((left, right) => right.support - left.support || compareText(left.token, right.token) || compareText(left.kind, right.kind));
   return rules.slice(0, categoryRuleLimit);
@@ -167,7 +172,7 @@ function ruleValue(entry: unknown): CategoryRule | undefined {
   if(kind !== 'prefix' && kind !== 'suffix' && kind !== 'glyph') return undefined;
   if(!intValue(candidate.support) || candidate.support < 1 || !intValue(candidate.conflicts)) return undefined;
   if(typeof candidate.purity !== 'number' || !(candidate.purity > 0) || candidate.purity > 1) return undefined;
-  if(typeof candidate.token !== 'string' || !candidate.token || candidate.token.length > 64) return undefined;
+  if(typeof candidate.token !== 'string' || !candidate.token || candidate.token.length > categoryRuleTokenLimit) return undefined;
   if(kind === 'glyph' ? candidate.token !== 'glyph' : !/^[a-z0-9\u4e00-\u9fff]+$/.test(candidate.token)) return undefined;
   if(categoryNameProblem(candidate.category)) return undefined;
   return {kind, token:candidate.token, category:(candidate.category as string).trim(),

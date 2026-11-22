@@ -55,7 +55,7 @@ let workflow:Workflow|undefined;
 // Category choices come from the page; the default seven are only a fallback.
 let categoryChoices:readonly Category[]=defaultCategories;
 // 页面学到的命名族规律摘要；由 loadCategories 回读，只在类别管理弹窗展示。
-let categoryRules:{count:number;estimated:number}={count:0,estimated:0};
+let categoryRules:{count:number;estimatedHits:number}={count:0,estimatedHits:0};
 let uiError='';
 let pageValidationPending=false;
 let remembered=false;
@@ -205,8 +205,8 @@ function renderCategoryManager(busy:boolean) {
   el('category-error').textContent=open?uiError:'';
   el('category-notice').textContent=categoryNotice;
   // 命名规律摘要与清空：清空后回退通用规则，下一次人工分类或类别变更才重新学习。
-  const rulesCount=categoryRules.count||0, estimated=categoryRules.estimated||0;
-  el('category-rules').textContent=`命名规律 ${rulesCount} 条 · 预计命中 ${estimated} 条`;
+  const rulesCount=categoryRules.count||0, estimatedHits=categoryRules.estimatedHits||0;
+  el('category-rules').textContent=`命名规律 ${rulesCount} 条 · 预计命中 ${estimatedHits} 条`;
   const clearRules=el<HTMLButtonElement>('clear-category-rules');
   clearRules.disabled=locked||rulesCount===0;
   clearRules.title=rulesCount===0?'当前页还没有学到的命名规律':lockedHint;
@@ -326,8 +326,8 @@ async function addCategory() {
 async function clearCategoryRules() {
   const current=requireSelectedProject();
   categoryNotice='';
-  await current.clearCategoryRules();
-  categoryNotice='命名规律已清空：分类回退通用规则，下次人工分类或类别变更时重新学习';
+  const change=await current.clearCategoryRules();
+  categoryNotice=change?.message||'';
   await loadCategories();
 }
 async function deleteCategory(name:string) {
@@ -479,7 +479,7 @@ async function loadCategories() {
     if(read.length)choices=read;
     const rules=state?.rules;
     categoryRules={count:Number.isInteger(rules?.count)?rules!.count:0,
-      estimated:Number.isInteger(rules?.estimated)?rules!.estimated:0};
+      estimatedHits:Number.isInteger(rules?.estimatedHits)?rules!.estimatedHits:0};
   } catch { /* keep the default seven and no rules when the page readback fails */ }
   categoryChoices=choices;
   render();
