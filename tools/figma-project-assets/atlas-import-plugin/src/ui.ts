@@ -35,6 +35,7 @@ const platform:Platform={
   tidy:project=>rpc('tidy',{project}),
   selection:project=>rpc('selection',{project}),
   categories:()=>rpc('categories',{}),
+  clearCategoryRules:project=>rpc('clear-category-rules',{project}),
   addCategory:(project,name)=>rpc('add-category',{project,name}),
   removeCategory:(project,name)=>rpc('remove-category',{project,name}),
   renameCategory:(project,from,to)=>rpc('rename-category',{project,from,to}),
@@ -53,6 +54,8 @@ categoryActionRow.append(tooltip(trainingButton));
 let workflow:Workflow|undefined;
 // Category choices come from the page; the default seven are only a fallback.
 let categoryChoices:readonly Category[]=defaultCategories;
+// 页面学到的命名族规律摘要；由 loadCategories 回读，只在类别管理弹窗展示。
+let categoryRules:{count:number;estimated:number}={count:0,estimated:0};
 let uiError='';
 let pageValidationPending=false;
 let remembered=false;
@@ -201,6 +204,12 @@ function renderCategoryManager(busy:boolean) {
   const open=categoryManager.open;
   el('category-error').textContent=open?uiError:'';
   el('category-notice').textContent=categoryNotice;
+  // 命名规律摘要与清空：清空后回退通用规则，下一次人工分类或类别变更才重新学习。
+  const rulesCount=categoryRules.count||0, estimated=categoryRules.estimated||0;
+  el('category-rules').textContent=`命名规律 ${rulesCount} 条 · 预计命中 ${estimated} 条`;
+  const clearRules=el<HTMLButtonElement>('clear-category-rules');
+  clearRules.disabled=locked||rulesCount===0;
+  clearRules.title=rulesCount===0?'当前页还没有学到的命名规律':lockedHint;
   const list=el('category-list');
   list.replaceChildren();
   for(const category of categoryChoices) {
@@ -312,6 +321,13 @@ async function addCategory() {
   input('new-category').value='';
   categoryNotice=change?.message||'';
   // 页面配置是唯一来源：变更后重新回读，标签区与本弹窗共用同一份列表。
+  await loadCategories();
+}
+async function clearCategoryRules() {
+  const current=requireSelectedProject();
+  categoryNotice='';
+  await current.clearCategoryRules();
+  categoryNotice='命名规律已清空：分类回退通用规则，下次人工分类或类别变更时重新学习';
   await loadCategories();
 }
 async function deleteCategory(name:string) {
@@ -461,7 +477,10 @@ async function loadCategories() {
       ? state.categories.filter(category=>category&&typeof category.name==='string'&&category.name&&typeof category.color==='string')
       : [];
     if(read.length)choices=read;
-  } catch { /* keep the default seven when the page readback fails */ }
+    const rules=state?.rules;
+    categoryRules={count:Number.isInteger(rules?.count)?rules!.count:0,
+      estimated:Number.isInteger(rules?.estimated)?rules!.estimated:0};
+  } catch { /* keep the default seven and no rules when the page readback fails */ }
   categoryChoices=choices;
   render();
 }
@@ -557,6 +576,7 @@ categoryManager.addEventListener('cancel',event=>{if(workflow?.state.busy){event
   resetCategoryDraft();});
 input('new-category').oninput=()=>render();
 el('add-category').onclick=()=>void run(addCategory);
+el('clear-category-rules').onclick=()=>void run(clearCategoryRules);
 el('rename-save').onclick=()=>void run(renameCategory);
 el('rename-cancel').onclick=()=>{resetCategoryDraft();render();};
 input('rename-value').oninput=()=>render();

@@ -85,18 +85,179 @@ const nameRules: ReadonlyArray<{category: string; keywords: readonly string[]}> 
 
 export type CategoryInput = { frameName: string; width: number; height: number };
 
-export function classify(input: CategoryInput): CategoryName {
+// 名称族规律（#21）：从当前页的人工标签学出「名称 token → 类别」。
+// token 化与匹配共用一套实现，避免学习和应用对名称的理解漂移。
+// 页面只有一个键，值有序（support 降序、同 support 按 token 升序），可回读。
+export const categoryRulesKey = 'atlas.category.rules.v1';
+export const categoryRuleLimit = 400;
+const categoryRuleMinSupport = 2;
+const categoryRuleMinPurity = 0.6;
+export type CategoryRuleKind = 'prefix' | 'suffix' | 'glyph';
+export interface CategoryRule {
+  kind: CategoryRuleKind; token: string; category: CategoryName;
+  support: number; purity: number; conflicts: number;
+}
+export interface CategoryRules { schemaVersion: 1; rules: CategoryRule[] }
+export type CategoryToken = { kind: CategoryRuleKind; token: string };
+// 按 kind+token 预先分桶，名称匹配只查自己的 token，避免逐条扫全表。
+export type CategoryRuleIndex = ReadonlyMap<string, readonly CategoryRule[]>;
+export interface ClassifiedCategory { category: CategoryName; learned: boolean }
+
+const tokenKey = (token: CategoryToken): string => token.kind + '\u0000' + token.token;
+
+// 名称切词：小写后按非字母数字中文分隔；首段记前缀族，其余记后缀/词族。
+// 纯数字名称与 `number_*` 归一为「字形」族；同一名称里重复的 token 只算一票。
+export function categoryTokens(frameName: string): CategoryToken[] {
+  const name = String(frameName ?? '').toLocaleLowerCase();
+  const parts = name.split(/[^a-z0-9\u4e00-\u9fff]+/).filter(part => part.length > 0);
+  const tokens: CategoryToken[] = [];
+  if(parts.length) {
+    tokens.push({kind:'prefix', token:parts[0]});
+    for(const part of parts.slice(1)) tokens.push({kind:'suffix', token:part});
+  }
+  if(/^[0-9]+$/.test(name) || parts[0] === 'number') tokens.push({kind:'glyph', token:'glyph'});
+  const seen = new Set<string>();
+  return tokens.filter(token => {
+    const key = tokenKey(token);
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export interface CategorySample { frameName: string; category: CategoryName }
+
+// 学习：每个 token 统计各类别票数，多数票即规则类别，冲突数照实记录。
+// 只保留 support ≥ 2 且 purity ≥ 0.6 的族，容忍少量标注噪声而不是整体失效。
+export function learnCategoryRules(samples: readonly CategorySample[]): CategoryRule[] {
+  const counts = new Map<string, {kind: CategoryRuleKind; token: string; total: number; votes: Map<string, number>}>();
+  for(const sample of samples) {
+    if(!sample || typeof sample.frameName !== 'string' || typeof sample.category !== 'string' || !sample.category) continue;
+    for(const token of categoryTokens(sample.frameName)) {
+      const key = tokenKey(token);
+      let entry = counts.get(key);
+      if(!entry) { entry = {kind:token.kind, token:token.token, total:0, votes:new Map()}; counts.set(key, entry); }
+      entry.total++;
+      entry.votes.set(sample.category, (entry.votes.get(sample.category) || 0) + 1);
+    }
+  }
+  const rules: CategoryRule[] = [];
+  for(const entry of counts.values()) {
+    if(entry.total < categoryRuleMinSupport) continue;
+    // 同票时按类别名排序取最小，结果不依赖标签写入顺序。
+    const ranked = [...entry.votes].sort((left,right) => right[1] - left[1] ||
+      (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0));
+    const [category, best] = ranked[0];
+    const purity = Math.round(best / entry.total * 1000) / 1000;
+    if(purity < categoryRuleMinPurity) continue;
+    rules.push({kind:entry.kind, token:entry.token, category, support:entry.total, purity, conflicts:entry.total - best});
+  }
+  rules.sort((left, right) => right.support - left.support || compareText(left.token, right.token) || compareText(left.kind, right.kind));
+  return rules.slice(0, categoryRuleLimit);
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function ruleValue(entry: unknown): CategoryRule | undefined {
+  if(!entry || typeof entry !== 'object') return undefined;
+  const candidate = entry as Partial<CategoryRule>;
+  const kind = candidate.kind;
+  if(kind !== 'prefix' && kind !== 'suffix' && kind !== 'glyph') return undefined;
+  if(!intValue(candidate.support) || candidate.support < 1 || !intValue(candidate.conflicts)) return undefined;
+  if(typeof candidate.purity !== 'number' || !(candidate.purity > 0) || candidate.purity > 1) return undefined;
+  if(typeof candidate.token !== 'string' || !candidate.token || candidate.token.length > 64) return undefined;
+  if(kind === 'glyph' ? candidate.token !== 'glyph' : !/^[a-z0-9\u4e00-\u9fff]+$/.test(candidate.token)) return undefined;
+  if(categoryNameProblem(candidate.category)) return undefined;
+  return {kind, token:candidate.token, category:(candidate.category as string).trim(),
+    support:candidate.support, purity:candidate.purity, conflicts:candidate.conflicts};
+}
+
+function intValue(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 1_000_000;
+}
+
+// 缺失意味着还没有学习；损坏或含非法条目时整份回退空规则并报告 `repaired`，
+// 让调用方回写重建，而不是阻断导入或页面校验（与类别配置同一风格）。
+export function readCategoryRules(raw: string | undefined | null): {rules: CategoryRule[]; repaired: boolean} {
+  if(!raw) return {rules:[], repaired:false};
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { return {rules:[], repaired:true}; }
+  const record = value as Partial<CategoryRules> | null;
+  const list = record && typeof record === 'object' ? record.rules : undefined;
+  if(!record || record.schemaVersion !== 1 || !Array.isArray(list) || list.length > categoryRuleLimit) {
+    return {rules:[], repaired:true};
+  }
+  const rules: CategoryRule[] = [];
+  const seen = new Set<string>();
+  for(const entry of list) {
+    const rule = ruleValue(entry);
+    if(!rule) return {rules:[], repaired:true};
+    const key = tokenKey(rule);
+    if(seen.has(key)) return {rules:[], repaired:true};
+    seen.add(key);
+    rules.push(rule);
+  }
+  return {rules, repaired:false};
+}
+
+export function serializeCategoryRules(rules: readonly CategoryRule[]): string {
+  return JSON.stringify({schemaVersion:1, rules:rules.slice(0, categoryRuleLimit).map(rule => ({
+    kind:rule.kind, token:rule.token, category:rule.category,
+    support:rule.support, purity:rule.purity, conflicts:rule.conflicts}))});
+}
+
+export function categoryRuleIndex(rules: readonly CategoryRule[]): CategoryRuleIndex {
+  const index = new Map<string, CategoryRule[]>();
+  for(const rule of rules) {
+    const key = tokenKey(rule);
+    const bucket = index.get(key);
+    if(bucket) bucket.push(rule);
+    else index.set(key, [rule]);
+  }
+  return index;
+}
+
+// 匹配：同名多个 token 时得分 log(1+support) × purity，取最高分；同分先取 support 大者，
+// 再取页面类别配置中靠前的类别。规则指向已不存在的类别时视为未命中，继续回退。
+export function matchCategoryRule(index: CategoryRuleIndex, frameName: string, config: CategoryConfig): CategoryRule | undefined {
+  if(!index.size) return undefined;
+  const names = config.categories.map(category => category.name);
+  let best: {rule: CategoryRule; score: number} | undefined;
+  for(const token of categoryTokens(frameName)) {
+    const bucket = index.get(tokenKey(token));
+    if(!bucket) continue;
+    for(const rule of bucket) {
+      if(!knownCategory(config, rule.category)) continue;
+      const score = Math.log(1 + rule.support) * rule.purity;
+      if(!best || score > best.score + 1e-12) { best = {rule, score}; continue; }
+      if(Math.abs(score - best.score) > 1e-12) continue;
+      if(rule.support > best.rule.support) { best = {rule, score}; continue; }
+      if(rule.support < best.rule.support) continue;
+      if(categoryIndex(names, rule.category) < categoryIndex(names, best.rule.category)) best = {rule, score};
+    }
+  }
+  return best?.rule;
+}
+
+// 优先级：学到的命名族在前，未命中才回退前缀/关键词/尺寸。`learned` 供预览统计使用。
+export function classify(input: CategoryInput, learned?: CategoryRuleIndex, config?: CategoryConfig): ClassifiedCategory {
+  if(learned && config) {
+    const rule = matchCategoryRule(learned, input.frameName, config);
+    if(rule) return {category:rule.category, learned:true};
+  }
   const name = input.frameName.toLocaleLowerCase();
   const token = name.match(/^[a-z]+/)?.[0];
-  if(token) for(const rule of prefixRules) if(rule.prefixes.includes(token)) return rule.category;
-  for(const rule of nameRules) if(rule.keywords.some(keyword => name.includes(keyword))) return rule.category;
+  if(token) for(const rule of prefixRules) if(rule.prefixes.includes(token)) return {category:rule.category, learned:false};
+  for(const rule of nameRules) if(rule.keywords.some(keyword => name.includes(keyword))) return {category:rule.category, learned:false};
   const width = input.width, height = input.height;
-  if(!(width > 0 && height > 0)) return unsortedCategory;
-  if(width >= 512 && height >= 512) return '背景';
+  if(!(width > 0 && height > 0)) return {category:unsortedCategory, learned:false};
+  if(width >= 512 && height >= 512) return {category:'背景', learned:false};
   const small = Math.min(width,height), large = Math.max(width,height);
-  if(small >= 8 && large <= 256 && large / small <= 1.5) return '图标';
-  if(height >= 8 && height <= 96 && width >= height * 2.5 && width <= 1024) return '按钮';
-  return unsortedCategory;
+  if(small >= 8 && large <= 256 && large / small <= 1.5) return {category:'图标', learned:false};
+  if(height >= 8 && height <= 96 && width >= height * 2.5 && width <= 1024) return {category:'按钮', learned:false};
+  return {category:unsortedCategory, learned:false};
 }
 
 // Display name format: 分类/散图原名. `sourceInfo` is the source location and

@@ -127,7 +127,7 @@ dialog::backdrop{background:#0006}
 #category-manager .small-body{gap:8px;flex:1;min-height:0;overflow:hidden}
 #category-manager .dialog-small{display:flex;flex-direction:column;height:calc(100vh - 26px);min-height:0}
 #category-manager .category-manage-list{flex:1 1 auto;max-height:none;min-height:72px}
-#category-manager .category-add,#category-manager .category-confirm,#category-manager .category-rename,#category-manager #category-notice,#category-manager #category-error{flex:none}
+#category-manager .category-add,#category-manager .category-confirm,#category-manager .category-rename,#category-manager .category-rules-line,#category-manager #category-notice,#category-manager #category-error{flex:none}
 .category-dot{width:8px;height:8px;border-radius:50%;background:var(--tag,#8b8d98);flex:none;box-shadow:0 0 0 1px #00000014}
 .category-manage-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;max-height:252px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin}
 .category-manage-row{display:flex;align-items:center;gap:6px;padding:3px 6px;border:1px solid var(--figma-color-border,#e4e4e4);border-radius:6px;background:var(--figma-color-bg-secondary,#f7f7f7);min-width:0}
@@ -145,6 +145,9 @@ dialog::backdrop{background:#0006}
 .category-rename .rename-actions button{padding:2px 7px;font-size:10px}
 .category-rename #rename-note{flex:1 1 100%;margin:0;color:var(--figma-color-text-danger,#a20)}
 .category-rename #rename-note[hidden]{display:none}
+.category-rules-line{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--figma-color-text-secondary,#666);min-width:0}
+.category-rules-line #category-rules{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.category-rules-line button{flex:none;padding:2px 7px;font-size:10px}
 .category-add{display:flex;flex-direction:column;gap:6px;padding-top:2px}
 .category-color-line{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--figma-color-text-secondary,#666)}
 .category-add .primary{width:100%}
@@ -229,6 +232,8 @@ dialog::backdrop{background:#0006}
     <div class="dialog-head"><h2 id="category-manager-title">类别管理</h2><button type="button" id="category-manager-close" title="关闭类别管理；已保存的类别不会撤销。">关闭类别管理</button></div>
     <div class="small-body">
       <p class="muted small">类别保存在当前资源页：新增后立即出现分类 Frame 与标签，删除时其中的主组件会先移到「未分类」，用户自有对象留在原处。</p>
+      <!-- 命名规律由人工标签学出：展示条数与预计命中，可一键清空后回退通用规则。 -->
+      <div class="category-rules-line"><span id="category-rules" data-testid="category-rules">命名规律 0 条 · 预计命中 0 条</span><button type="button" id="clear-category-rules" class="quiet" data-testid="clear-category-rules" disabled title="当前页还没有学到的命名规律">清空规律</button></div>
       <ul id="category-list" data-testid="category-list" class="category-manage-list" aria-label="当前类别"></ul>
       <!-- 删除确认与改名行固定在列表之外：列表再长也不会把它们挤到滚动区外。 -->
       <div id="category-confirm" class="category-confirm" role="group" aria-label="确认删除类别" hidden></div>

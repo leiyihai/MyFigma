@@ -42,6 +42,10 @@ figma.ui.onmessage=async(message:{type:string;requestId:number;project:PublicPro
     else if(message.type==='tidy')reply(await platform.tidy(message.project));
     else if(message.type==='selection')reply(await platform.selection(message.project));
     else if(message.type==='categories')reply(await platform.categories());
+    else if(message.type==='clear-category-rules') {
+      if(!message.project) throw new Error('项目信息无效');
+      reply(await platform.clearCategoryRules(message.project));
+    }
     else if(message.type==='add-category') {
       if(typeof message.name!=='string') throw new Error('类别名称无效');
       reply(await platform.addCategory(message.project,message.name));

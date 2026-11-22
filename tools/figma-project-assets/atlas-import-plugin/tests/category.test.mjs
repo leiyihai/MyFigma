@@ -1312,3 +1312,233 @@ test('类别数量达到配置上限时拒绝新增，避免整份配置被判�
     assert.equal((await platform.categories()).categories.length, 64);
   } finally { await f.cleanup(); }
 });
+
+// #21 从人工标签学习页面级命名族规则：学习、应用优先级、联动与清空语义。
+const rulesKey = 'atlas.category.rules.v1';
+const project21 = { id: 'g8', name: '分类测试' };
+function storedRules(page) {
+  return JSON.parse(page.getPluginData(rulesKey) || '{"schemaVersion":1,"rules":[]}');
+}
+function component(page, name) {
+  return page.findAll(node => node.type === 'COMPONENT' && node.name === name)[0];
+}
+async function label(workflow, page, names, category) {
+  const components = names.map(name => component(page, name));
+  assert.ok(components.every(Boolean), `找不到组件：${names.join('、')}`);
+  page.selection = components;
+  await workflow.loadSelection();
+  await workflow.setCategory(category);
+}
+
+test('从人工标签学出名称族规则，导入预览与导入都优先于通用前缀规则', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    // 通用规则会把 btn_* 判成按钮；人工标签说明这批素材是图标。
+    await sprite(f, 'btn_a.json', 'btn_a', 64, 24);
+    await sprite(f, 'btn_b.json', 'btn_b', 64, 24);
+    await sprite(f, 'panel_base.json', 'panel_base', 40, 30);
+    await workflow.scan();
+    await workflow.import();
+    await label(workflow, page, ['按钮/btn_a', '按钮/btn_b'], '图标');
+
+    // 规则写进资源页：有序、带 support/purity/conflicts，只保留有证据的名称族。
+    assert.deepEqual(storedRules(page), { schemaVersion: 1, rules: [
+      { kind: 'prefix', token: 'btn', category: '图标', support: 2, purity: 1, conflicts: 0 }
+    ] });
+
+    // 新素材：btn_new 命中学习规律判为图标，panel_new 未命中仍回退通用前缀规则。
+    await sprite(f, 'btn_new.json', 'btn_new', 64, 24);
+    await sprite(f, 'panel_new.json', 'panel_new', 40, 30);
+    await workflow.scan();
+    assert.ok(workflow.state.plan.messages.includes('按学习命名规律预分类 1 条'));
+    await workflow.import();
+    assert.equal(component(page, '图标/btn_new').parent.name, '图标');
+    assert.equal(component(page, '底板/panel_new').parent.name, '底板');
+    // 回读条数与预计命中：人工覆盖的组件不计入预计命中。
+    assert.deepEqual((await platform.categories()).rules, { count: 1, estimated: 1 });
+  } finally { await f.cleanup(); }
+});
+
+test('学习阈值、字形族与同名多标多数票：support 与 purity 不达标不学，冲突记录不整体失效', async () => {
+  const { f, workflow, page } = await setup();
+  try {
+    await sprite(f, 'chip_1.json', 'chip_1', 32, 32);
+    await sprite(f, 'chip_2.json', 'chip_2', 32, 32);
+    await sprite(f, 'chip_3.json', 'chip_3', 32, 32);
+    await sprite(f, 'single_x.json', 'single_x', 32, 32);
+    await sprite(f, '7.json', '7', 32, 32);
+    await sprite(f, '8.json', '8', 32, 32);
+    await sprite(f, 'number_9.json', 'number_9', 45, 59);
+    await sprite(f, 'number_10.json', 'number_10', 45, 59);
+    await sprite(f, 'img_a.json', 'img_a', 40, 40);
+    await sprite(f, 'img_b.json', 'img_b', 40, 40);
+    await workflow.scan();
+    await workflow.import();
+
+    // 同名 token 多数票：chip 3 条里 2 条图标 1 条按钮 → 图标，冲突 1。
+    // 点击已高亮的当前类别是空操作，先批量标成按钮再把两条改回图标。
+    await label(workflow, page, ['图标/chip_1', '图标/chip_2', '图标/chip_3'], '按钮');
+    await label(workflow, page, ['按钮/chip_1', '按钮/chip_2'], '图标');
+    // support 1 的 single_x 不学；img 两条标成不同类别，purity 0.5 不学。
+    await label(workflow, page, ['图标/single_x'], '按钮');
+    await label(workflow, page, ['图标/img_a'], '按钮');
+    await label(workflow, page, ['图标/img_b'], '底板');
+    // 字形族：纯数字与 number_* 归一，与名称前缀族并存。
+    await label(workflow, page, ['图标/7', '图标/8', '图标/number_9', '图标/number_10'], '艺术字');
+
+    // support 降序、同 support 按 token 升序。
+    assert.deepEqual(storedRules(page).rules, [
+      { kind: 'glyph', token: 'glyph', category: '艺术字', support: 4, purity: 1, conflicts: 0 },
+      { kind: 'prefix', token: 'chip', category: '图标', support: 3, purity: 0.667, conflicts: 1 },
+      { kind: 'prefix', token: 'number', category: '艺术字', support: 2, purity: 1, conflicts: 0 }
+    ]);
+
+    // 应用：字形族同时命中纯数字与新 number_*，多数票族命中 chip 新素材。
+    await sprite(f, '9.json', '9', 37, 39);
+    await sprite(f, 'number_11.json', 'number_11', 40, 40);
+    await sprite(f, 'chip_9.json', 'chip_9', 32, 32);
+    await sprite(f, 'img_c.json', 'img_c', 32, 32);
+    await workflow.scan();
+    await workflow.import();
+    assert.equal(component(page, '艺术字/9').parent.name, '艺术字');
+    assert.equal(component(page, '艺术字/number_11').parent.name, '艺术字');
+    assert.equal(component(page, '图标/chip_9').parent.name, '图标');
+    // 未学到 img 族：回退通用规则（小方图 → 图标）。
+    assert.equal(component(page, '图标/img_c').parent.name, '图标');
+  } finally { await f.cleanup(); }
+});
+
+test('学到的规律不覆盖人工分类，未命中回退通用规则，恢复自动分类用同一优先级', async () => {
+  const { f, workflow, page } = await setup();
+  try {
+    await sprite(f, 'btn_a.json', 'btn_a', 64, 24);
+    await sprite(f, 'btn_b.json', 'btn_b', 64, 24);
+    await sprite(f, 'panel_base.json', 'panel_base', 40, 30);
+    await workflow.scan();
+    await workflow.import();
+    await label(workflow, page, ['按钮/btn_a', '按钮/btn_b'], '图标');
+    await sprite(f, 'btn_new.json', 'btn_new', 64, 24);
+    await sprite(f, 'panel_new.json', 'panel_new', 40, 30);
+    await workflow.scan();
+    await workflow.import();
+
+    // 人工把 btn_new 改回按钮：人工分类始终最高优先。
+    await label(workflow, page, ['图标/btn_new'], '按钮');
+    // 一条冲突不足以让名称族整体失效，冲突数被记录。
+    assert.deepEqual(storedRules(page).rules, [
+      { kind: 'prefix', token: 'btn', category: '图标', support: 3, purity: 0.667, conflicts: 1 }
+    ]);
+    // 再次增量导入：人工分类不被学到的规律覆盖。
+    await workflow.scan();
+    await workflow.import();
+    assert.equal(component(page, '按钮/btn_new').parent.name, '按钮');
+    assert.equal(component(page, '按钮/btn_new').getPluginData('atlas.category.manual'), '按钮');
+
+    // 恢复自动分类按「学习规律 > 通用规则」重新计算。
+    page.selection = [component(page, '按钮/btn_new')];
+    await workflow.loadSelection();
+    await workflow.setCategory('auto');
+    assert.equal(component(page, '图标/btn_new').parent.name, '图标');
+    assert.equal(component(page, '图标/btn_new').getPluginData('atlas.category.manual'), '');
+    // 未命中的 panel_* 仍按通用前缀规则归入底板。
+    assert.equal(component(page, '底板/panel_new').parent.name, '底板');
+  } finally { await f.cleanup(); }
+});
+
+test('类别改名与删除联动命名规律：改名同步改指，删除后不把组件引回已删除类别', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'btn_a.json', 'btn_a', 64, 24);
+    await sprite(f, 'btn_b.json', 'btn_b', 64, 24);
+    await sprite(f, 'btn_c.json', 'btn_c', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    await label(workflow, page, ['按钮/btn_a', '按钮/btn_b', '按钮/btn_c'], '图标');
+
+    await platform.renameCategory(project21, '图标', '图形');
+    assert.deepEqual(storedRules(page).rules, [
+      { kind: 'prefix', token: 'btn', category: '图形', support: 3, purity: 1, conflicts: 0 }
+    ]);
+    await sprite(f, 'btn_new.json', 'btn_new', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    assert.equal(component(page, '图形/btn_new').parent.name, '图形');
+
+    await platform.removeCategory(project21, '图形');
+    // 删除的类别不得继续出现在规律里；迁移到未分类的人工覆盖成为新的学习证据。
+    assert.equal(page.getPluginData(rulesKey).includes('图形'), false);
+    // 学习信号只有人工覆盖：btn_new 是按规律自动分类的，不贡献新样本。
+    assert.deepEqual(storedRules(page).rules, [
+      { kind: 'prefix', token: 'btn', category: '未分类', support: 3, purity: 1, conflicts: 0 }
+    ]);
+    await sprite(f, 'btn_next.json', 'btn_next', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    assert.equal(component(page, '未分类/btn_next').parent.name, '未分类');
+  } finally { await f.cleanup(); }
+});
+
+test('命名规律配置损坏或含非法条目时整份回退无规律并回写重建，不阻断导入与页面校验', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'btn_a.json', 'btn_a', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    // 不可解析：回退空规则并回写，不抛错。
+    page.setPluginData(rulesKey, '{不是 JSON');
+    assert.deepEqual((await platform.categories()).rules, { count: 0, estimated: 0 });
+    assert.deepEqual(storedRules(page), { schemaVersion: 1, rules: [] });
+    assert.equal((await platform.validate(project21)).valid, true);
+    // 非法条目（未知种类）同样整份回退，不做部分采用。
+    page.setPluginData(rulesKey, JSON.stringify({ schemaVersion: 1, rules: [
+      { kind: 'word', token: 'btn', category: '图标', support: 2, purity: 1, conflicts: 0 }
+    ] }));
+    assert.deepEqual((await platform.categories()).rules, { count: 0, estimated: 0 });
+    assert.deepEqual(storedRules(page), { schemaVersion: 1, rules: [] });
+    // 导入仍按通用规则工作。
+    await sprite(f, 'btn_b.json', 'btn_b', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    assert.equal(component(page, '按钮/btn_b').parent.name, '按钮');
+    // 未绑定页不能写规律：拒绝并保持页面为空。
+    const blank = figmaFixture();
+    const other = api.createFigmaPlatform(blank.api);
+    await assert.rejects(() => other.clearCategoryRules(project21), /请先导入主组件/);
+    assert.equal(blank.page.getPluginData(rulesKey), '');
+  } finally { await f.cleanup(); }
+});
+
+test('类别管理回读规律条数与预计命中，清空后回退通用规则并再次人工分类时重学', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'btn_a.json', 'btn_a', 64, 24);
+    await sprite(f, 'btn_b.json', 'btn_b', 64, 24);
+    await sprite(f, 'btn_c.json', 'btn_c', 64, 24);
+    await sprite(f, 'btn_d.json', 'btn_d', 64, 24);
+    await sprite(f, 'btn_e.json', 'btn_e', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    await label(workflow, page, ['按钮/btn_a', '按钮/btn_b', '按钮/btn_c'], '图标');
+    await sprite(f, 'btn_f.json', 'btn_f', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    assert.equal(component(page, '图标/btn_f').parent.name, '图标');
+    // 预计命中只统计没有人工覆盖、且能被规律匹配到的当前页组件：btn_d/btn_e/btn_f。
+    assert.deepEqual((await platform.categories()).rules, { count: 1, estimated: 3 });
+
+    // 清空规律只写空规则，不立即重学。
+    const cleared = await platform.clearCategoryRules(project21);
+    assert.deepEqual(cleared.rules, { count: 0, estimated: 0 });
+    assert.deepEqual(storedRules(page), { schemaVersion: 1, rules: [] });
+    await sprite(f, 'btn_g.json', 'btn_g', 64, 24);
+    await workflow.scan();
+    assert.equal(workflow.state.plan.messages.some(message => message.includes('学习命名规律')), false);
+    await workflow.import();
+    // 清空后分类回退通用前缀规则：btn → 按钮。
+    assert.equal(component(page, '按钮/btn_g').parent.name, '按钮');
+
+    // 下一次人工分类重新学习（清空不等于永久关闭）。
+    await label(workflow, page, ['按钮/btn_g'], '图标');
+    assert.deepEqual((await platform.categories()).rules, { count: 1, estimated: 3 });
+  } finally { await f.cleanup(); }
+});

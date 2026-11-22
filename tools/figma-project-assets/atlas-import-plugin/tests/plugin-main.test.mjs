@@ -90,6 +90,25 @@ test('built main script loads in an import-rejecting sandbox, stores pairing loc
     assert.deepEqual(samplesReply.result.samples, [{
       identity: JSON.parse(manual.getPluginData('atlas.source')).identity, category: '按钮'
     }]);
+    // 命名规律 RPC：回读摘要（条数 + 预计命中），清空写入空规则且不立即重学。
+    for (const node of page.findAll(node => node.type === 'COMPONENT')) {
+      node.setPluginData('atlas.category.manual', '按钮');
+    }
+    await figma.ui.onmessage({ type: 'categories', requestId: 31 });
+    const rulesReply = replies.find(reply => reply.requestId === 31);
+    assert.equal(rulesReply.error, undefined);
+    assert.deepEqual(Object.keys(rulesReply.result.rules).sort(), ['count', 'estimated']);
+    assert.equal(Number.isInteger(rulesReply.result.rules.count), true);
+    assert.equal(Number.isInteger(rulesReply.result.rules.estimated), true);
+    await figma.ui.onmessage({ type: 'clear-category-rules', requestId: 32, project: { id: 'g2', name: '测试游戏' } });
+    const clearedRules = replies.find(reply => reply.requestId === 32);
+    assert.equal(clearedRules.error, undefined);
+    assert.deepEqual(clearedRules.result.rules, { count: 0, estimated: 0 });
+    assert.deepEqual(JSON.parse(page.getPluginData('atlas.category.rules.v1')), { schemaVersion: 1, rules: [] });
+    await figma.ui.onmessage({ type: 'categories', requestId: 33 });
+    assert.deepEqual(replies.find(reply => reply.requestId === 33).result.rules, { count: 0, estimated: 0 });
+    await figma.ui.onmessage({ type: 'clear-category-rules', requestId: 34 });
+    assert.match(replies.find(reply => reply.requestId === 34).error, /项目信息无效/);
     await figma.ui.onmessage({ type: 'tidy', requestId: 4, project: { id: 'g2', name: '测试游戏' } });
     const tidied = replies.find(reply => reply.requestId === 4);
     assert.equal(tidied.error, undefined);
