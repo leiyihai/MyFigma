@@ -190,8 +190,8 @@ function storedRecord(component: ComponentNode): {record?: NineSliceRecord; corr
 // Category frames are tool-managed page children. New frames store the category
 // name in `atlas.category`; `unsorted` is the legacy #3 marker for 未分类.
 const categoryGap = 48;
-const compareColumns = 3;
 const compareGap = 24;
+function compareColumns(count: number): number { return Math.max(1, Math.ceil(Math.sqrt(count))); }
 function frameCategory(node: FrameNode): CategoryName | undefined {
   const raw = node.getPluginData(categoryKey);
   if(raw === 'unsorted') return '未分类';
@@ -487,6 +487,11 @@ function orderedCategoryFrames(page: PageNode): FrameNode[] {
 }
 // 重新整理 only touches category frame coordinates. Components, their source
 // records, instance links and nine-slice child constraints stay untouched.
+function tidyCompareGroups(page: PageNode): TidyResult {
+  const result = layoutCompareGroups(page);
+  return {schemaVersion:1,frames:result.frames,moved:result.moved,
+    messages:result.frames?[]:['当前对照页没有图集分组，无需整理']};
+}
 function tidyCategoryFrames(page: PageNode): TidyResult {
   const frames = orderedCategoryFrames(page);
   if(!frames.length) return {schemaVersion:1,frames:0,moved:0,
@@ -731,6 +736,37 @@ function existingCompareInstances(page: PageNode): Map<string, InstanceNode[]> {
   return found;
 }
 type CompareCounts = { added: number; removed: number; kept: number; groups: number; messages: string[] };
+function compareGroups(page: PageNode): FrameNode[] {
+  const indexed = new Map<SceneNode, number>();
+  page.children.forEach((node, index) => indexed.set(node, index));
+  return page.children.filter((node): node is FrameNode => node.type === 'FRAME' && !!node.getPluginData(compareGroupKey))
+    .sort((left, right) => {
+      const key = left.getPluginData(compareGroupKey).localeCompare(right.getPluginData(compareGroupKey));
+      return key || (indexed.get(left) || 0) - (indexed.get(right) || 0);
+    });
+}
+function layoutCompareGroups(page: PageNode): { frames: number; moved: number } {
+  const frames = compareGroups(page);
+  if(!frames.length) return {frames:0,moved:0};
+  const columns = compareColumns(frames.length);
+  let column = 0, rowY = 0, rowHeight = 0, moved = 0;
+  for(const frame of frames) {
+    const x = column * (1200 + compareGap);
+    if(frame.x !== x || frame.y !== rowY) {
+      frame.x = x; frame.y = rowY;
+      moved++;
+    }
+    rowHeight = Math.max(rowHeight, frame.height || 0);
+    column++;
+    if(column === columns) {
+      column = 0;
+      rowY += rowHeight + compareGap;
+      rowHeight = 0;
+    }
+  }
+  return {frames:frames.length,moved};
+}
+
 function syncComparePage(page: PageNode, items: Map<string, CompareItem>, api: Pick<PluginAPI,'createFrame'>,
   created: { instances: InstanceNode[]; frames: FrameNode[] }): CompareCounts {
   const messages: string[] = [];
@@ -785,8 +821,8 @@ function syncComparePage(page: PageNode, items: Map<string, CompareItem>, api: P
     created.instances.push(copy);
     added++;
   }
-  // Keep many source-atlas groups browseable: three columns, then a new row.
-  // Row height follows the tallest frame in that row.
+  // Grid columns follow group count: 4 -> 2x2, 9 -> 3x3, 10 -> 4x3.
+  const columns = compareColumns(keys.length);
   let column = 0, rowY = 0, rowHeight = 0;
   for(const key of keys) {
     const frame = frames.get(key)!;
@@ -794,7 +830,7 @@ function syncComparePage(page: PageNode, items: Map<string, CompareItem>, api: P
     frame.y = rowY;
     rowHeight = Math.max(rowHeight, frame.height || 0);
     column++;
-    if(column === compareColumns) {
+    if(column === columns) {
       column = 0;
       rowY += rowHeight + compareGap;
       rowHeight = 0;
@@ -1050,8 +1086,10 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         const page = api.currentPage;
         await loadPage(page);
         const status = validate(page, project);
-        if(!status.valid) throw new Error(status.message);
-        return tidyCategoryFrames(page);
+        if(status.valid) return tidyCategoryFrames(page);
+        const compare = parseCompareBinding(page.getPluginData(compareKey));
+        if(compare?.projectId === project.id) return tidyCompareGroups(page);
+        throw new Error(status.message);
       } finally {busy=false;}
     },
     async compare(project) {

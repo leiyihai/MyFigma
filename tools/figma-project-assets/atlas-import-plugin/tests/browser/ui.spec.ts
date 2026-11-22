@@ -155,7 +155,7 @@ test('management dialog, maintained dropdown, real scan, task lock, progress and
     expect(await page.evaluate(()=>(window as any).compareCalls)).toBe(1);
     // 重新整理 explains its scope in hover and only repositions category frames.
     await ui.getByRole('button',{name:'重新整理',exact:true}).hover();
-    await expect(ui.getByRole('tooltip')).toContainText('不改变九宫格切片');
+    await expect(ui.getByRole('tooltip')).toContainText('近方形网格');
     await ui.getByRole('button',{name:'重新整理',exact:true}).click();
     await expect(ui.getByTestId('action-result')).toContainText('重新整理：3 个分类 Frame');
     await expect(ui.getByTestId('action-result')).toContainText('移动 2 个');

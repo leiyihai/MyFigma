@@ -234,8 +234,8 @@ test('没有导入主组件时拒绝创建对照页', async () => {
 });
 
 
-test('对照页图集分组按三列网格排列，超过三组后换行', async () => {
-  const { f, workflow, root } = await setup();
+test('对照页图集分组按数量计算近方形网格，并允许重新整理', async () => {
+  const { f, workflow, root, api: figma } = await setup();
   try {
     // Add two more source atlases so the comparison page has four groups.
     for(const name of ['extra_a', 'extra_b']) {
@@ -250,8 +250,14 @@ test('对照页图集分组按三列网格排列，超过三组后换行', async
     const page = comparePage(root);
     const frames = page.children.filter(node => node.type === 'FRAME');
     assert.equal(frames.length, 4);
-    assert.deepEqual(frames.slice(0, 3).map(frame => [frame.x, frame.y]), [[0, 0], [1224, 0], [2448, 0]]);
-    assert.equal(frames[3].x, 0);
-    assert.equal(frames[3].y, Math.max(...frames.slice(0, 3).map(frame => frame.height)) + 24);
+    // 4 groups -> ceil(sqrt(4)) = 2 columns, 2 rows.
+    assert.deepEqual(frames.map(frame => [frame.x, frame.y]), [[0, 0], [1224, 0], [0, frames[0].height + 24], [1224, frames[0].height + 24]]);
+    // 重新整理 works on the bound comparison page and restores the same grid.
+    for(const frame of frames) { frame.x = 77; frame.y = 99; }
+    figma.currentPage = page;
+    await workflow.tidy();
+    assert.equal(workflow.state.tidy.frames, 4);
+    assert.equal(workflow.state.tidy.moved, 4);
+    assert.deepEqual(frames.map(frame => [frame.x, frame.y]), [[0, 0], [1224, 0], [0, frames[0].height + 24], [1224, frames[0].height + 24]]);
   } finally { await f.cleanup(); }
 });
