@@ -1,4 +1,4 @@
-import type { CategoryName } from './category';
+import type { Category } from './category';
 export interface Project { id: string; name: string; path: string; maintained: boolean }
 export interface PublicProject { id: string; name: string }
 export interface Source {
@@ -38,7 +38,7 @@ export interface TidyResult {
 }
 export interface ItemFailure { name: string; reason: string }
 export interface SelectionMember {
-  id: string; name: string; category: CategoryName; manual: boolean; viaInstance: boolean;
+  id: string; name: string; category: string; manual: boolean; viaInstance: boolean;
 }
 export interface SelectionState {
   schemaVersion: 1; members: SelectionMember[]; ignored: number; mixed: boolean;
@@ -46,6 +46,9 @@ export interface SelectionState {
 export interface CategoryResult {
   schemaVersion: 1; action: 'manual' | 'auto'; updated: number; moved: number; messages: string[];
 }
+// The page is the source of truth for categories; the UI only renders this
+// ordered readback and never keeps a second list of its own.
+export interface CategoryState { schemaVersion: 1; categories: Category[] }
 // Import is not one atomic transaction: every item commits or is isolated and
 // reported, so a later incremental run can fill only what is still missing.
 export interface ImportReport extends ImportPlan {
@@ -80,7 +83,8 @@ export interface Platform {
   compare(project: PublicProject): Promise<CompareResult>;
   tidy(project: PublicProject): Promise<TidyResult>;
   selection(project: PublicProject): Promise<SelectionState>;
-  setCategory(project: PublicProject, ids: string[], category: CategoryName | 'auto'): Promise<CategoryResult>;
+  categories(): Promise<CategoryState>;
+  setCategory(project: PublicProject, ids: string[], category: string): Promise<CategoryResult>;
 }
 
 class HelperConnectionError extends Error {}
@@ -199,7 +203,7 @@ export class Workflow {
     this.state.selection = await this.platform.selection(this.state.selected);
     this.changed();
   }
-  async setCategory(category: CategoryName | 'auto'): Promise<void> {
+  async setCategory(category: string): Promise<void> {
     await this.task('应用分类',async () => {
       const project = this.state.selected;
       const selection = this.state.selection;

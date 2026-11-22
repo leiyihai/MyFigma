@@ -422,3 +422,284 @@ test('批量分类同类重名补充来源，混合无关对象只跳过不改�
     assert.equal(homes[0].parent.name, '背景');
   } finally { await f.cleanup(); }
 });
+
+test('散图原名开头前缀优先定类，token 边界与大小写不敏感', async () => {
+  const { f, workflow, page } = await setup();
+  try {
+    for (const [file, width, height] of [
+      ['btn_panel.json', 64, 24],
+      ['button_icon.json', 32, 32],
+      ['BTN_Bg.json', 32, 32],
+      ['btn2_ok.json', 64, 24],
+      ['bg_btn.json', 32, 32],
+      ['background_panel.json', 40, 30],
+      ['icon_btn.json', 32, 32],
+      ['panel_btn.json', 40, 30],
+      ['progress_row.json', 160, 16],
+      ['pbar_btn.json', 160, 16],
+      ['font_title.json', 32, 32],
+      ['wordart_icon.json', 32, 32]
+    ]) await sprite(f, file, file.replace(/\.json$/, ''), width, height);
+    // 前缀不匹配时才回退到完整名称关键词与尺寸比例。
+    await sprite(f, 'bgm_panel.json', 'bgm_panel', 40, 30);
+    await sprite(f, 'game_button_icon.json', 'game_button_icon', 32, 32);
+    await sprite(f, 'plain_badge.json', 'plain_badge', 64, 64);
+    await sprite(f, 'wide_plain.json', 'wide_plain', 160, 40);
+    await sprite(f, 'dot.json', 'dot', 1, 1);
+    await workflow.scan();
+    await workflow.import();
+    assert.deepEqual(
+      displayNames(page).sort(),
+      [
+        '未分类/dot',
+        '图标/icon_btn',
+        '图标/plain_badge',
+        '按钮/btn_panel',
+        '按钮/button_icon',
+        '按钮/BTN_Bg',
+        '按钮/btn2_ok',
+        '按钮/game_button_icon',
+        '按钮/wide_plain',
+        '底板/panel_btn',
+        '底板/bgm_panel',
+        '背景/bg_btn',
+        '背景/background_panel',
+        '艺术字/font_title',
+        '艺术字/wordart_icon',
+        '进度条/progress_row',
+        '进度条/pbar_btn'
+      ].sort()
+    );
+    assert.equal(page.children.filter(node => node.getPluginData('atlas.category')).length, 7);
+  } finally { await f.cleanup(); }
+});
+
+test('九宫格用法只决定拉伸结构，九宫格按钮与进度条仍归按钮与进度条', async () => {
+  const { f, workflow, page } = await setup();
+  try {
+    await sprite(f, 'btn_hp.json', 'btn_hp', 64, 24);
+    await sprite(f, 'progress_hp.json', 'progress_hp', 160, 16);
+    await sprite(f, 'icon_frame.json', 'icon_frame', 48, 48);
+    await writeLayout(layoutPath(f.project), [
+      layoutImageNode('按钮', 'set:btn_hp.json image:btn_hp', '8 8 8 8'),
+      layoutImageNode('进度', 'set:progress_hp.json image:progress_hp', '4 4 4 4'),
+      layoutImageNode('图标', 'set:icon_frame.json image:icon_frame', '6 6 6 6')
+    ]);
+    await workflow.scan();
+    await workflow.import();
+    assert.deepEqual(displayNames(page).sort(), ['按钮/btn_hp', '进度条/progress_hp', '图标/icon_frame'].sort());
+    assert.equal(page.children.filter(node => node.getPluginData('atlas.category')).length, 3);
+    for (const [name, category] of [
+      ['按钮/btn_hp', '按钮'],
+      ['进度条/progress_hp', '进度条'],
+      ['图标/icon_frame', '图标']
+    ]) {
+      const component = page.findAll(node => node.type === 'COMPONENT' && node.name === name)[0];
+      assert.ok(component, name);
+      assert.equal(component.parent.name, category);
+      assert.equal(component.children.length, 9);
+      assert.equal(component.layoutMode, 'NONE');
+      assert.equal(component.children.find(child => child.name === '切片 2-2').constraints.horizontal, 'STRETCH');
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('页面没有类别配置时回读默认七类及稳定颜色，缺失不写空白页', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    const state = await platform.categories();
+    assert.equal(state.schemaVersion, 1);
+    assert.deepEqual(state.categories.map(category => category.name),
+      ['按钮', '底板', '图标', '背景', '艺术字', '进度条', '未分类']);
+    for (const category of state.categories) assert.match(category.color, /^#[0-9a-f]{6}$/);
+    assert.equal(new Set(state.categories.map(category => category.color)).size, 7);
+    // 缺失即默认；只读回读不给空白页写入配置。
+    assert.equal(page.getPluginData('atlas.categories.v1'), '');
+
+    // 导入仍按默认七类工作，顺序与颜色不变，页面校验不受影响。
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    await workflow.scan();
+    await workflow.import();
+    assert.equal(workflow.state.page.valid, true);
+    const after = await platform.categories();
+    assert.deepEqual(after.categories, state.categories);
+  } finally { await f.cleanup(); }
+});
+
+const defaultNames = ['按钮', '底板', '图标', '背景', '艺术字', '进度条', '未分类'];
+
+test('类别配置损坏时回退默认七类并回写修复，不阻断导入与页面校验', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    await workflow.scan();
+    await workflow.import();
+
+    // 坏 JSON：回读得到默认七类，并把修复结果写回已绑定资源页。
+    page.setPluginData('atlas.categories.v1', '{not json');
+    const repaired = await platform.categories();
+    assert.deepEqual(repaired.categories.map(category => category.name), defaultNames);
+    assert.deepEqual(JSON.parse(page.getPluginData('atlas.categories.v1')).categories.map(category => category.name), defaultNames);
+
+    // 配置损坏不阻断页面校验，也不阻断后续导入。
+    await workflow.validatePage();
+    assert.equal(workflow.state.page.valid, true);
+    await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
+    await workflow.scan();
+    await workflow.import();
+    assert.equal(page.findAll(node => node.type === 'COMPONENT').length, 2);
+    assert.ok(categoryFrame(page, '按钮'));
+
+    // 合法但缺少「未分类」：保留自定义类别，补回未分类。
+    page.setPluginData('atlas.categories.v1', JSON.stringify({
+      schemaVersion: 1, categories: [{ name: '特殊按钮', color: '#123456' }]
+    }));
+    const appended = await platform.categories();
+    assert.deepEqual(appended.categories, [
+      { name: '特殊按钮', color: '#123456' },
+      { name: '未分类', color: '#8b8d98' }
+    ]);
+    assert.deepEqual(JSON.parse(page.getPluginData('atlas.categories.v1')).categories, appended.categories);
+
+    // 非法名称（路径分隔符、控制字符、超长、重复）或非法颜色：整体回退默认七类。
+    for (const categories of [
+      [{ name: 'a/b', color: '#123456' }, { name: '未分类', color: '#8b8d98' }],
+      [{ name: 'a\b', color: '#123456' }, { name: '未分类', color: '#8b8d98' }],
+      [{ name: '换\n行', color: '#123456' }, { name: '未分类', color: '#8b8d98' }],
+      [{ name: 'x'.repeat(25), color: '#123456' }, { name: '未分类', color: '#8b8d98' }],
+      [{ name: '特殊', color: '#123456' }, { name: '特殊', color: '#654321' }, { name: '未分类', color: '#8b8d98' }],
+      [{ name: '特殊', color: 'red' }, { name: '未分类', color: '#8b8d98' }],
+      [{ name: '', color: '#123456' }, { name: '未分类', color: '#8b8d98' }]
+    ]) {
+      page.setPluginData('atlas.categories.v1', JSON.stringify({ schemaVersion: 1, categories }));
+      assert.deepEqual((await platform.categories()).categories.map(category => category.name), defaultNames);
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('自定义类别按页面配置顺序排序、认领分类 Frame 并回读人工分类', async () => {
+  const { f, workflow, platform, page } = await setup();
+  try {
+    await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
+    await sprite(f, 'icon_coin.json', 'icon_coin', 32, 32);
+    await sprite(f, 'dot.json', 'dot', 1, 1);
+    await workflow.scan();
+    await workflow.import();
+    const icon = page.findAll(node => node.type === 'COMPONENT' && node.name === '图标/icon_coin')[0];
+
+    const config = { schemaVersion: 1, categories: [
+      { name: '未分类', color: '#8b8d98' },
+      { name: '特殊按钮', color: '#0091ff' },
+      { name: '按钮', color: '#e5484d' },
+      { name: '底板', color: '#8e4ec6' },
+      { name: '图标', color: '#f2a900' },
+      { name: '背景', color: '#3e63dd' },
+      { name: '艺术字', color: '#d6409f' },
+      { name: '进度条', color: '#30a46c' }
+    ] };
+    page.setPluginData('atlas.categories.v1', JSON.stringify(config));
+    assert.deepEqual((await platform.categories()).categories, config.categories);
+
+    // 自定义类别可以被人工分类选中、移动、改名并回读。
+    page.selection = [icon];
+    await workflow.loadSelection();
+    await workflow.setCategory('特殊按钮');
+    assert.equal(icon.parent.name, '特殊按钮');
+    assert.equal(icon.parent.getPluginData('atlas.category'), '特殊按钮');
+    assert.equal(icon.name, '特殊按钮/icon_coin');
+    assert.equal(icon.getPluginData('atlas.category.manual'), '特殊按钮');
+    assert.deepEqual(workflow.state.selection.members.map(member => [member.category, member.manual]),
+      [['特殊按钮', true]]);
+
+    // 重新整理按配置顺序排列，自定义类别参与整理。
+    const frames = page.children.filter(node => node.getPluginData('atlas.category'));
+    for (const frame of frames) { frame.x = 400; frame.y = 40; }
+    await workflow.tidy();
+    assert.equal(workflow.state.tidy.frames, 4);
+    assert.deepEqual([...frames].sort((left, right) => left.x - right.x).map(frame => frame.name),
+      ['未分类', '特殊按钮', '按钮', '图标']);
+
+    // 不在当前配置里的旧 Frame 不被认领、不被搬动、也不改写标记。
+    const legacy = frames.find(frame => frame.name === '按钮');
+    legacy.setPluginData('atlas.category', '旧分类');
+    legacy.x = 900; legacy.y = 50;
+    const button = legacy.children[0];
+    assert.equal(button.name, '按钮/btn_ok');
+    await workflow.tidy();
+    assert.equal(workflow.state.tidy.frames, 3);
+    assert.deepEqual([legacy.x, legacy.y], [900, 50]);
+    assert.equal(legacy.getPluginData('atlas.category'), '旧分类');
+    assert.equal(button.name, '按钮/btn_ok');
+
+    // 不在页面配置里的类别名无法应用，也不会误建 Frame。
+    page.selection = [icon];
+    await workflow.loadSelection();
+    await assert.rejects(workflow.setCategory('不存在的类别'), /分类无效/);
+    assert.equal(icon.parent.name, '特殊按钮');
+    assert.equal(categoryFrame(page, '不存在的类别'), undefined);
+  } finally { await f.cleanup(); }
+});
+
+test('页面配置里没有的用途类别由自动分类回落到未分类，不生成无主 Frame', async () => {
+  const { f, workflow, page } = await setup();
+  try {
+    page.setPluginData('atlas.categories.v1', JSON.stringify({ schemaVersion: 1, categories: [
+      { name: '未分类', color: '#8b8d98' },
+      { name: '按钮', color: '#e5484d' }
+    ] }));
+    await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
+    await sprite(f, 'wordart_title.json', 'wordart_title', 32, 32);
+    await workflow.scan();
+    await workflow.import();
+    assert.deepEqual(displayNames(page).sort(), ['按钮/btn_ok', '未分类/wordart_title'].sort());
+    assert.equal(page.children.filter(node => node.getPluginData('atlas.category')).length, 2);
+    assert.equal(categoryFrame(page, '艺术字'), undefined);
+  } finally { await f.cleanup(); }
+});
+
+test('旧分类不迁移：unsorted 仍读作未分类，未知旧 Frame 不被认领、搬动或改写', async () => {
+  const { f, workflow, page } = await setup();
+  try {
+    await sprite(f, 'btn_ok.json', 'btn_ok', 64, 24);
+    await sprite(f, 'dot.json', 'dot', 1, 1);
+    await workflow.scan();
+    await workflow.import();
+    const buttonFrame = categoryFrame(page, '按钮');
+    const unclassified = categoryFrame(page, '未分类');
+    const button = buttonFrame.children[0];
+
+    // 旧 #3 标记 'unsorted' 仍读作未分类；旧「九宫格底板」既不被认领也不迁移。
+    unclassified.setPluginData('atlas.category', 'unsorted');
+    unclassified.name = 'unsorted';
+    buttonFrame.setPluginData('atlas.category', '九宫格底板');
+    buttonFrame.name = '九宫格底板';
+    button.setPluginData('atlas.category.manual', '九宫格底板');
+    buttonFrame.x = 800; buttonFrame.y = 60;
+    unclassified.x = 800; unclassified.y = 60;
+
+    await workflow.tidy();
+    assert.equal(workflow.state.tidy.frames, 1);
+    assert.deepEqual([unclassified.x, unclassified.y], [0, 0]);
+    assert.deepEqual([buttonFrame.x, buttonFrame.y], [800, 60]);
+    assert.equal(buttonFrame.getPluginData('atlas.category'), '九宫格底板');
+    assert.equal(button.name, '按钮/btn_ok');
+
+    // 旧人工覆盖不落在当前配置里：读回时按当前规则显示，但值不被清除。
+    page.selection = [button];
+    await workflow.loadSelection();
+    const member = workflow.state.selection.members[0];
+    assert.equal(member.category, '按钮');
+    assert.equal(member.manual, false);
+    assert.equal(button.getPluginData('atlas.category.manual'), '九宫格底板');
+
+    // 普通增量导入不认领、不搬动、不改写旧 Frame，也不重命名其主组件。
+    await workflow.scan();
+    await workflow.import();
+    assert.equal(button.parent, buttonFrame);
+    assert.equal(button.name, '按钮/btn_ok');
+    assert.deepEqual([buttonFrame.x, buttonFrame.y], [800, 60]);
+    assert.equal(buttonFrame.getPluginData('atlas.category'), '九宫格底板');
+    assert.equal(buttonFrame.name, '九宫格底板');
+    assert.equal(unclassified.name, 'unsorted');
+  } finally { await f.cleanup(); }
+});

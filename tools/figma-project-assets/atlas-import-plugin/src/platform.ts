@@ -1,6 +1,7 @@
 import type { CategoryResult, ImportPlan, ImportReport, LayoutUsage, Platform, Progress, PublicProject, Resource, Scan, SelectionState, Source, TidyResult } from './api';
 import { Cancellation } from './api';
-import { categoryIndex, classify, componentName, isCategoryName, type CategoryName } from './category';
+import { categoryConfigKey, categoryIndex, categoryOr, classify, componentName, knownCategory, readCategoryConfig,
+  serializeCategories, unsortedCategory, type CategoryConfig } from './category';
 import { createNineSlicePlan, type Margins } from '../../packages/nine-slice/src/index';
 import { applyNineSliceComponent, createNineSliceComponent } from '../../packages/nine-slice/src/figma';
 import {
@@ -187,25 +188,42 @@ function storedRecord(component: ComponentNode): {record?: NineSliceRecord; corr
   if(record) writeNineSliceRecord(component, raw);
   return {record, corrupt:!record};
 }
-// Category frames are tool-managed page children. New frames store the category
-// name in `atlas.category`; `unsorted` is the legacy #3 marker for 未分类.
+// Category frames are tool-managed page children whose `atlas.category` value
+// must be one of the page's configured categories. `unsorted` is the legacy #3
+// marker for 未分类; frames carrying any other unknown value (for example the old
+// 九宫格底板) are left alone instead of being adopted or renamed.
 const categoryGap = 48;
 const compareGap = 24;
 function compareColumns(count: number): number { return Math.max(1, Math.ceil(Math.sqrt(count))); }
-function frameCategory(node: FrameNode): CategoryName | undefined {
+function hostPage(node: BaseNode): PageNode | undefined {
+  let current: BaseNode | null = node;
+  while(current && current.type !== 'PAGE') current = current.parent;
+  return current && current.type === 'PAGE' ? current as PageNode : undefined;
+}
+// Read-through: a page without stored categories simply uses the default seven.
+function pageCategories(page: PageNode): CategoryConfig {
+  return readCategoryConfig(page.getPluginData(categoryConfigKey)).config;
+}
+function categoriesFor(node: BaseNode): CategoryConfig {
+  const page = hostPage(node);
+  return page ? pageCategories(page) : readCategoryConfig('').config;
+}
+function frameCategory(node: FrameNode, config: CategoryConfig): string | undefined {
   const raw = node.getPluginData(categoryKey);
-  if(raw === 'unsorted') return '未分类';
-  if(isCategoryName(raw)) return raw;
+  if(raw === 'unsorted') return knownCategory(config, unsortedCategory);
+  const known = knownCategory(config, raw);
+  if(known) return known;
   // Legacy #3 frames carry no marker; their managed children identify them.
-  if(node.name === '未分类' && Array.isArray(node.children) && node.children.some(child => child.getPluginData(sourceKey))) return '未分类';
+  if(node.name === unsortedCategory && Array.isArray(node.children) && node.children.some(child => child.getPluginData(sourceKey))) return unsortedCategory;
   return undefined;
 }
 function managedCategoryFrames(page: PageNode): FrameNode[] {
-  return page.children.filter((node): node is FrameNode => node.type === 'FRAME' && !!frameCategory(node as FrameNode));
+  const config = pageCategories(page);
+  return page.children.filter((node): node is FrameNode => node.type === 'FRAME' && !!frameCategory(node as FrameNode, config));
 }
 function managedCategory(node: ComponentNode): boolean {
   const parent = node.parent;
-  return !!parent && parent.type === 'FRAME' && !!frameCategory(parent as FrameNode);
+  return !!parent && parent.type === 'FRAME' && !!frameCategory(parent as FrameNode, categoriesFor(parent));
 }
 // Category frames are tool-owned, but users may drop unrelated components into
 // them. Only components carrying tool records (or children of legacy frames) can
@@ -217,23 +235,24 @@ function carriesToolRecord(node: ComponentNode): boolean {
 function legacyManagedParent(node: ComponentNode): boolean {
   const parent = node.parent;
   return !!parent && parent.type === 'FRAME' && !parent.getPluginData(categoryKey) &&
-    parent.name === '未分类' && !!frameCategory(parent as FrameNode);
+    parent.name === unsortedCategory && !!frameCategory(parent as FrameNode, categoriesFor(parent));
 }
 // If every tool record was cleared, the derived display name is the remaining
 // evidence that this was a managed component; a plain user name is not flagged.
-function looksManagedName(node: ComponentNode): boolean {
+function looksManagedName(node: ComponentNode, config: CategoryConfig): boolean {
   const separator = node.name.indexOf('/');
-  return separator > 0 && isCategoryName(node.name.slice(0,separator));
+  return separator > 0 && !!knownCategory(config, node.name.slice(0,separator));
 }
-function findCategoryFrame(page: PageNode, category: CategoryName): FrameNode | undefined {
-  return managedCategoryFrames(page).find(frame => frameCategory(frame) === category);
+function findCategoryFrame(page: PageNode, category: string): FrameNode | undefined {
+  const config = pageCategories(page);
+  return managedCategoryFrames(page).find(frame => frameCategory(frame, config) === category);
 }
 function nextCategoryFrameX(page: PageNode): number {
   const frames = managedCategoryFrames(page);
   if(!frames.length) return 0;
   return Math.max(...frames.map(frame => frame.x + frame.width)) + categoryGap;
 }
-function createCategoryFrame(page: PageNode, api: Pick<PluginAPI,'createFrame'>, category: CategoryName): FrameNode {
+function createCategoryFrame(page: PageNode, api: Pick<PluginAPI,'createFrame'>, category: string): FrameNode {
   const x = nextCategoryFrameX(page);
   const frame = api.createFrame();
   page.appendChild(frame);
@@ -249,7 +268,7 @@ function createCategoryFrame(page: PageNode, api: Pick<PluginAPI,'createFrame'>,
   frame.x = x; frame.y = 0;
   return frame;
 }
-function ensureCategoryFrame(page: PageNode, api: Pick<PluginAPI,'createFrame'>, category: CategoryName,
+function ensureCategoryFrame(page: PageNode, api: Pick<PluginAPI,'createFrame'>, category: string,
   created: FrameNode[]): FrameNode {
   const found = findCategoryFrame(page, category);
   if(found) return found;
@@ -281,25 +300,19 @@ function restoreCategoryLayouts(snapshots: CategoryLayout[]): void {
     } catch { /* best effort; never hide the import result for a layout restore */ }
   }
 }
-function manualCategory(component: ComponentNode): CategoryName | undefined {
-  const raw = component.getPluginData(manualCategoryKey);
-  return isCategoryName(raw) ? raw : undefined;
+function manualCategory(component: ComponentNode, config: CategoryConfig): string | undefined {
+  return knownCategory(config, component.getPluginData(manualCategoryKey));
 }
-function currentCategory(component: ComponentNode): CategoryName | undefined {
+function currentCategory(component: ComponentNode, config: CategoryConfig): string | undefined {
   const parent = component.parent;
-  return parent && parent.type === 'FRAME' ? frameCategory(parent as FrameNode) : undefined;
+  return parent && parent.type === 'FRAME' ? frameCategory(parent as FrameNode, config) : undefined;
 }
-function componentPage(component: ComponentNode): PageNode | undefined {
-  let node: BaseNode | null = component;
-  while(node && node.type !== 'PAGE') node = node.parent;
-  return node && node.type === 'PAGE' ? node as PageNode : undefined;
+function automaticCategory(component: ComponentNode, source: Source, config: CategoryConfig): string {
+  return categoryOr(config, classify({frameName:source.frameName,width:component.width,height:component.height}));
 }
-function automaticCategory(component: ComponentNode, source: Source): CategoryName {
-  return classify({frameName:source.frameName,width:component.width,height:component.height});
-}
-function plannedCategory(item: Candidate): CategoryName {
-  const manual = item.existing ? manualCategory(item.existing.component) : undefined;
-  return manual || classify({frameName:item.source.frameName,width:item.resource.width,height:item.resource.height});
+function plannedCategory(item: Candidate, config: CategoryConfig): string {
+  const manual = item.existing ? manualCategory(item.existing.component, config) : undefined;
+  return manual || categoryOr(config, classify({frameName:item.source.frameName,width:item.resource.width,height:item.resource.height}));
 }
 function existingComponents(page: PageNode, project: PublicProject): { items: Existing[]; corrupt: string[] } {
   const result: Existing[] = [], corrupt: string[] = [];
@@ -308,7 +321,7 @@ function existingComponents(page: PageNode, project: PublicProject): { items: Ex
     const source = parseStoredSource(node, project);
     if(!source) {
       if(carriesToolRecord(node) || (managedCategory(node) &&
-         (legacyManagedParent(node) || looksManagedName(node)))) corrupt.push(node.name);
+         (legacyManagedParent(node) || looksManagedName(node, categoriesFor(node))))) corrupt.push(node.name);
       continue;
     }
     const sync = parseSync(node,source.identity);
@@ -473,10 +486,12 @@ function buildPlan(scan: Scan, page: PageNode): PlanState {
 function orderedCategoryFrames(page: PageNode): FrameNode[] {
   const index = new Map<SceneNode, number>();
   page.children.forEach((node, position) => index.set(node, position));
-  // Canonical category order is the layout contract; duplicates of one category
+  // Page configuration order is the layout contract; duplicates of one category
   // stay stacked in their previous visual/page order to keep the move minimal.
+  const config = pageCategories(page);
+  const names = config.categories.map(category => category.name);
   return [...managedCategoryFrames(page)].sort((left, right) => {
-    const category = categoryIndex(frameCategory(left)!) - categoryIndex(frameCategory(right)!);
+    const category = categoryIndex(names, frameCategory(left, config)!) - categoryIndex(names, frameCategory(right, config)!);
     if(category) return category;
     if(left.y !== right.y) return left.y - right.y;
     if(left.x !== right.x) return left.x - right.x;
@@ -509,9 +524,10 @@ function tidyCategoryFrames(page: PageNode): TidyResult {
 // Display names are derived, never part of the resource identity. Same-name
 // components in one category add their source location so both stay unique.
 function refreshDisplayNames(page: PageNode, project: PublicProject, messages: string[]): void {
-  const groups = new Map<string, Array<{component: ComponentNode; source: Source; category: CategoryName}>>();
+  const config = pageCategories(page);
+  const groups = new Map<string, Array<{component: ComponentNode; source: Source; category: string}>>();
   for(const frame of managedCategoryFrames(page)) {
-    const category = frameCategory(frame);
+    const category = frameCategory(frame, config);
     if(!category) continue;
     for(const child of frame.children) {
       if(child.type !== 'COMPONENT') continue;
@@ -614,7 +630,7 @@ function applyComponent(api: Pick<PluginAPI,'createRectangle'>, component: Compo
   writeRecord(component,planned);
 }
 function createComponent(api: Pick<PluginAPI,'createComponent'|'createRectangle'>, target: FrameNode, item: Candidate,
-  image: ImagePaint, category: CategoryName): ComponentNode {
+  image: ImagePaint, category: string): ComponentNode {
   const planned = item.planned;
   const component = planned.shape === 'slices' && planned.margins
     ? createNineSliceComponent(api,{width:item.resource.width,height:item.resource.height,fill:image},
@@ -637,7 +653,7 @@ function createComponent(api: Pick<PluginAPI,'createComponent'|'createRectangle'
     throw error;
   }
 }
-function describeCandidate(item: Candidate, category: CategoryName): string {
+function describeCandidate(item: Candidate, category: string): string {
   return componentName(category,item.source.frameName);
 }
 async function loadPage(page: PageNode): Promise<void> {
@@ -840,6 +856,17 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
   let busy = false;
   return {
     async validate(project) {const page = api.currentPage; await loadPage(page); return validate(page,project);},
+    async categories() {
+      // Read-through page configuration: missing means the default seven. A
+      // damaged value is repaired on the next read so nothing blocks import or
+      // page validation, but only a bound resource page is written to.
+      const page = api.currentPage;
+      await loadPage(page);
+      const raw = page.getPluginData(categoryConfigKey);
+      const {config, repaired} = readCategoryConfig(raw);
+      if(repaired && page.getPluginData(bindingKey)) page.setPluginData(categoryConfigKey, serializeCategories(config));
+      return {schemaVersion:1, categories:config.categories.map(category => ({name:category.name, color:category.color}))};
+    },
     async preview(scan) {
       if(busy) throw new Error('导入任务正在执行');
       const page = api.currentPage;
@@ -885,8 +912,9 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         report.unchanged = plan.unchanged; report.blocked = plan.blocked;
         report.removalSuppressed = plan.removalSuppressed; report.messages = [...plan.messages];
         updatedIds = new Set(state.updates.map(item => item.existing!.component.id));
-        const categories = new Set([...state.adds,...state.updates].map(plannedCategory));
-        const categoryFrames = new Map<CategoryName,FrameNode>();
+        const categoryConfig = pageCategories(page);
+        const categories = new Set([...state.adds,...state.updates].map(item => plannedCategory(item, categoryConfig)));
+        const categoryFrames = new Map<string,FrameNode>();
         for(const category of categories) categoryFrames.set(category,ensureCategoryFrame(page,api,category,createdFrames));
         // Bulk append into an active Auto Layout frame reflows the frame for
         // every component. Pause it until all writes are done, then restore the
@@ -917,7 +945,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
           if(cancellation.cancelled) { report.cancelled = true; break; }
           if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已停止导入，已完成的项会保留');
           const component = item.existing?.component;
-          const category = plannedCategory(item);
+          const category = plannedCategory(item, categoryConfig);
           if(!component) { fail(describeCandidate(item,category),new Error('待更新组件已消失')); await step(); continue; }
           const snap = snapshot(component,item.existing!);
           try {
@@ -939,7 +967,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
           for(const item of state.adds) {
             if(cancellation.cancelled) { report.cancelled = true; break; }
             if(api.currentPage.id !== page.id) throw new Error('当前页已改变，已停止导入，已完成的项会保留');
-            const category = plannedCategory(item);
+            const category = plannedCategory(item, categoryConfig);
             try {
               const image = api.createImage(api.base64Decode(item.resource.png));
               const target = ensureCategoryFrame(page,api,category,createdFrames);
@@ -966,7 +994,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         }
         const nameKeys = new Map<string,number>();
         for(const item of [...state.adds,...state.updates]) {
-          const key = plannedCategory(item) + '\u0000' + item.source.frameName;
+          const key = plannedCategory(item, categoryConfig) + '\u0000' + item.source.frameName;
           nameKeys.set(key,(nameKeys.get(key)||0)+1);
         }
         // On a fresh page with unique category/name pairs, creation already
@@ -1000,6 +1028,7 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
       if(!project || typeof project.id !== 'string' || !project.name) throw new Error('项目信息无效');
       const page = api.currentPage;
       await loadPage(page);
+      const config = pageCategories(page);
       const found = new Map<string, SelectionState['members'][number]>();
       let ignored = 0;
       for(const node of page.selection) {
@@ -1012,10 +1041,10 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
         }
         if(!component) { ignored++; continue; }
         const source = parseStoredSource(component, project);
-        const host = componentPage(component);
+        const host = hostPage(component);
         if(!source || !host || !validate(host, project).valid) { ignored++; continue; }
-        const manual = manualCategory(component);
-        const category = manual || currentCategory(component) || automaticCategory(component, source);
+        const manual = manualCategory(component, config);
+        const category = manual || currentCategory(component, config) || automaticCategory(component, source, config);
         const member = {id:component.id,name:component.name,category,manual:!!manual,viaInstance};
         const previous = found.get(component.id);
         if(!previous) found.set(component.id, member);
@@ -1027,7 +1056,10 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
     async setCategory(project, ids, category) {
       if(busy) throw new Error('任务执行中，请等待完成');
       if(!project || typeof project.id !== 'string' || !project.name) throw new Error('项目信息无效');
-      if(category !== 'auto' && !isCategoryName(category)) throw new Error('分类无效');
+      const page = api.currentPage;
+      await loadPage(page);
+      // 分类合法性由当前页面的类别配置决定，而不是固定七类。
+      if(category !== 'auto' && !knownCategory(pageCategories(page), category)) throw new Error('分类无效');
       if(!Array.isArray(ids) || !ids.length || ids.length > 200 ||
          ids.some(id=>typeof id !== 'string' || !/^[A-Za-z0-9:_;-]{1,128}$/.test(id))) throw new Error('主组件选择无效');
       busy = true;
@@ -1035,18 +1067,23 @@ export function createFigmaPlatform(api: Pick<PluginAPI,'currentPage'|'root'|'cr
       let layouts: CategoryLayout[] = [];
       const messages: string[] = [];
       try {
-        const jobs: Array<{component:ComponentNode;page:PageNode;target:CategoryName;targetFrame?:FrameNode;previous:string}> = [];
+        const jobs: Array<{component:ComponentNode;page:PageNode;target:string;targetFrame?:FrameNode;previous:string}> = [];
         for(const id of [...new Set(ids)]) {
           const node = await api.getNodeByIdAsync(id);
           if(!node || node.type !== 'COMPONENT') { messages.push(`${id}：不是主组件，已跳过`); continue; }
           const component = node as ComponentNode;
           const source = parseStoredSource(component, project);
-          const host = componentPage(component);
+          const host = hostPage(component);
           if(!source || !host || !validate(host, project).valid) {
             messages.push(`${component.name}：不是本项目资源页中的工具主组件，已跳过`);
             continue;
           }
-          const target = category === 'auto' ? automaticCategory(component, source) : category;
+          const hostConfig = categoriesFor(host);
+          const target = category === 'auto' ? automaticCategory(component, source, hostConfig) : knownCategory(hostConfig, category);
+          if(!target) {
+            messages.push(`${component.name}：该页面没有分类「${category}」，已跳过`);
+            continue;
+          }
           jobs.push({component,page:host,target,previous:component.getPluginData(manualCategoryKey)});
         }
         if(!jobs.length) throw new Error('当前选择中没有可修改的本工具主组件');

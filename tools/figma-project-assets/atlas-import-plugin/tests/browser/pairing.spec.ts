@@ -22,6 +22,7 @@ test('a remembered pairing connects automatically and can be forgotten', async (
         else if (m.type === 'pairing-save') { window.pairing = m.pairing; reply(true); }
         else if (m.type === 'pairing-clear') { window.pairing = null; reply(true); }
         else if (m.type === 'validate') reply({valid:true,message:'空白页可导入'});
+        else if (m.type === 'categories') reply({schemaVersion:1,categories:[{name:'按钮',color:'#e5484d'},{name:'未分类',color:'#8b8d98'}]});
       });
     </script><iframe title="plugin" sandbox="allow-scripts" src="/ui.html" style="width:350px;height:540px"></iframe>`);
   });
