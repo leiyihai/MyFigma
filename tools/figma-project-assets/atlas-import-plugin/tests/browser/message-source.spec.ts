@@ -33,18 +33,20 @@ for(const origin of ['https://www.figma.com','https://untrusted.example']) {
       });</script>`}));
     await page.goto(host);
     const ui=page.frameLocator('iframe[title="bridge"]').frameLocator('iframe[title="plugin"]');
-    await ui.locator('#token').fill('0'.repeat(64));
     await ui.locator('#connect').click();
+    await expect(ui.locator('#pairing')).toBeVisible();
+    await ui.locator('#token').fill('0'.repeat(64));
+    await ui.locator('#connect-submit').click();
     await expect(ui.locator('#connection')).toHaveText('已连接');
     await ui.locator('#project').selectOption('g2');
     await expect.poll(()=>page.evaluate(()=>(window as any).validationCount)).toBe(1);
     if(origin==='https://www.figma.com') {
-      await expect(ui.locator('#page-status')).toHaveText('顶层宿主校验完成');
+      await expect(ui.locator('#page-status')).toHaveText('资源页：可导入');
       await expect(ui.locator('#phase')).toHaveText('就绪');
       await expect(ui.locator('#scan')).toBeEnabled();
     } else {
       await expect(ui.locator('#phase')).toHaveText('页面校验');
-      await expect(ui.locator('#page-status')).not.toHaveText('顶层宿主校验完成');
+      await expect(ui.locator('#page-status')).not.toHaveText('资源页：可导入');
       await expect(ui.locator('#scan')).toBeDisabled();
     }
   });

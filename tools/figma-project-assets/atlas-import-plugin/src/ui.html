@@ -9,20 +9,35 @@ h1,h2,h3,p{margin:0}
 h1{font-size:19px;letter-spacing:-.02em;line-height:1.2}
 h2{font-size:12px;font-weight:650;letter-spacing:.01em}
 h3{font-size:13px}
-.app-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 2px}
-.kicker{font:600 9px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.14em;color:var(--figma-color-text-secondary,#666);margin-bottom:4px}
+.app-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 2px;min-height:32px}
+.header-actions{display:flex;align-items:center;gap:7px}
+.header-actions button{padding:5px 9px}
 .badge{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid var(--figma-color-border,#d9d9d9);border-radius:99px;font-size:11px;color:var(--figma-color-text-secondary,#555);white-space:nowrap}
 .badge::before{content:"";width:6px;height:6px;border-radius:50%;background:#9b9b9b}
 .badge.connected{color:var(--figma-color-text-success,#0a7a43);border-color:var(--figma-color-border-success,#9ed8b8)}
 .badge.connected::before{background:var(--figma-color-icon-success,#14ae5c)}
-.app-main{display:flex;flex-direction:column;gap:8px;min-height:0;overflow:hidden}
+.app-main{display:flex;flex-direction:column;gap:8px;min-height:0;overflow:hidden;flex:1}
+.app-content{display:flex;flex-direction:column;gap:8px;min-height:0;overflow:hidden;flex:1}
+.app-content .card{flex:none}
+.project-card{padding:8px 10px}
+.field-line{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px}
+.field-line>label>span{margin:0;white-space:nowrap}
+.field-line select{margin:0}
+.page-line{margin-top:5px;font-size:10px;line-height:1.35;color:var(--figma-color-text-secondary,#666);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.resource-card{padding:9px 10px}
+.resource-card .card-head{margin-bottom:4px}
+.actions{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px;margin-top:8px}
+.actions .primary{min-width:0}
+.notice{margin-top:5px;font-size:10px;line-height:1.35;color:var(--figma-color-text-secondary,#666);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.status-card{flex:none;padding:8px 10px;background:var(--figma-color-bg-secondary,#f7f7f7)}
+.status-card .status-line{margin-bottom:2px}
+.status-card progress{margin:3px 0 0}
+#details-open{margin-top:3px;padding:2px 6px;font-size:10px}
 .card{border:1px solid var(--figma-color-border,#dedede);border-radius:9px;background:var(--figma-color-bg,#fff);padding:10px 11px;min-width:0}
 .card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px}
 .chip{font-size:10px;padding:2px 6px;border-radius:99px;background:var(--figma-color-bg-secondary,#f0f0f0);color:var(--figma-color-text-secondary,#666);white-space:nowrap}
 .muted{color:var(--figma-color-text-secondary,#666)}
 .small{font-size:11px}
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.grid-project{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:8px}
 label{display:block;min-width:0}
 label>span{display:block;margin-bottom:3px;font-size:11px;color:var(--figma-color-text-secondary,#555)}
 input:not([type=checkbox]),select{width:100%;min-width:0;padding:6px 7px;background:var(--figma-color-bg,#fff);color:inherit;border:1px solid var(--figma-color-border-strong,#999);border-radius:5px;font:inherit}
@@ -34,19 +49,14 @@ button:disabled{opacity:.45;cursor:not-allowed}
 button.primary{background:var(--figma-color-bg-brand,#0d99ff);border-color:var(--figma-color-border-brand,#0d99ff);color:#fff;font-weight:650}
 button.primary:hover:not(:disabled){background:var(--figma-color-bg-brand-hover,#007be5)}
 button.quiet{background:transparent;border-color:var(--figma-color-border,#ccc)}
-.inline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.inline>button{margin-left:auto}
 .check{display:inline-flex;align-items:center;gap:5px;color:var(--figma-color-text-secondary,#555);font-size:11px}
 .actions{display:flex;align-items:center;gap:8px;margin-top:7px}
 .actions .primary{flex:1}
 .status-line{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
 .summary-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px}
-#summary{font-size:11px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#details{max-height:62px;overflow:auto;font-size:11px;color:var(--figma-color-text-danger,#a20);margin-top:4px}
-#details summary{cursor:pointer;font-size:11px;margin-top:4px}
-#details-body{margin:3px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}
+#summary{font-size:11px;line-height:1.4;min-width:0;max-height:31px;overflow:hidden}
 .status-actions{display:flex;align-items:center;gap:8px}
-#error{white-space:pre-wrap;overflow-wrap:anywhere;max-height:46px;overflow:auto;color:var(--figma-color-text-danger,#a20);font-size:11px;margin-top:3px}
+#error{white-space:pre-wrap;overflow-wrap:anywhere;max-height:30px;overflow:hidden;color:var(--figma-color-text-danger,#a20);font-size:10px;line-height:1.35;margin-top:2px}
 .hidden{display:none!important}
 progress{width:100%;height:6px;margin:5px 0 2px;accent-color:var(--figma-color-bg-brand,#0d99ff)}
 .action{position:relative;display:inline-block}
@@ -61,7 +71,21 @@ progress{width:100%;height:6px;margin:5px 0 2px;accent-color:var(--figma-color-b
 .field-note.locked{color:var(--figma-color-text-warning,#8a5a00)}
 dialog{width:calc(100vw - 16px);height:calc(100vh - 16px);max-width:none;max-height:none;padding:0;overflow:hidden;background:var(--figma-color-bg,#fff);color:inherit;border:1px solid var(--figma-color-border-strong,#999);border-radius:9px}
 dialog::backdrop{background:#0006}
+#pairing,#details-dialog{width:min(386px,calc(100vw - 24px));height:auto;max-height:calc(100vh - 24px);margin:auto;padding:0;border:1px solid var(--figma-color-border-strong,#999);border-radius:9px;background:var(--figma-color-bg,#fff);overflow:hidden}
+#pairing .dialog-small,#details-dialog .dialog-small{width:100%;max-height:calc(100vh - 26px);margin:0;border:0;border-radius:0;background:transparent}
+#pairing .small-body{padding:11px}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
 .dialog-shell{height:100%;display:flex;flex-direction:column;min-height:0}
+.dialog-small{width:min(386px,calc(100vw - 24px));max-height:calc(100vh - 24px);margin:auto;padding:0;overflow:hidden;background:var(--figma-color-bg,#fff);color:inherit;border:1px solid var(--figma-color-border-strong,#999);border-radius:9px}
+.dialog-small .dialog-head{padding:9px 11px;border-bottom:1px solid var(--figma-color-border,#ddd)}
+.small-body{display:flex;flex-direction:column;gap:8px;padding:11px}
+.dialog-actions{display:flex;gap:7px}
+.dialog-actions .primary{flex:1}
+#pairing-error{min-height:0;color:var(--figma-color-text-danger,#a20);font-size:10px;white-space:pre-wrap}
+#pairing-error:empty{display:none}
+.details-shell{height:auto;max-height:calc(100vh - 24px);display:flex;flex-direction:column}
+#details-body{margin:0;padding:11px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}
 .dialog-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-bottom:1px solid var(--figma-color-border,#ddd)}
 .dialog-grid{display:grid;grid-template-columns:190px minmax(0,1fr);min-height:0;flex:1}
 .project-pane{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--figma-color-border,#ddd);padding:9px}
@@ -84,63 +108,74 @@ dialog::backdrop{background:#0006}
 .category-row button{margin-bottom:0}
 </style></head><body>
 <header class="app-header">
-  <div><p class="kicker">LOCAL ATLAS TOOL</p><h1>项目图集导入</h1></div>
-  <span id="connection" data-testid="connection" class="badge">未连接</span>
+  <h1>项目图集导入</h1>
+  <div class="header-actions">
+    <span id="connection" data-testid="connection" class="badge">未连接</span>
+    <button id="connect" title="连接本机助手。首次使用或需要重新配对时打开配对窗口；已连接时可用于重新连接或忘记配对。">连接助手</button>
+  </div>
 </header>
 
 <main class="app-main">
-<section class="card" aria-label="本机助手">
-  <div class="card-head"><h2>本机助手</h2><span id="pairing-status" class="chip">首次配对后自动记住</span></div>
-  <p class="muted small" style="margin-bottom:7px">首次启动需从本机 token 文件复制令牌；忘记后可在助手托盘菜单选择「显示配对令牌」，或查看 <code>%LOCALAPPDATA%\MyFigmaAssets\token</code>。</p>
-  <div class="grid-2">
-    <label><span>助手地址</span><input id="address" value="http://localhost:38473" spellcheck="false"></label>
-    <label><span>配对令牌</span><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴 token 文件中的 64 位令牌"></label>
+<div class="app-content">
+<section class="card project-card" aria-label="游戏项目">
+  <div class="field-line">
+    <label for="project"><span>游戏</span></label>
+    <select id="project" title="只显示长期维护的游戏；其他登记项目在管理窗口中维护。"><option value="">请选择游戏</option></select>
+    <button id="manage" title="维护本机共享的游戏登记、资源目录和长期维护标记；任务执行中不可修改。">管理</button>
   </div>
-  <div class="inline" style="margin-top:7px">
-    <button id="connect" title="连接已启动的本机助手；需要本机 token。连接失败时请检查启动状态和本地网络权限。">连接助手</button>
-    <label class="check"><input id="remember" type="checkbox" checked> 记住本机配对</label>
-    <button id="forget" class="quiet" disabled title="清除本机插件保存的配对信息；不会停止助手或删除项目登记。清除后可在助手托盘菜单选择「显示配对令牌」，或查看 token 文件后重新粘贴。">忘记配对</button>
-  </div>
+  <p id="page-status" class="page-line" title="扫描或导入时也会再次检查当前页。非空未绑定页和绑定其他游戏的页面会被拒绝，不会写入。">选择游戏后自动检查资源页</p>
 </section>
 
-<section class="card" aria-label="游戏项目">
-  <div class="card-head"><h2>游戏项目</h2><button id="manage" title="维护本机共享的游戏登记、资源目录和长期维护标记；任务执行中不可修改。">管理项目</button></div>
-  <div class="grid-project">
-    <label><span>搜索名称或编号</span><input id="search" placeholder="留空仅显示长期维护游戏"></label>
-    <label for="project"><span>选择游戏</span><select id="project"><option value="">请选择游戏</option></select></label>
+<section class="card resource-card" aria-label="资源与操作">
+  <div class="card-head"><h2>资源</h2><button id="scan" title="扫描登记目录中的 JSON + PNG 图集并计算新增、更新和源缺失；扫描期间可取消。">扫描资源</button></div>
+  <p id="summary" data-testid="summary">尚未扫描</p>
+  <div class="actions">
+    <button id="import" class="primary" title="新增创建主组件，变化原位更新，源缺失仅标记；单项失败保留其他成果，失败或取消后再次点击只补齐未完成项。">导入主组件</button>
+    <button id="compare" class="quiet" title="按源图集分组创建或更新只含主组件实例的对照页；默认不创建，每个实例会增加文件负担。">对照页</button>
+    <button id="tidy" class="quiet" title="只调整分类 Frame 的位置，消除重叠；不移动或重建主组件，不改变九宫格切片。">重新整理</button>
   </div>
-  <p id="selected" class="muted small" style="margin-top:5px"></p>
-</section>
-
-<section class="card" aria-label="页面与资源">
-  <div class="card-head"><h2>页面校验</h2><button id="validate" title="检查当前页是否为空白或已绑定当前游戏；不会修改页面。">校验当前页</button></div>
-  <p id="page-status" class="small">请选择游戏后校验页面</p>
-  <p class="muted small" style="margin-top:3px">支持登记目录内的小型对象式 JSON + PNG 图集；导入后按名称、九宫格用法与尺寸比例归入按钮、九宫格底板、图标、背景、艺术字或未分类。空白页首次导入，绑定一致的资源页可增量更新；未绑定非空页和错绑页受保护。</p>
-  <div class="summary-row"><span id="summary" data-testid="summary">尚未扫描</span><button id="scan" title="扫描登记目录中的 JSON + PNG 图集并计算新增、更新和源缺失；空白页或绑定一致的资源页可开始。扫描期间可取消，取消后不会把结果当作源删除。">扫描资源</button></div>
-  <div class="actions"><button id="import" class="primary" title="新增创建主组件，变化原位更新，源缺失仅标记；单项失败保留其他成果，失败或取消后再次点击只补齐未完成项；空白页首次导入会绑定并重命名当前页。不上传整张图集。">导入主组件</button><button id="compare" class="quiet" title="可选功能：按源图集分组创建或更新只含主组件实例的对照页，不复制主组件；再次点击补齐新增素材。每个实例都会增加文件负担，仅在需要核对时使用。">创建 / 更新对照页</button></div>
-  <p id="compare-status" data-testid="compare-status" class="muted small" style="margin-top:4px">可选：按源图集生成实例对照页，默认不创建。</p>
-  <div class="status-actions" style="margin-top:6px;align-items:flex-start">
-    <button id="tidy" class="quiet" title="仅把本工具创建的分类 Frame 按「按钮 → 九宫格底板 → 图标 → 背景 → 艺术字 → 未分类」从上到下重新摆放，消除重叠；只改变分类 Frame 的位置，不移动或重建主组件，不改变九宫格切片及内部约束。">重新整理</button>
-    <span id="tidy-status" data-testid="tidy-status" class="muted small" style="flex:1;min-width:0">只调整分类 Frame 位置，不重建主组件、不改九宫格约束。</span>
-  </div>
+  <p id="action-result" class="notice hidden" data-testid="action-result"></p>
 </section>
 
 <section class="card" aria-label="选中主组件分类">
   <div class="card-head"><h2>选中主组件分类 <span class="help-wrap"><span class="help" tabindex="0" role="note" aria-label="分类更正说明" title="按 Figma 当前选择处理主组件或实例；实例会定位主组件，无关对象不会被改造。人工分类优先于自动规则；恢复自动分类会清除人工覆盖。">?</span><span class="tooltip" role="tooltip">按 Figma 当前选择处理主组件或实例；实例会定位主组件，无关对象不会被改造。人工分类优先于自动规则；恢复自动分类会清除人工覆盖。</span></span></h2><span id="selection-status" data-testid="selection-status" class="chip">先选择游戏</span></div>
   <div class="category-row">
     <label><span>目标分类</span><select id="category-select" aria-label="选中主组件分类" title="选择人工分类后立即移动主组件到对应分类 Frame，并保留来源和实例关系；选择恢复自动分类会按当前名称、尺寸和九宫格规则重新归类。"><option value="">选择目标分类</option></select></label>
-    <button id="apply-category" class="quiet" title="只修改带本工具来源记录的主组件；实例会先定位主组件。混合选择中无关对象不会被改造，并在状态中说明。" disabled>应用分类</button>
+    <button id="apply-category" class="quiet" title="只修改带本工具来源记录的主组件；实例会先定位主组件。混合选择中无关对象不会被改造，并在状态中说明。" disabled>应用</button>
   </div>
-  <p id="selection-note" class="muted small" style="margin-top:4px">按 Figma 当前选择处理；实例会定位主组件，无关对象不改动。</p>
 </section>
+</div>
 
-<section class="card" aria-label="任务状态">
-  <div class="status-line"><span id="phase">未连接</span><div class="status-actions"><span id="progress" data-testid="progress" class="muted small">0 / 0</span><button id="cancel" class="quiet" disabled title="取消当前扫描或导入；已完成的项会保留，未完成项不会记为成功，可再次运行补齐。">取消任务</button></div></div>
+<section class="card status-card" aria-label="任务状态">
+  <div class="status-line"><span id="phase">未连接</span><div class="status-actions"><span id="progress" data-testid="progress" class="muted small">0 / 0</span><button id="cancel" class="quiet" aria-label="取消任务" disabled title="取消当前扫描或导入；已完成的项会保留，未完成项不会记为成功，可再次运行补齐。">取消</button></div></div>
   <progress id="bar" max="1" value="0"></progress>
   <p id="error" role="alert"></p>
-  <details id="details" class="hidden"><summary id="details-summary">异常与失败详情（0）</summary><pre id="details-body"></pre></details>
+  <button id="details-open" class="quiet hidden" title="查看扫描警告、跳过原因和导入失败详情。">详情</button>
 </section>
 </main>
+
+<dialog id="pairing" aria-labelledby="pairing-title">
+  <div id="pairing-form" class="dialog-small">
+    <div class="dialog-head"><h2 id="pairing-title">连接本机助手</h2><button type="button" id="pairing-close" title="关闭配对窗口；不会删除已记住的配对。">关闭</button></div>
+    <div class="small-body">
+      <p class="muted small">首次使用需粘贴本机 token；地址固定为 localhost:38473，连接成功后会自动记住。</p>
+      <input id="address" value="http://localhost:38473" type="hidden">
+      <label><span>配对令牌</span><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴 64 位 token"></label>
+      <p id="pairing-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button id="connect-submit" type="button" class="primary">连接</button>
+        <button id="forget" type="button" class="quiet" title="清除本机保存的配对信息；不会停止助手或删除项目登记。">忘记配对</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="details-dialog" aria-labelledby="details-title">
+  <div class="dialog-small details-shell">
+    <div class="dialog-head"><h2 id="details-title">异常与失败详情</h2><button id="details-close" title="关闭详情。">关闭</button></div>
+    <pre id="details-body"></pre>
+  </div>
+</dialog>
 
 <dialog id="management" aria-labelledby="management-title">
   <div class="dialog-shell">

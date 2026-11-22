@@ -5,7 +5,7 @@ import {readFile} from 'node:fs/promises';
 // @ts-ignore JS fixture is intentionally shared across the two owned packages.
 import {fixture} from '../../../local-helper/tests/fixture.mjs';
 
-test('management dialog, full search, real scan, task lock, progress and hover guidance',async({page})=>{
+test('management dialog, maintained dropdown, real scan, task lock, progress and hover guidance',async({page})=>{
   const f=await fixture();
   const server=createServer(async(req,res)=>{
     if(req.url==='/ui.html') {res.setHeader('Content-Type','text/html; charset=utf-8');res.end(await readFile(new URL('../../dist/ui.html',import.meta.url)));}
@@ -34,20 +34,25 @@ test('management dialog, full search, real scan, task lock, progress and hover g
   try {
     await page.goto('http://127.0.0.1:'+ (server.address() as {port:number}).port);
     const ui=page.frameLocator('iframe');
-    await ui.getByLabel('助手地址').fill(f.base);
-    await ui.getByLabel('配对令牌').fill(f.token);
     await ui.getByRole('button',{name:'连接助手',exact:true}).click();
+    await expect(ui.locator('#pairing')).toBeVisible();
+    await ui.locator('#address').evaluate((el, base) => { (el as HTMLInputElement).value = base; }, f.base);
+    await ui.getByLabel('配对令牌').fill(f.token);
+    await ui.locator('#connect-submit').click();
     await expect(ui.getByTestId('connection')).toHaveText('已连接');
+    await expect(ui.locator('#search')).toHaveCount(0);
+    await expect(ui.locator('#validate')).toHaveCount(0);
+    await expect(ui.getByRole('region',{name:'本机助手'})).toHaveCount(0);
+    await expect(ui.getByTestId('action-result')).toBeHidden();
     await expect(ui.getByRole('button',{name:'取消任务',exact:true})).toBeDisabled();
-    // 重新整理 needs a selected game and starts with an explicit scope note.
+    // 重新整理 needs a selected game; its scope is in the button tooltip.
     await expect(ui.getByRole('button',{name:'重新整理',exact:true})).toBeDisabled();
-    await expect(ui.getByTestId('tidy-status')).toContainText('不改九宫格约束');
-    await ui.getByRole('button',{name:'管理项目',exact:true}).hover();
+    await ui.getByRole('button',{name:'管理',exact:true}).hover();
     const floating=ui.locator('#manage').locator('..').locator('.tooltip');
     await expect(floating).toBeVisible();
     const bounds=await floating.evaluate(el=>{const r=el.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:innerWidth,height:innerHeight};});
     expect(bounds.left>=0&&bounds.top>=0&&bounds.right<=bounds.width&&bounds.bottom<=bounds.height).toBe(true);
-    await ui.getByRole('button',{name:'管理项目',exact:true}).click();
+    await ui.getByRole('button',{name:'管理',exact:true}).click();
     await expect(ui.getByRole('dialog')).toBeVisible();
     await ui.getByLabel('游戏名称', {exact:true}).fill('测试游戏');
     await ui.getByLabel('项目编号', {exact:true}).fill('g2');
@@ -73,13 +78,8 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await expect(ui.getByLabel('项目编号', {exact:true})).toBeEnabled();
     await ui.getByRole('button',{name:'关闭管理',exact:true}).click();
     await expect(ui.locator('#project option')).toHaveCount(2);
-    await expect(ui.getByLabel('记住本机配对', {exact:true})).toBeChecked();
     expect(await page.evaluate(()=>(window as any).pairing?.token)).toBe(f.token);
     expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
-    await ui.getByLabel('搜索名称或编号').fill('g3');
-    await expect(ui.locator('#project option')).toHaveCount(2);
-    await expect(ui.locator('#project')).toContainText('临时游戏');
-    await ui.getByLabel('搜索名称或编号').fill('');
     await ui.locator('#project').selectOption('g2');
     // Hold a real helper request so the page change occurs deterministically during scanning.
     let releaseScan!:()=>void;
@@ -101,7 +101,7 @@ test('management dialog, full search, real scan, task lock, progress and hover g
       (window as any).currentPageInvalid=false;
       document.querySelector('iframe')!.contentWindow!.postMessage({pluginMessage:{type:'page-changed'}},'*');
     });
-    await expect(ui.locator('#page-status')).toContainText('空白页可导入');
+    await expect(ui.locator('#page-status')).toContainText('资源页：可导入');
     await ui.getByRole('button',{name:'扫描资源',exact:true}).click();
     await expect(ui.getByTestId('summary')).toContainText('散图 2');
     await expect(ui.getByTestId('summary')).toContainText('新增 2');
@@ -114,14 +114,14 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await expect(ui.getByRole('button',{name:'重新整理',exact:true})).toBeDisabled();
     await expect(ui.getByTestId('progress')).toContainText('1 / 2');
     await expect(ui.getByRole('button',{name:'取消任务',exact:true})).toBeEnabled();
+    expect(await ui.locator('body').evaluate(el=>el.scrollHeight<=el.clientHeight)).toBe(true);
     await ui.getByRole('button',{name:'取消任务',exact:true}).hover();
     await expect(ui.getByRole('tooltip')).toContainText('已完成的项会保留');
     await ui.getByRole('button',{name:'取消任务',exact:true}).click();
     await expect.poll(()=>page.evaluate(()=>(window as any).cancelRequests)).toBe(1);
     await page.evaluate(()=>{(window as any).finish(true);});
     await expect(ui.locator('#phase')).toHaveText('已取消');
-    await expect(ui.getByTestId('summary')).toContainText('成功 1');
-    await expect(ui.getByTestId('summary')).toContainText('已取消');
+    await expect(ui.getByTestId('action-result')).toContainText('导入已取消');
     await expect(ui.getByRole('button',{name:'取消任务',exact:true})).toBeDisabled();
     await expect(ui.getByRole('button',{name:'导入主组件',exact:true})).toBeEnabled();
     expect(await page.evaluate(()=>(window as any).imported.resources.length)).toBe(2);
@@ -130,23 +130,21 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await ui.getByRole('button',{name:'导入主组件',exact:true}).click();
     await page.evaluate(()=>{(window as any).finish(false);});
     await expect(ui.locator('#phase')).toHaveText('就绪');
-    await expect(ui.getByTestId('summary')).toContainText('上次操作');
+    await expect(ui.getByTestId('action-result')).toContainText('导入：成功 2');
     // The optional comparison page stays absent through scan/import until requested.
     expect(await page.evaluate(()=>(window as any).compareCalls||0)).toBe(0);
-    await expect(ui.getByTestId('compare-status')).toContainText('默认不创建');
-    await ui.getByRole('button',{name:'创建 / 更新对照页',exact:true}).hover();
+    await ui.getByRole('button',{name:'对照页',exact:true}).hover();
     await expect(ui.getByRole('tooltip')).toContainText('文件负担');
-    await ui.getByRole('button',{name:'创建 / 更新对照页',exact:true}).click();
-    await expect(ui.getByTestId('compare-status')).toContainText('测试游戏（g2）- 图集对照');
-    await expect(ui.getByTestId('compare-status')).toContainText('2 个实例');
+    await ui.getByRole('button',{name:'对照页',exact:true}).click();
+    await expect(ui.getByTestId('action-result')).toContainText('对照页：已创建 2 组');
+    await expect(ui.getByTestId('action-result')).toContainText('2 个实例');
     expect(await page.evaluate(()=>(window as any).compareCalls)).toBe(1);
-    // 重新整理 explains its scope and only repositions category frames.
-    await expect(ui.getByTestId('tidy-status')).toContainText('不重建主组件');
+    // 重新整理 explains its scope in hover and only repositions category frames.
     await ui.getByRole('button',{name:'重新整理',exact:true}).hover();
     await expect(ui.getByRole('tooltip')).toContainText('不改变九宫格切片');
     await ui.getByRole('button',{name:'重新整理',exact:true}).click();
-    await expect(ui.getByTestId('tidy-status')).toContainText('已整理 3 个分类 Frame');
-    await expect(ui.getByTestId('tidy-status')).toContainText('移动 2 个');
+    await expect(ui.getByTestId('action-result')).toContainText('重新整理：3 个分类 Frame');
+    await expect(ui.getByTestId('action-result')).toContainText('移动 2 个');
     await expect(ui.locator('#phase')).toHaveText('就绪');
     expect(await page.evaluate(()=>(window as any).tidyCalls)).toBe(1);
     // Manual category controls use the live Figma selection; mixed choices stay explicit.
@@ -160,12 +158,12 @@ test('management dialog, full search, real scan, task lock, progress and hover g
       document.querySelector('iframe')!.contentWindow!.postMessage({pluginMessage:{type:'selection-changed'}},'*');
     });
     await expect(ui.getByTestId('selection-status')).toContainText('混合分类：按钮 / 图标');
-    await expect(ui.locator('#selection-note')).toContainText('已从 1 个实例定位主组件');
-    await expect(ui.locator('#selection-note')).toContainText('已忽略 1 个非本工具对象');
-    await expect(ui.getByRole('button',{name:'应用分类',exact:true})).toBeDisabled();
+    await expect(ui.getByTestId('selection-status')).toHaveAttribute('title', /已从 1 个实例定位主组件/);
+    await expect(ui.getByTestId('selection-status')).toHaveAttribute('title', /已忽略 1 个非本工具对象/);
+    await expect(ui.getByRole('button',{name:'应用',exact:true})).toBeDisabled();
     await ui.locator('#category-select').selectOption('艺术字');
-    await expect(ui.getByRole('button',{name:'应用分类',exact:true})).toBeEnabled();
-    await ui.getByRole('button',{name:'应用分类',exact:true}).click();
+    await expect(ui.getByRole('button',{name:'应用',exact:true})).toBeEnabled();
+    await ui.getByRole('button',{name:'应用',exact:true}).click();
     await expect(ui.getByTestId('selection-status')).toContainText('当前分类：艺术字');
     expect(await page.evaluate(()=>(window as any).categoryRequest.category)).toBe('艺术字');
     expect(await page.evaluate(()=>(window as any).categoryRequest.ids.length)).toBe(2);
@@ -188,7 +186,6 @@ test('management dialog, full search, real scan, task lock, progress and hover g
     await expect(ui.locator('#phase')).toHaveText('失败');
     await page.unroute(f.base+'/v1/scan');
     await f.stop();
-    await ui.getByLabel('配对令牌').fill('0'.repeat(64));
     await ui.getByRole('button',{name:'连接助手',exact:true}).click();
     await expect(ui.getByRole('alert')).toContainText('请启动 figma-assets-helper');
   } finally {await new Promise<void>(r=>server.close(()=>r()));await f.cleanup();}

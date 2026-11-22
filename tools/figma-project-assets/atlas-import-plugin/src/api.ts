@@ -125,7 +125,7 @@ export class HelperClient {
 }
 export interface State {
   connected: boolean; busy: boolean; phase: string; error: string;
-  selected?: PublicProject; page?: PageStatus; scan?: Scan; plan?: ImportPlan; result?: ImportReport; compare?: CompareResult; tidy?: TidyResult; selection?: SelectionState; progress: Progress;
+  selected?: PublicProject; page?: PageStatus; scan?: Scan; plan?: ImportPlan; result?: ImportReport; compare?: CompareResult; tidy?: TidyResult; selection?: SelectionState; notice?: string; progress: Progress;
 }
 export class Workflow {
   readonly state: State = {connected:false,busy:false,phase:'未连接',error:'',progress:{done:0,total:0}};
@@ -161,13 +161,13 @@ export class Workflow {
   }
   async connect(): Promise<void> {
     await this.task('连接中',async () => {
-      this.state.connected = false; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined;
+      this.state.connected = false; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined; this.state.notice = undefined;
       await this.helper.health(); this.projects = await this.helper.projects(); this.state.connected = true;
     });
   }
   async saveProject(project: Project): Promise<void> {
     await this.task('保存登记',async () => {
-      this.projects = await this.helper.saveProject(project); this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined;
+      this.projects = await this.helper.saveProject(project); this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.compare = undefined; this.state.tidy = undefined; this.state.notice = undefined;
       if(this.state.selected?.id === project.id) {
         this.state.selected = {id:project.id,name:project.name};
         this.state.page = await this.platform.validate(this.state.selected);
@@ -177,12 +177,12 @@ export class Workflow {
   async deleteProject(id: string): Promise<void> {
     await this.task('删除登记',async () => {
       this.projects = await this.helper.deleteProject(id);
-      if (this.state.selected?.id === id) {this.state.selected = undefined; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.page = undefined; this.state.compare = undefined; this.state.tidy = undefined;}
+      if (this.state.selected?.id === id) {this.state.selected = undefined; this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.page = undefined; this.state.compare = undefined; this.state.tidy = undefined; this.state.notice = undefined;}
     });
   }
   async selectProject(id: string): Promise<void> {
     await this.task('页面校验',async () => {
-      this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined;
+      this.state.compare = undefined; this.state.tidy = undefined; this.state.selection = undefined; this.state.notice = undefined;
       if(!id) {this.state.selected=undefined;this.state.scan=undefined;this.state.plan=undefined;this.state.result=undefined;this.state.page=undefined;this.state.progress={done:0,total:0};return;}
       const project = this.projects.find(p=>p.id===id);
       if (!project) throw new Error('请选择已登记的游戏');
@@ -190,7 +190,7 @@ export class Workflow {
       this.state.page = await this.platform.validate(this.state.selected);
     });
   }
-  invalidateScan(): void {this.state.scan=undefined;this.state.plan=undefined;this.state.result=undefined;this.state.compare=undefined;this.state.tidy=undefined;this.state.progress={done:0,total:0};}
+  invalidateScan(): void {this.state.scan=undefined;this.state.plan=undefined;this.state.result=undefined;this.state.compare=undefined;this.state.tidy=undefined;this.state.notice=undefined;this.state.progress={done:0,total:0};}
   async validatePage(): Promise<void> {
     await this.task('页面校验',async () => {if (this.state.selected) this.state.page = await this.platform.validate(this.state.selected);});
   }
@@ -213,7 +213,7 @@ export class Workflow {
   async scan(): Promise<void> {
     await this.task('扫描中',async cancellation => {
       if(!this.state.selected || !this.state.connected) throw new Error('请连接助手并选择游戏');
-      this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.tidy = undefined; this.state.progress = {done:0,total:0};
+      this.state.scan = undefined; this.state.plan = undefined; this.state.result = undefined; this.state.tidy = undefined; this.state.notice = undefined; this.state.progress = {done:0,total:0};
       this.state.page = await this.platform.validate(this.state.selected);
       if(!this.state.page.valid) throw new Error(this.state.page.message);
       const controller = new AbortController();
@@ -244,6 +244,9 @@ export class Workflow {
       }
       this.state.result = report;
       this.state.plan = report;
+      this.state.notice = report.cancelled ? '导入已取消：已完成项保留，可再次导入补齐'
+        : report.failures.length ? `导入：成功 ${report.applied.added+report.applied.updated+report.applied.removed} · 失败 ${report.failures.length}`
+        : `导入：成功 ${report.applied.added+report.applied.updated+report.applied.removed}`;
       // The document is the source of truth; refresh the page status after a partial run too.
       this.state.page = await this.platform.validate(scan.project);
       if(report.cancelled) { this.state.error = ''; return '已取消'; }
@@ -261,6 +264,9 @@ export class Workflow {
       const project = this.state.selected;
       if(!project) throw new Error('请选择游戏');
       this.state.compare = await this.platform.compare(project);
+      this.state.notice = this.state.compare.created
+        ? `对照页：已创建 ${this.state.compare.groups} 组 · ${this.state.compare.added} 个实例`
+        : `对照页：新增 ${this.state.compare.added} · 保留 ${this.state.compare.kept} · 移除 ${this.state.compare.removed}`;
     });
   }
   // Reposition existing category frames only; no component, source or slice is rebuilt.
@@ -269,6 +275,9 @@ export class Workflow {
       const project = this.state.selected;
       if(!project) throw new Error('请选择游戏');
       this.state.tidy = await this.platform.tidy(project);
+      this.state.notice = this.state.tidy.frames
+        ? `重新整理：${this.state.tidy.frames} 个分类 Frame · 移动 ${this.state.tidy.moved} 个`
+        : this.state.tidy.messages[0]||'重新整理：没有可整理的分类 Frame';
     });
   }
 }
