@@ -204,9 +204,12 @@ async function openHelperFolder():Promise<void> {
     await rpc('open-helper-folder',{path});
     helperFolderOpened=true;
   } catch {
-    try{await navigator.clipboard.writeText(path);}catch{/* sandbox clipboard may be unavailable */}
-    openSettings();
-    throw new Error(`无法打开资源助手文件夹，路径已填入配对窗口，请手动打开：${path}`);
+    let copied=false;
+    try{await navigator.clipboard.writeText(path);copied=true;}catch{/* sandbox clipboard may be unavailable */}
+    openSettings(true);
+    throw new Error(copied
+      ? `Figma 不允许插件直接打开本地文件夹。路径已复制，请在资源管理器地址栏粘贴打开：${path}`
+      : `Figma 不允许插件直接打开本地文件夹。请在设置中复制路径后，在资源管理器地址栏粘贴打开：${path}`);
   }
 }
 async function connectHelper(address:string,token:string) {
@@ -222,11 +225,13 @@ async function connectHelper(address:string,token:string) {
   await rpc('pairing-save',{pairing:{schemaVersion:1,address,token}});
   remembered=true;
 }
-function openSettings() {
+function openSettings(focusPath=false) {
   if(workflow?.state.busy)return;
   uiError='';render();
   if(!pairingDialog.open)pairingDialog.showModal();
-  (input('helper-path').value.trim()?input('token'):input('helper-path')).focus();
+  const target=focusPath?input('helper-path'):(input('helper-path').value.trim()?input('token'):input('helper-path'));
+  target.focus();
+  if(focusPath)target.select();
 }
 async function run(action:()=>Promise<void>) {
   uiError='';
