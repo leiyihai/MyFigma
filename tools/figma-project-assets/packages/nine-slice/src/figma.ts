@@ -27,7 +27,10 @@ export function applyNineSliceComponent(
       rect.locked = true;
     }
   } catch (error) {
-    for (const { rect } of prepared) rect.remove();
+    for (const { rect } of prepared) {
+      try { rect.remove(); }
+      catch (removeError) { console.error('清理九宫格切片失败', removeError); }
+    }
     throw error;
   }
 
@@ -38,27 +41,42 @@ export function applyNineSliceComponent(
     fills: Array.isArray(component.fills) ? [...component.fills] : [],
     layoutMode: component.layoutMode
   };
-  const appended: RectangleNode[] = [];
+  // Figma has no transaction primitive. Track every previous child we attempt
+  // to remove so a mid-way failure can try to put the old image/slices back.
+  const touchedChildren: SceneNode[] = [];
   try {
     component.resize(plan.width, plan.height);
     component.fills = [];
     component.layoutMode = 'NONE';
     for (const { rect, slice } of prepared) {
       component.appendChild(rect);
-      appended.push(rect);
       rect.x = slice.x;
       rect.y = slice.y;
     }
-    for (const child of previousChildren) child.remove();
+    for (const child of previousChildren) {
+      touchedChildren.push(child);
+      child.remove();
+    }
   } catch (error) {
-    for (const rect of appended) rect.remove();
+    // Remove every prepared rectangle, including one whose append just failed,
+    // so a failed upgrade does not leave detached slices in the file.
+    for (const { rect } of prepared) {
+      try { if (!rect.removed) rect.remove(); }
+      catch (removeError) { console.error('清理九宫格切片失败', removeError); }
+    }
+    // Restore children we may already have removed. This is best effort: Figma
+    // does not expose a transaction, so the API can still reject the restore.
+    for (const child of touchedChildren) {
+      try { component.appendChild(child); }
+      catch (restoreError) { console.error('恢复旧子层失败', restoreError); }
+    }
     // A failed upgrade must not leave the component half converted: restore
     // the previous fill, size and layout so the source image stays usable.
     try {
       component.fills = previous.fills;
       component.layoutMode = previous.layoutMode;
       component.resize(previous.width, previous.height);
-    } catch { /* rollback is best effort; never hide the original failure */ }
+    } catch (restoreError) { console.error('恢复组件填充或尺寸失败', restoreError); }
     throw error;
   }
   return component;

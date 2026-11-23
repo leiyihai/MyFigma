@@ -804,3 +804,153 @@ test('an unchanged upgrade keeps the existing project override state', async () 
   assert.deepEqual(saved.current, { left: 8, top: 8, right: 8, bottom: 8 });
   assert.deepEqual(saved.imageSize, { width: 64, height: 40 });
 });
+
+test('rejects visible strokes, effects or rounded corners on the root of both plain image structures', async () => {
+  const decorations = [
+    { name: 'stroke', apply: node => { node.strokes = [{ type: 'SOLID', visible: true }]; } },
+    { name: 'effect', apply: node => { node.effects = [{ type: 'DROP_SHADOW', visible: true }]; } },
+    { name: 'uniform corner', apply: node => { node.cornerRadius = 4; } },
+    { name: 'per-corner radius', apply: node => { node.topLeftRadius = 4; } }
+  ];
+  const structures = [
+    { name: 'root fill', make: () => plainComponent({ marked: false }) },
+    { name: 'image child', make: () => childImageComponent({ marked: false }).component }
+  ];
+  for (const structure of structures) {
+    for (const decoration of decorations) {
+      const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+      const component = structure.make();
+      decoration.apply(component);
+      env.figma.currentPage.selection = [component];
+      await env.figma.ui.onmessage({ type: 'ui-ready' });
+      await new Promise(resolve => setTimeout(resolve, 0));
+      const preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+      assert.equal(preview.edit, null, `${structure.name} ${decoration.name} should not offer an upgrade`);
+      assert.equal(preview.unsupported, 'extra-content',
+        `${structure.name} ${decoration.name} should be rejected as extra visible content`);
+
+      await env.figma.ui.onmessage({ ...env.settings, left: 8 });
+      assert.equal(component.children.length, structure.name === 'root fill' ? 0 : 1);
+      assert.equal(component.removed, false);
+      assert.equal(component.data['myfigma.nineSlice.v1'], undefined);
+    }
+  }
+});
+
+test('a hidden image child is not treated as the covering image', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const { component, child } = childImageComponent({ marked: false });
+  child.visible = false;
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(preview.edit, null);
+  assert.equal(preview.unsupported, 'component');
+
+  await env.figma.ui.onmessage({ ...env.settings, left: 8 });
+  assert.equal(component.children.length, 1);
+  assert.equal(component.children[0], child);
+  assert.equal(child.removed, false);
+  assert.equal(component.fills.length, 0);
+  assert.equal(component.data['myfigma.nineSlice.v1'], undefined);
+});
+
+test('hidden fills, strokes and effects do not count as visible content', async () => {
+  const childEnv = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const withChild = childImageComponent({
+    marked: false,
+    rootFills: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 }, visible: false }],
+    child: { strokes: [{ type: 'SOLID', visible: false }], effects: [{ type: 'DROP_SHADOW', visible: false }] }
+  });
+  childEnv.figma.currentPage.selection = [withChild.component];
+  await childEnv.figma.ui.onmessage({ ...childEnv.settings, left: 8 });
+  assert.equal(withChild.component.children.length, 9);
+  assert.equal(withChild.child.removed, true);
+
+  const rootEnv = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const root = plainComponent({ marked: false });
+  root.fills = [
+    { type: 'IMAGE', imageHash: 'plain-image', scaleMode: 'FILL' },
+    { type: 'SOLID', color: { r: 0, g: 0, b: 0 }, visible: false }
+  ];
+  root.strokes = [{ type: 'SOLID', visible: false }];
+  root.effects = [{ type: 'DROP_SHADOW', visible: false }];
+  rootEnv.figma.currentPage.selection = [root];
+  await rootEnv.figma.ui.onmessage({ ...rootEnv.settings, left: 8 });
+  assert.equal(root.children.length, 9);
+  assert.equal(root.fills.length, 0);
+});
+
+test('accepts sub-pixel coverage differences on a direct image child and still rejects real gaps', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const { component, child } = childImageComponent({
+    marked: false,
+    child: { x: 0.005, y: -0.005, width: 159.995, height: 120.005 }
+  });
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(preview.edit.target, 'upgrade');
+
+  await env.figma.ui.onmessage({ ...env.settings, left: 16, right: 8, top: 4, bottom: 2 });
+  assert.equal(component.children.length, 9);
+  assert.equal(child.removed, true);
+
+  const gapEnv = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const gap = childImageComponent({ marked: false, child: { width: 159.98 } });
+  gapEnv.figma.currentPage.selection = [gap.component];
+  await gapEnv.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const gapPreview = gapEnv.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(gapPreview.unsupported, 'image-child-not-filled');
+});
+
+test('a failed child-based upgrade keeps the old image child and writes no partial slices', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const { component, child } = childImageComponent({ marked: false });
+  component.appendChild = function () { throw new Error('Simulated append failure'); };
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ ...env.settings, left: 16, right: 8, top: 4, bottom: 2 });
+  assert.equal(component.children.length, 1);
+  assert.equal(component.children[0], child);
+  assert.equal(child.removed, false);
+  assert.equal(component.fills.length, 0);
+  assert.deepEqual([component.width, component.height], [160, 120]);
+  assert.equal(component.layoutMode, 'NONE');
+  assert.ok(!component.data['myfigma.nineSlice.v1']);
+  assert.ok(env.notices.some(text => text.includes('升级失败')));
+});
+
+test('a failed child removal restores the old image child before reporting the upgrade failure', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const { component, child } = childImageComponent({ marked: false });
+  const remove = child.remove;
+  child.remove = function () {
+    remove.call(this);
+    throw new Error('Simulated remove failure');
+  };
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ ...env.settings, left: 16, right: 8, top: 4, bottom: 2 });
+  assert.equal(component.children.length, 1);
+  assert.equal(component.children[0], child);
+  assert.equal(component.children.includes(child), true);
+  assert.equal(component.fills.length, 0);
+  assert.deepEqual([component.width, component.height], [160, 120]);
+  assert.equal(component.layoutMode, 'NONE');
+  assert.ok(!component.data['myfigma.nineSlice.v1']);
+  assert.ok(env.notices.some(text => text.includes('升级失败')));
+});
+
+test('code and UI rejection reason sets stay in sync', () => {
+  const code = fs.readFileSync('code.ts', 'utf8');
+  const reasonsMatch = code.match(/const UPGRADE_REJECTIONS = \[([\s\S]*?)\] as const;/);
+  assert.ok(reasonsMatch, 'UPGRADE_REJECTIONS must be a single source list in code.ts');
+  const codeReasons = [...reasonsMatch[1].matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
+  const ui = fs.readFileSync('ui.html', 'utf8');
+  const mappingMatch = ui.match(/function unsupportedText\(state\) \{[\s\S]*?var keys = \{([\s\S]*?)\n      \};/);
+  assert.ok(mappingMatch, 'unsupportedText must map every rejection reason');
+  const uiReasons = [...mappingMatch[1].matchAll(/'([^']+)':/g)].map(match => match[1]).sort();
+  assert.deepEqual(uiReasons, codeReasons);
+});

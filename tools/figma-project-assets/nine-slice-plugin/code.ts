@@ -23,13 +23,17 @@ type EditableSlice = {
   imageSize: Size; record?: NineSliceRecord; legacy: boolean;
 };
 
-type UpgradeRejection = 'auto-layout' | 'image-child-not-filled' | 'image-child-decorated' |
-  'multiple-children' | 'extra-content';
+const UPGRADE_REJECTIONS = ['auto-layout', 'image-child-not-filled', 'image-child-decorated',
+  'multiple-children', 'extra-content'] as const;
+type UpgradeRejection = (typeof UPGRADE_REJECTIONS)[number];
 // A plain single-image component keeps its image either on the root or on one
 // direct child that fully covers the component.
 type PlainImageInspection =
-  | { ok: true; fill: ImagePaint; child?: SceneNode }
+  | { ok: true; fill: ImagePaint }
   | { ok: false; reason: UpgradeRejection };
+// Figma can report a hairline difference between a child and its canvas even
+// when the designer placed the image at 0,0 with the same size.
+const COVERAGE_TOLERANCE = 0.01;
 
 /** A plain single-image main component that can be upgraded manually. */
 type Upgradeable = {
@@ -69,6 +73,7 @@ function isImageNode(node: SceneNode): node is ImageNode {
   return 'fills' in node && Array.isArray(node.fills) && node.fills.some(fill => fill.type === 'IMAGE');
 }
 function visibleFills(node: SceneNode): readonly Paint[] {
+  if (node.visible === false) return [];
   return 'fills' in node && Array.isArray(node.fills) ? node.fills.filter(fill => fill.visible !== false) : [];
 }
 function visibleImageFills(node: SceneNode): ImagePaint[] {
@@ -78,10 +83,12 @@ function usesAutoLayout(node: SceneNode): boolean {
   return 'layoutMode' in node && node.layoutMode !== 'NONE';
 }
 function hasVisibleStrokes(node: SceneNode): boolean {
-  return 'strokes' in node && Array.isArray(node.strokes) && node.strokes.some(stroke => stroke.visible !== false);
+  return node.visible !== false && 'strokes' in node && Array.isArray(node.strokes) &&
+    node.strokes.some(stroke => stroke.visible !== false);
 }
 function hasVisibleEffects(node: SceneNode): boolean {
-  return 'effects' in node && Array.isArray(node.effects) && node.effects.some(effect => effect.visible !== false);
+  return node.visible !== false && 'effects' in node && Array.isArray(node.effects) &&
+    node.effects.some(effect => effect.visible !== false);
 }
 function hasRoundedCorners(node: SceneNode): boolean {
   const corner = node as SceneNode & {
@@ -100,6 +107,14 @@ function childCount(node: SceneNode): number {
 }
 function hasVisibleAppearance(node: SceneNode): boolean {
   return hasRoundedCorners(node) || hasVisibleStrokes(node) || hasVisibleEffects(node);
+}
+function hasVisibleExtraContent(node: SceneNode): boolean {
+  return hasVisibleContent(node) || hasRoundedCorners(node);
+}
+function coversComponent(child: SceneNode, component: ComponentNode): boolean {
+  return Math.abs(child.x) <= COVERAGE_TOLERANCE && Math.abs(child.y) <= COVERAGE_TOLERANCE &&
+    Math.abs(child.width - component.width) <= COVERAGE_TOLERANCE &&
+    Math.abs(child.height - component.height) <= COVERAGE_TOLERANCE;
 }
 // Converting an existing main component or an instance would break the source
 // identity and every linked instance, so only plain layers are convertible.
@@ -180,6 +195,9 @@ function inspectPlainImageComponent(node: SceneNode | undefined): PlainImageInsp
     if (usesAutoLayout(component)) return { ok: false, reason: 'auto-layout' };
     // One visible fill, and it must be the image itself.
     if (visibleFills(component).length !== 1) return { ok: false, reason: 'extra-content' };
+    // The root is the image container here, so its own strokes, effects and
+    // corner radius are extra visible content too.
+    if (hasVisibleAppearance(component)) return { ok: false, reason: 'extra-content' };
     return { ok: true, fill: rootImages[0] };
   }
   if (children.length > 1) {
@@ -190,14 +208,14 @@ function inspectPlainImageComponent(node: SceneNode | undefined): PlainImageInsp
   const childImages = visibleImageFills(child);
   if (childImages.length === 0) return rootImages.length ? { ok: false, reason: 'extra-content' } : null;
   if (usesAutoLayout(component) || usesAutoLayout(child)) return { ok: false, reason: 'auto-layout' };
-  // Structure B: the root must not add visible content of its own.
-  if (hasVisibleContent(component)) return { ok: false, reason: 'extra-content' };
+  // Structure B: the root must not add visible content of its own, including
+  // strokes, effects and corner radius.
+  if (hasVisibleExtraContent(component)) return { ok: false, reason: 'extra-content' };
   if (visibleFills(child).length !== 1) return { ok: false, reason: 'extra-content' };
   if (childCount(child) > 0) return { ok: false, reason: 'extra-content' };
   if (hasVisibleAppearance(child)) return { ok: false, reason: 'image-child-decorated' };
-  if (child.x !== 0 || child.y !== 0 || child.width !== component.width || child.height !== component.height)
-    return { ok: false, reason: 'image-child-not-filled' };
-  return { ok: true, fill: childImages[0], child };
+  if (!coversComponent(child, component)) return { ok: false, reason: 'image-child-not-filled' };
+  return { ok: true, fill: childImages[0] };
 }
 function upgradeRejection(node: SceneNode | undefined): UpgradeRejection | null {
   const inspection = inspectPlainImageComponent(node);
@@ -401,11 +419,11 @@ async function upgradePlainComponent(upgrade: Upgradeable, msg: Settings): Promi
     notifyLocalized('已在同一个主组件上完成手动九宫格升级；组件 ID、当前宽高与实例关联均保留。',
       'Manual 9-slice upgrade finished on the same main component; its ID, current size and instances stay intact.');
   } catch (error) {
-    console.error('升级普通图片主组件失败', error);
+    console.error('升级普通单图组件失败', error);
     try { writeNineSliceRecord(upgrade.component, previousRecord); }
     catch (recordError) { console.error('回滚九宫格记录失败', recordError); }
-    notifyLocalized('升级失败，原组件未被替换。请查看插件控制台。',
-      'Upgrade failed; the original component was kept. Check the plugin console.', { error: true });
+    notifyLocalized('升级失败；已尽力保留原组件，若内容不完整请查看插件控制台。',
+      'Upgrade failed; the original component was kept as far as possible. Check the plugin console if its content looks incomplete.', { error: true });
   } finally {
     generating = false;
   }

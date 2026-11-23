@@ -14,7 +14,7 @@ npm run typecheck
   尺寸必须为有限正数，边距为有限非负数，两边之和严格小于对应尺寸；否则抛出 `RangeError`，不钳制人工输入。
   返回按行排序的非零切片、位置和约束：角固定、边单向拉伸、中心双向拉伸。
 - `@myfigma/nine-slice/figma`：`createNineSliceComponent(figma, {width, height, fill}, margins, {overlap?})`。
-  返回无 Auto Layout 的主组件；失败移除本次半成品。调用方负责父级、名称、坐标、选择、来源状态和原图删除。
+  返回无 Auto Layout 的主组件；失败移除本次半成品，并尽力恢复已移除的旧子层与原填充、尺寸、布局。Figma 不提供事务原语，恢复本身仍可能失败。调用方负责父级、名称、坐标、选择、来源状态和原图删除。
   `fill` 为 Figma `ImagePaint`；消费适配入口的工程需要 `@figma/plugin-typings`。
 - `@myfigma/nine-slice/record`：两个插件共用的 Figma shared plugin data 记录读写（namespace `myfigma`、key `nineSlice.v1`，旧私有 `myfigma.nineSlice.v1` 仅兼容回退）。
   必填 `margins`、`overlap`、`width`、`height` 兼容旧版；新增 `project`（项目统计参数）、`current`（当前参数）、`override`（人工覆盖）和可选 `imageSize`（原图像素尺寸）。
