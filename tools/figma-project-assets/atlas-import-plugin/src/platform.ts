@@ -7,8 +7,8 @@ import { categoryConfigKey, categoryIndex, categoryOr, classify, componentName, 
 import { createNineSlicePlan, type Margins } from '../../packages/nine-slice/src/index';
 import { applyNineSliceComponent, createNineSliceComponent } from '../../packages/nine-slice/src/figma';
 import {
-  NINE_SLICE_RECORD_KEY, createNineSliceRecord, parseNineSliceRecord,
-  readNineSliceRecord, writeNineSliceRecord, serializeNineSliceRecord, type NineSliceRecord
+  NINE_SLICE_RECORD_KEY, createNineSliceRecord, nineSliceSourceSize, parseNineSliceRecord,
+  readNineSliceRecord, scaleMargins, writeNineSliceRecord, serializeNineSliceRecord, type NineSliceRecord
 } from '../../packages/nine-slice/src/record';
 
 const bindingKey = 'atlas.binding';
@@ -159,7 +159,12 @@ function verifyNineSlice(component: ComponentNode, record: NineSliceRecord): boo
   if(component.layoutMode !== 'NONE') return false;
   if(!Array.isArray(component.fills) || component.fills.length !== 0) return false;
   let plan;
-  try { plan = createNineSlicePlan({width:component.width,height:component.height}, record.current, record.overlap); }
+  try {
+    // A manual upgrade keeps the designer's current canvas while its margins
+    // stay in original image pixels; compare against scaled canvas margins.
+    const canvas = {width:component.width,height:component.height};
+    plan = createNineSlicePlan(canvas, scaleMargins(record.current, nineSliceSourceSize(record), canvas), record.overlap);
+  }
   catch { return false; }
   if(component.children.length !== plan.slices.length) return false;
   const expected = new Map(plan.slices.map(slice => [`切片 ${slice.row + 1}-${slice.column + 1}`, slice]));
@@ -488,6 +493,14 @@ function planState(existing: Existing | undefined, item: Candidate): Planned {
   const project = item.layout?.nineSlice?.margins;
   const record = existing?.record;
   const width = item.resource.width, height = item.resource.height;
+  // A record with an explicit source size was written by a manual upgrade: the
+  // canvas is the designer's decision, while margins stay in image pixels.
+  const keepCanvas = !!record?.source;
+  const canvas = keepCanvas && existing
+    ? {width:existing.component.width,height:existing.component.height} : {width,height};
+  const recordFor = (margins: Margins, options: {project?: Margins; overlap: boolean; override: boolean}) =>
+    createNineSliceRecord(margins, canvas,
+      {project:options.project,overlap:options.overlap,override:options.override,source:keepCanvas?{width,height}:undefined});
   if(record?.override) {
     if(!validFor(record.current,width,height)) {
       // Never clamp a designer's margins; explain how to recover and retry instead.
@@ -499,7 +512,7 @@ function planState(existing: Existing | undefined, item: Candidate): Planned {
     }
     const effectiveProject = project || record.project;
     return {shape:'slices', margins:record.current, project:effectiveProject, override:true, overlap:record.overlap,
-      record:createNineSliceRecord(record.current,{width,height},{project:effectiveProject,overlap:record.overlap,override:true})};
+      record:recordFor(record.current,{project:effectiveProject,overlap:record.overlap,override:true})};
   }
   if(project) {
     if(!validFor(project,width,height)) return {
@@ -507,7 +520,7 @@ function planState(existing: Existing | undefined, item: Candidate): Planned {
       blocked:`项目九宫格边距无法应用到 ${width}×${height}，已跳过`
     };
     return {shape:'slices', margins:project, project, override:false, overlap:record?.overlap === true,
-      record:createNineSliceRecord(project,{width,height},{project,overlap:record?.overlap === true,override:false})};
+      record:recordFor(project,{project,overlap:record?.overlap === true,override:false})};
   }
   if(existing?.shape === 'slices' && record) {
     // Usage disappeared: keep the existing stretch behavior instead of downgrading.
@@ -516,7 +529,7 @@ function planState(existing: Existing | undefined, item: Candidate): Planned {
       blocked:`九宫格边距无法应用到新尺寸 ${width}×${height}，已跳过`
     };
     return {shape:'slices', margins:record.current, project:record.project, override:record.override, overlap:record.overlap,
-      record:createNineSliceRecord(record.current,{width,height},{project:record.project,overlap:record.overlap,override:record.override})};
+      record:recordFor(record.current,{project:record.project,overlap:record.overlap,override:record.override})};
   }
   return {shape:'image', override:false, overlap:false};
 }
@@ -526,12 +539,15 @@ function sameMargins(left: Margins | undefined, right: Margins | undefined): boo
 }
 function isUnchanged(existing: Existing, item: Candidate, planned: Planned): boolean {
   if(!existing.sync || existing.sync.status !== 'current' || existing.sync.contentHash !== item.hash ||
-     existing.sync.sourceSize.w !== item.resource.width || existing.sync.sourceSize.h !== item.resource.height ||
-     existing.component.width !== item.resource.width || existing.component.height !== item.resource.height) return false;
+     existing.sync.sourceSize.w !== item.resource.width || existing.sync.sourceSize.h !== item.resource.height) return false;
+  // Manual upgrades keep the designer's canvas; only the record canvas must match.
+  const explicitSource = !!existing.record?.source;
+  if(!explicitSource && (existing.component.width !== item.resource.width || existing.component.height !== item.resource.height)) return false;
   if(existing.shape !== planned.shape) return false;
   if(planned.shape === 'image') return true;
   const record = existing.record;
-  return !!record && sameMargins(record.current, planned.margins) && record.overlap === planned.overlap &&
+  return !!record && existing.component.width === record.width && existing.component.height === record.height &&
+    sameMargins(record.current, planned.margins) && record.overlap === planned.overlap &&
     record.override === planned.override && sameMargins(record.project, planned.project);
 }
 function buildPlan(scan: Scan, page: PageNode): PlanState {
@@ -762,8 +778,15 @@ function restoreSnapshot(api: Pick<PluginAPI,'createRectangle'>, snap: UpdateSna
 function applyComponent(api: Pick<PluginAPI,'createRectangle'>, component: ComponentNode, item: Candidate, image: ImagePaint): void {
   const planned = item.planned;
   if(planned.shape === 'slices' && planned.margins) {
-    applyNineSliceComponent(api,component,
-      {width:item.resource.width,height:item.resource.height,fill:image},planned.margins,
+    // Manual upgrades keep their canvas; scale the image-pixel margins into it.
+    const keepCanvas = !!planned.record?.source;
+    const canvas = keepCanvas
+      ? {width:planned.record!.width,height:planned.record!.height}
+      : {width:item.resource.width,height:item.resource.height};
+    const margins = keepCanvas
+      ? scaleMargins(planned.margins,{width:item.resource.width,height:item.resource.height},canvas)
+      : planned.margins;
+    applyNineSliceComponent(api,component,{width:canvas.width,height:canvas.height,fill:image},margins,
       {overlap:planned.overlap});
   } else {
     component.resize(item.resource.width,item.resource.height);

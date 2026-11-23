@@ -29,7 +29,11 @@ function setup(sizes = [[100, 80]], options = {}) {
     ui: { postMessage(msg) { messages.push(msg); } },
     clientStorage: { async getAsync() { return options.saved; }, async setAsync(key, value) { saved.push({ key, value }); } },
     currentPage: { selection: sources },
-    getImageByHash(hash) { return { getBytesAsync: options.getBytes || (async () => new Uint8Array([1])) }; },
+    getImageByHash(hash) {
+      const bytes = options.getBytes || (async () => new Uint8Array([1]));
+      const imageSize = options.imageSize || { width: 100, height: 80 };
+      return { getBytesAsync: bytes, getSizeAsync: async () => ({ ...imageSize }) };
+    },
     notify(text) { notices.push(text); }, viewport: { scrollAndZoomIntoView() {} },
     createComponent() { const result = node('COMPONENT'); created.push(result); return result; },
     createRectangle: node
@@ -414,4 +418,134 @@ test('selection payloads tell the UI whether margins are manual, project-driven 
   assert.equal(preview.edit.legacy, false);
   assert.deepEqual(JSON.parse(JSON.stringify(preview.edit.project)), { left: 8, right: 8, top: 8, bottom: 8 });
   assert.equal(preview.edit.override, false);
+});
+
+function plainComponent(options = {}) {
+  const component = {
+    type: 'COMPONENT', name: options.name || '底板/普通底板', width: options.width ?? 160, height: options.height ?? 120,
+    children: [], layoutMode: 'NONE', removed: false, data: { ...(options.data || {}) }, shared: {},
+    fills: [{ type: 'IMAGE', imageHash: 'plain-image', scaleMode: 'FILL' }],
+    getPluginData(key) { return this.data[key] || ''; },
+    setPluginData(key, value) { this.data[key] = value; },
+    getSharedPluginData(ns, key) { return (this.shared || {})[ns + '/' + key] || ''; },
+    setSharedPluginData(ns, key, value) { (this.shared ||= {})[ns + '/' + key] = value; },
+    resize(width, height) { this.width = width; this.height = height; },
+    appendChild(child) { child.parent = this; this.children.push(child); },
+    remove() { this.removed = true; }
+  };
+  return component;
+}
+
+test('upgrades an importer plain image main component in place, previewing original pixels and keeping its current size', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const component = plainComponent();
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(preview.width, 64);
+  assert.equal(preview.height, 40);
+  assert.equal(preview.edit.target, 'upgrade');
+  assert.equal(preview.edit.editable, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(preview.edit.source)), { width: 64, height: 40 });
+
+  await env.figma.ui.onmessage({ ...env.settings, left: 16, right: 8, top: 4, bottom: 2 });
+  // Same component upgraded in place: no replacement component, no second master.
+  assert.equal(env.created.length, 0);
+  assert.equal(component.removed, false);
+  assert.deepEqual([component.width, component.height], [160, 120]);
+  assert.equal(component.fills.length, 0);
+  assert.equal(component.children.length, 9);
+  const child = name => component.children.find(node => node.name === name);
+  // Margins are entered in original image pixels and scaled to the current canvas.
+  assert.equal(child('切片 2-1').width, 40);
+  assert.equal(child('切片 1-2').height, 12);
+  assert.equal(child('切片 2-3').width, 20);
+  assert.equal(child('切片 3-2').height, 6);
+  const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.deepEqual(saved.margins, { left: 16, right: 8, top: 4, bottom: 2 });
+  assert.deepEqual(saved.current, { left: 16, right: 8, top: 4, bottom: 2 });
+  assert.deepEqual(saved.source, { width: 64, height: 40 });
+  assert.deepEqual([saved.width, saved.height], [160, 120]);
+  assert.equal(saved.override, true);
+  assert.equal(saved.project, undefined);
+  // The atlas importer reads shared plugin data, not this plugin's private store.
+  assert.equal(component.shared['myfigma/nineSlice.v1'], component.data['myfigma.nineSlice.v1']);
+});
+
+test('rejects margins that only fit the current canvas but overflow the original image pixels', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const component = plainComponent();
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ ...env.settings, left: 40, right: 30, top: 4, bottom: 2 });
+  assert.equal(component.children.length, 0);
+  assert.equal(component.fills.length, 1);
+  assert.equal(component.data['myfigma.nineSlice.v1'], undefined);
+  assert.ok(env.notices.some(text => /边距/.test(text)));
+});
+
+test('an instance of a plain image component is never upgraded; it only locates the main component', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const component = plainComponent();
+  const instance = {
+    type: 'INSTANCE', name: '普通底板实例', width: 300, height: 200, fills: [], children: [],
+    async getMainComponentAsync() { return component; }
+  };
+  env.figma.currentPage.selection = [instance];
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  let preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(preview.edit.target, 'upgrade');
+  assert.equal(preview.edit.editable, false);
+  assert.deepEqual([preview.width, preview.height], [64, 40]);
+
+  await env.figma.ui.onmessage({ ...env.settings, left: 16 });
+  assert.equal(component.children.length, 0);
+  assert.equal(component.fills.length, 1);
+  assert.equal(component.data['myfigma.nineSlice.v1'], undefined);
+  assert.deepEqual([instance.width, instance.height], [300, 200]);
+
+  env.messages.length = 0;
+  await env.figma.ui.onmessage({ type: 'locate-main-component' });
+  assert.equal(env.figma.currentPage.selection[0], component);
+  assert.ok(env.notices.some(text => /主组件/.test(text)));
+  assert.equal(component.children.length, 0);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(preview.edit.editable, true);
+});
+
+test('a manually changed or complex component is rejected without touching its content', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const complex = plainComponent({ name: '人工改造底板' });
+  complex.children = [{ type: 'RECTANGLE', name: '自绘边框', fills: [], children: [], data: {} }];
+  env.figma.currentPage.selection = [complex];
+  await env.figma.ui.onmessage({ ...env.settings, left: 8 });
+  assert.equal(env.created.length, 0);
+  assert.equal(complex.children.length, 1);
+  assert.equal(complex.fills.length, 1);
+  assert.equal(complex.data['myfigma.nineSlice.v1'], undefined);
+  assert.ok(env.notices.some(text => /无法识别/.test(text)));
+
+  const multiFill = plainComponent({ name: '双层填充' });
+  multiFill.fills = [{ type: 'IMAGE', imageHash: 'a' }, { type: 'SOLID', color: { r: 0, g: 0, b: 0 } }];
+  env.figma.currentPage.selection = [multiFill];
+  await env.figma.ui.onmessage({ ...env.settings, left: 8 });
+  assert.equal(multiFill.children.length, 0);
+  assert.equal(multiFill.fills.length, 2);
+  assert.equal(multiFill.data['myfigma.nineSlice.v1'], undefined);
+});
+
+test('a failed upgrade leaves the plain component with its image fill and no partial slices', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const component = plainComponent();
+  component.appendChild = function () { throw new Error('Simulated append failure'); };
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ ...env.settings, left: 16, right: 8, top: 4, bottom: 2 });
+  assert.equal(component.children.length, 0);
+  assert.equal(component.fills.length, 1);
+  assert.equal(component.fills[0].type, 'IMAGE');
+  assert.deepEqual([component.width, component.height], [160, 120]);
+  assert.equal(component.data['myfigma.nineSlice.v1'], undefined);
+  assert.ok(env.notices.some(text => text.includes('升级失败')));
 });

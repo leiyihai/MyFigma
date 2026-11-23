@@ -249,3 +249,186 @@ test('skips a nine-slice component whose inner structure was changed by hand', a
   } finally { await f.cleanup(); }
 });
 
+
+// Drive the real nine-slice plugin entry so the manual upgrade is produced by
+// the plugin itself, not a hand-written record fixture.
+async function upgradeWithNineSlicePlugin(figma, component, imageSize, settings) {
+  const notices = [];
+  const host = {
+    showUI() {}, on() {},
+    ui: { postMessage() {} },
+    clientStorage: { async getAsync() { return { lang: 'zh', settingsVersion: 2 }; }, async setAsync() {} },
+    currentPage: { selection: [component], async loadAsync() {} },
+    getImageByHash() {
+      return {
+        async getBytesAsync() { return new Uint8Array([1]); },
+        async getSizeAsync() { return imageSize; }
+      };
+    },
+    notify(text) { notices.push(text); },
+    viewport: { scrollAndZoomIntoView() {} },
+    createRectangle: figma.createRectangle
+  };
+  vm.runInNewContext(nineSlicePluginCode(), { figma: host, __html__: '', console });
+  await host.ui.onmessage({
+    type: 'generate', left: 0, right: 0, top: 0, bottom: 0, all: 0, overlap: false,
+    keepOriginal: false, batchMode: false, lang: 'zh', ...settings
+  });
+  return notices;
+}
+
+test('manually upgraded plain component keeps manual margins, its current size and instances across incremental imports', async () => {
+  const { f, workflow, page, api: figma } = await setup();
+  try {
+    await workflow.scan();
+    await workflow.import();
+    const plain = component(page, 'plain');
+    assert.equal(plain.children.length, 0);
+    const id = plain.id;
+
+    // The designer resized the master and uses an instance at a design size.
+    plain.resize(120, 60);
+    const instance = {
+      type: 'INSTANCE', width: 30, height: 30,
+      async getMainComponentAsync() { return plain; },
+      resize(width, height) { this.width = width; this.height = height; }
+    };
+    page.appendChild(instance);
+
+    // Preview and margins are in original image pixels (20x20), not the 120x60 canvas.
+    const notices = await upgradeWithNineSlicePlugin(figma, plain, { width: 20, height: 20 }, {
+      left: 4, right: 4, top: 4, bottom: 4
+    });
+    assert.ok(notices.length > 0);
+    assert.equal(component(page, 'plain'), plain);
+    assert.equal(plain.id, id);
+    assert.deepEqual([plain.width, plain.height], [120, 60]);
+    assert.equal(plain.children.length, 9);
+    const upgraded = record(plain);
+    assert.deepEqual(upgraded.current, { left: 4, top: 4, right: 4, bottom: 4 });
+    assert.deepEqual(upgraded.source, { width: 20, height: 20 });
+    assert.deepEqual([upgraded.width, upgraded.height], [120, 60]);
+    assert.equal(upgraded.override, true);
+    assert.match(plain.getPluginData('atlas.source'), /"frameName":"plain"/);
+    assert.deepEqual([instance.width, instance.height], [30, 30]);
+
+    // An unchanged import recognises the manual upgrade instead of rewriting it.
+    await workflow.scan();
+    assert.deepEqual(pick(workflow.state.plan), { added: 0, updated: 0, removed: 0, unchanged: 2, blocked: 0 });
+    await workflow.import();
+    assert.equal(component(page, 'plain'), plain);
+    assert.deepEqual([plain.width, plain.height], [120, 60]);
+    assert.deepEqual(record(plain).current, { left: 4, top: 4, right: 4, bottom: 4 });
+    assert.deepEqual([instance.width, instance.height], [30, 30]);
+
+    // A project parameter appearing never replaces the manual margins.
+    await writeLayout(layoutPath(f.project), [
+      layoutImageNode('普通', 'set:buttons.json image:plain', '6 6 6 6')
+    ]);
+    await workflow.scan();
+    assert.deepEqual(pick(workflow.state.plan), { added: 0, updated: 1, removed: 0, unchanged: 1, blocked: 0 });
+    await workflow.import();
+    assert.equal(component(page, 'plain'), plain);
+    assert.deepEqual([plain.width, plain.height], [120, 60]);
+    assert.deepEqual(record(plain).current, { left: 4, top: 4, right: 4, bottom: 4 });
+    assert.deepEqual(record(plain).project, { left: 6, top: 6, right: 6, bottom: 6 });
+    assert.equal(record(plain).override, true);
+
+    // Updating the image pixels keeps the manual margins and the current canvas.
+    const previousHash = plain.children[0].fills[0].imageHash;
+    await writePng(join(imageset(f.project), 'buttons.png'), 40, 30, solid(40, 30, [90, 40, 10, 255]));
+    await workflow.scan();
+    assert.deepEqual(pick(workflow.state.plan), { added: 0, updated: 2, removed: 0, unchanged: 0, blocked: 0 });
+    await workflow.import();
+    assert.equal(component(page, 'plain'), plain);
+    assert.notEqual(plain.children[0].fills[0].imageHash, previousHash);
+    assert.deepEqual([plain.width, plain.height], [120, 60]);
+    assert.deepEqual(record(plain).current, { left: 4, top: 4, right: 4, bottom: 4 });
+    assert.deepEqual(record(plain).source, { width: 20, height: 20 });
+    assert.deepEqual([instance.width, instance.height], [30, 30]);
+
+    // The source shrinks below the manual margins: skip and explain, never clamp.
+    const keptHash = plain.children[0].fills[0].imageHash;
+    await writeAtlas(join(imageset(f.project), 'buttons.json'), {
+      image: 'buttons.png', size: { w: 40, h: 30 },
+      frames: {
+        panel: { frame: { x: 0, y: 0, w: 40, h: 30 } },
+        plain: { frame: { x: 0, y: 0, w: 6, h: 6 }, sourceSize: { w: 6, h: 6 }, offset: { x: 0, y: 0 } }
+      }
+    });
+    await workflow.scan();
+    assert.deepEqual(pick(workflow.state.plan), { added: 0, updated: 0, removed: 0, unchanged: 1, blocked: 1 });
+    assert.match(workflow.state.plan.messages.join('\n'), /边距/);
+    await workflow.import();
+    assert.equal(plain.children[0].fills[0].imageHash, keptHash);
+    assert.deepEqual([plain.width, plain.height], [120, 60]);
+    assert.deepEqual(record(plain).current, { left: 4, top: 4, right: 4, bottom: 4 });
+    assert.deepEqual([instance.width, instance.height], [30, 30]);
+  } finally { await f.cleanup(); }
+});
+
+test('restoring project parameters on a manually upgraded component keeps its canvas and instance sizes', async () => {
+  const { f, workflow, page, api: figma } = await setup();
+  try {
+    await workflow.scan();
+    await workflow.import();
+    const plain = component(page, 'plain');
+    plain.resize(120, 60);
+    const instance = {
+      type: 'INSTANCE', width: 30, height: 30,
+      async getMainComponentAsync() { return plain; },
+      resize(width, height) { this.width = width; this.height = height; }
+    };
+    page.appendChild(instance);
+    await upgradeWithNineSlicePlugin(figma, plain, { width: 20, height: 20 }, {
+      left: 4, right: 4, top: 4, bottom: 4
+    });
+    assert.deepEqual(record(plain).project, undefined);
+
+    await writeLayout(layoutPath(f.project), [
+      layoutImageNode('普通', 'set:buttons.json image:plain', '6 6 6 6')
+    ]);
+    await workflow.scan();
+    await workflow.import();
+    const withProject = record(plain);
+    assert.deepEqual(withProject.project, { left: 6, top: 6, right: 6, bottom: 6 });
+    assert.deepEqual(withProject.current, { left: 4, top: 4, right: 4, bottom: 4 });
+    assert.equal(withProject.override, true);
+
+    // Restoring uses the recorded project parameter in place, keeping the canvas.
+    const notices = await restoreWithNineSlicePlugin(figma, plain);
+    assert.ok(notices.some(text => /恢复|restored/i.test(text)));
+    const restored = record(plain);
+    assert.deepEqual(restored.current, { left: 6, top: 6, right: 6, bottom: 6 });
+    assert.deepEqual(restored.project, { left: 6, top: 6, right: 6, bottom: 6 });
+    assert.equal(restored.override, false);
+    assert.deepEqual([plain.width, plain.height], [120, 60]);
+    assert.deepEqual(restored.source, { width: 20, height: 20 });
+    assert.equal(plain.children.length, 9);
+    assert.equal(plain.children.find(child => child.name === '切片 2-1').width, 36);
+    assert.deepEqual([instance.width, instance.height], [30, 30]);
+
+    // The importer recognises the restored record without resizing the canvas.
+    await workflow.scan();
+    assert.deepEqual(pick(workflow.state.plan), { added: 0, updated: 0, removed: 0, unchanged: 2, blocked: 0 });
+    await workflow.import();
+    assert.deepEqual([plain.width, plain.height], [120, 60]);
+    assert.deepEqual(record(plain).current, { left: 6, top: 6, right: 6, bottom: 6 });
+
+    // A source that no longer fits the project parameter is skipped and reported.
+    const keptHash = plain.children[0].fills[0].imageHash;
+    await writeAtlas(join(imageset(f.project), 'buttons.json'), {
+      image: 'buttons.png', size: { w: 40, h: 30 },
+      frames: {
+        panel: { frame: { x: 0, y: 0, w: 40, h: 30 } },
+        plain: { frame: { x: 0, y: 0, w: 8, h: 8 }, sourceSize: { w: 8, h: 8 }, offset: { x: 0, y: 0 } }
+      }
+    });
+    await workflow.scan();
+    assert.deepEqual(pick(workflow.state.plan), { added: 0, updated: 0, removed: 0, unchanged: 1, blocked: 1 });
+    assert.match(workflow.state.plan.messages.join('\n'), /九宫格边距无法应用/);
+    await workflow.import();
+    assert.equal(plain.children[0].fills[0].imageHash, keptHash);
+    assert.deepEqual([plain.width, plain.height], [120, 60]);
+  } finally { await f.cleanup(); }
+});
