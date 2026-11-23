@@ -244,6 +244,7 @@ test('a rejected plain image structure explains why the upgrade is unavailable',
     ['image-child-not-filled', /铺满/],
     ['image-child-decorated', /圆角|描边|效果/],
     ['multiple-children', /多个|额外|一张/],
+    ['extra-content', /额外|其他内容/],
     ['auto-layout', /Auto Layout|自动布局/]
   ]) {
     await page.evaluate(reason => window.postMessage({ pluginMessage: {
