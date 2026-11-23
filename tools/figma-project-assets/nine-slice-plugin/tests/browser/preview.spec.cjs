@@ -205,3 +205,49 @@ test('an unrecognized component is explained and never offered an update action'
   await expect(page.locator('#main-btn')).toBeDisabled();
   await expect(page.locator('#restore-btn')).toBeHidden();
 });
+
+test('a plain image main component offers an in-place upgrade and explains the disabled restore entry', async ({ page }) => {
+  await openPreview(page);
+  await page.evaluate(() => window.postMessage({ pluginMessage: {
+    type: 'update-preview', bytes: null,
+    edit: {
+      margins: { left: 0, right: 0, top: 0, bottom: 0 }, overlap: false, target: 'upgrade',
+      name: '底板/普通底板', editable: true, legacy: false, override: true, source: { width: 64, height: 40 }
+    }
+  } }, '*'));
+  await expect(page.locator('#main-btn')).toHaveText('升级为九宫格组件');
+  await expect(page.locator('#edit-status')).toContainText('原图 64×40');
+  const restore = page.locator('#restore-btn');
+  await expect(restore).toBeVisible();
+  await expect(restore).toBeDisabled();
+  await expect(restore).toHaveAttribute('title', /没有记录项目参数/);
+  await expect(page.locator('#locate-btn')).toBeHidden();
+});
+
+test('an instance exposes a locate action that never submits an upgrade', async ({ page }) => {
+  await openPreview(page);
+  await page.evaluate(() => {
+    window.locateMessages = [];
+    window.generatedMessages = [];
+    window.addEventListener('message', e => {
+      const message = e.data?.pluginMessage;
+      if (message?.type === 'locate-main-component') window.locateMessages.push(message);
+      if (message?.type === 'generate') window.generatedMessages.push(message);
+    });
+    window.postMessage({ pluginMessage: {
+      type: 'update-preview', bytes: null,
+      edit: {
+        margins: { left: 4, right: 4, top: 4, bottom: 4 }, overlap: false, target: 'upgrade',
+        name: '底板/普通底板', editable: false, legacy: false, override: true, source: { width: 20, height: 20 }
+      }
+    } }, '*');
+  });
+  await expect(page.locator('#edit-status')).toContainText('定位主组件');
+  await expect(page.locator('#main-btn')).toBeDisabled();
+  const locate = page.locator('#locate-btn');
+  await expect(locate).toBeVisible();
+  await expect(locate).toHaveAttribute('title', /不会修改/);
+  await locate.click();
+  await expect.poll(() => page.evaluate(() => window.locateMessages)).toEqual([{ type: 'locate-main-component' }]);
+  expect(await page.evaluate(() => window.generatedMessages)).toEqual([]);
+});

@@ -30,6 +30,8 @@
     .edit-status { display: none; margin: 0 0 8px; padding: 7px 9px; border: 1px solid #b8d8ff; background: #eef7ff; color: #084b8a; border-radius: 7px; font-size: 11px; line-height: 1.4; }
     button#main-btn { width: 100%; height: 46px; background: linear-gradient(135deg, #18a0fb 0%, #007aff 100%); color: #fff; border: none; border-radius: 10px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(24,160,251,0.3); }
     button#restore-btn { display: none; width: 100%; height: 34px; margin-bottom: 8px; background: #fff; color: #084b8a; border: 1px solid #b8d8ff; border-radius: 8px; font-weight: 600; cursor: pointer; }
+    button#restore-btn:disabled { color: #8a949c; border-color: var(--border); background: #fafafa; cursor: not-allowed; }
+    button#locate-btn { display: none; width: 100%; height: 34px; margin-bottom: 8px; background: #fff; color: #084b8a; border: 1px solid #b8d8ff; border-radius: 8px; font-weight: 600; cursor: pointer; }
     .switch { position: relative; width: 34px; height: 18px; }
     .switch input { display: none; }
     .slider { position: absolute; cursor: pointer; background: #ddd; border-radius: 20px; top:0; left:0; right:0; bottom:0; transition: .3s; }
@@ -93,6 +95,7 @@
 
   <p id="edit-status" class="edit-status"></p>
   <button id="restore-btn" onclick="restoreProject()" data-t="restoreBtn">恢复项目参数</button>
+  <button id="locate-btn" onclick="locateMainComponent()" data-t="locateBtn">定位主组件</button>
   <button id="main-btn" onclick="submit()" data-t="generateBtn">生成九宫格组件</button>
 
   <div class="footer">
@@ -113,8 +116,8 @@
 
   <script>
     const i18n = {
-      zh: { code: "ZH", updateBtn: "更新九宫格组件", editStatus: "正在编辑现有组件", editInstance: "选中实例；请定位主组件后编辑", locateMain: "请选中主组件后编辑", updateHint: "按当前边距更新已有九宫格组件；人工边距优先于项目参数；保留原图与批量模式不适用于编辑", restoreBtn: "恢复项目参数", editManual: "人工边距优先", editProject: "使用项目参数", editLegacy: "旧版组件：按切片结构推导边距", unsupportedComponent: "无法识别该组件：请选择本工具生成的九宫格主组件或图片图层。未做修改。", unsupportedInstance: "选中的是实例；请定位主组件后编辑，不会自动改造实例。", restoreHint: "清除手动边距，改用导入插件记录的项目统计参数；原位重建切片，主组件与实例关联保留。", batchOverlay: "📦 批量模式已开启", emptyHint: "请在画布选中图片图层", controlHint: "鼠标中键拖拽平移 / 滚轮缩放", allLabel: "统一边距 (All)", topLabel: "上", bottomLabel: "下", leftLabel: "左", rightLabel: "右", keepOriginal: "保留原图", batchMode: "批量模式", batchTip: "同步处理多张图片。开启后，选中的所有图层将统一应用当前切片数值。", overlap: "消除缝隙", overlapTip: "修正渲染缝隙。开启后切片间将产生 1px 重叠以消除拼接黑线（透明图片慎用）。", generateBtn: "生成九宫格组件" },
-      en: { code: "EN", updateBtn: "Update 9-Slice", editStatus: "Editing existing component", editInstance: "Instance selected; locate the main component to edit", locateMain: "Select the main component to edit", updateHint: "Update the existing 9-slice with these margins; manual margins take priority over the project parameter; Keep Original and Batch do not apply", restoreBtn: "Restore project parameter", editManual: "manual margins take priority", editProject: "using project parameter", editLegacy: "legacy component: margins derived from slices", unsupportedComponent: "Unrecognized component. Select a 9-slice main component created by this tool or an image layer. Nothing changed.", unsupportedInstance: "An instance is selected. Locate its main component to edit; instances are never converted automatically.", restoreHint: "Clear the manual margins and use the project statistic recorded by the importer; slices are rebuilt in place and main component/instance links stay intact.", batchOverlay: "📦 Batch Mode Active", emptyHint: "Please select an image layer", controlHint: "Middle click to pan / Scroll to zoom", allLabel: "All Margins", topLabel: "Top", bottomLabel: "Bottom", leftLabel: "Left", rightLabel: "Right", keepOriginal: "Keep Original", batchMode: "Batch Mode", batchTip: "Sync multiple images. All selected layers will use the same slice values.", overlap: "Fix Gaps", overlapTip: "Fix rendering gaps. Creates a 1px overlap to eliminate lines.", generateBtn: "Generate 9-Slice" },
+      zh: { code: "ZH", updateBtn: "更新九宫格组件", editStatus: "正在编辑现有组件", editInstance: "选中实例；请定位主组件后编辑", locateMain: "请选中主组件后编辑", updateHint: "按当前边距更新已有九宫格组件；人工边距优先于项目参数；保留原图与批量模式不适用于编辑", restoreBtn: "恢复项目参数", editManual: "人工边距优先", editProject: "使用项目参数", editLegacy: "旧版组件：按切片结构推导边距", unsupportedComponent: "无法识别该组件：请选择本工具生成的九宫格主组件、资源导入器创建的普通图片主组件或普通图片图层。未做修改。", unsupportedInstance: "选中的是实例；请定位主组件后编辑，不会自动改造实例。", restoreHint: "清除手动边距，改用导入插件记录的项目统计参数；原位重建切片，主组件与实例关联保留。", locateBtn: "定位主组件", locateHint: "在画布中选中该实例的主组件；不会修改实例或主组件。", upgradeBtn: "升级为九宫格组件", upgradeStatus: "普通图片主组件：按原图像素预览，升级保留组件与实例", upgradeHint: "按原图像素设置边距，在同一个主组件上原位升级；组件 ID、当前宽高、来源与实例关联均保留", restoreMissing: "该组件没有记录项目参数，无法恢复；请先导入包含项目参数的资源", batchOverlay: "📦 批量模式已开启", emptyHint: "请在画布选中图片图层", controlHint: "鼠标中键拖拽平移 / 滚轮缩放", allLabel: "统一边距 (All)", topLabel: "上", bottomLabel: "下", leftLabel: "左", rightLabel: "右", keepOriginal: "保留原图", batchMode: "批量模式", batchTip: "同步处理多张图片。开启后，选中的所有图层将统一应用当前切片数值。", overlap: "消除缝隙", overlapTip: "修正渲染缝隙。开启后切片间将产生 1px 重叠以消除拼接黑线（透明图片慎用）。", generateBtn: "生成九宫格组件" },
+      en: { code: "EN", updateBtn: "Update 9-Slice", editStatus: "Editing existing component", editInstance: "Instance selected; locate the main component to edit", locateMain: "Select the main component to edit", updateHint: "Update the existing 9-slice with these margins; manual margins take priority over the project parameter; Keep Original and Batch do not apply", restoreBtn: "Restore project parameter", editManual: "manual margins take priority", editProject: "using project parameter", editLegacy: "legacy component: margins derived from slices", unsupportedComponent: "Unrecognized component. Select a 9-slice main component created by this tool, an importer plain image main component, or an image layer. Nothing changed.", unsupportedInstance: "An instance is selected. Locate its main component to edit; instances are never converted automatically.", restoreHint: "Clear the manual margins and use the project statistic recorded by the importer; slices are rebuilt in place and main component/instance links stay intact.", locateBtn: "Locate main component", locateHint: "Select the main component of this instance on the canvas; the instance and its master are not modified.", upgradeBtn: "Upgrade to 9-slice", upgradeStatus: "Plain image main component: previewed in original image pixels; the component and its instances stay linked", upgradeHint: "Set margins in original image pixels and upgrade this same main component in place; its ID, current size, source record and instances are kept", restoreMissing: "This component has no recorded project parameter, so it cannot be restored. Import a resource with a project parameter first.", batchOverlay: "📦 Batch Mode Active", emptyHint: "Please select an image layer", controlHint: "Middle click to pan / Scroll to zoom", allLabel: "All Margins", topLabel: "Top", bottomLabel: "Bottom", leftLabel: "Left", rightLabel: "Right", keepOriginal: "Keep Original", batchMode: "Batch Mode", batchTip: "Sync multiple images. All selected layers will use the same slice values.", overlap: "Fix Gaps", overlapTip: "Fix rendering gaps. Creates a 1px overlap to eliminate lines.", generateBtn: "Generate 9-Slice" },
       ja: { code: "JP", batchOverlay: "📦 一括モード有効", emptyHint: "画像レイヤーを選択してください", controlHint: "中ボタンでパン / スクロールでズーム", allLabel: "一括余白", topLabel: "上", bottomLabel: "下", leftLabel: "左", rightLabel: "右", keepOriginal: "元画像を保持", batchMode: "一括モード", batchTip: "複数の画像を同期します。", overlap: "隙間を補正", overlapTip: "1pxの重なりを作り、境界線を消去します。", generateBtn: "コンポーネント作成" },
       ko: { code: "KO", batchOverlay: "📦 일괄 모드 활성화", emptyHint: "이미지 레이어를 선택하세요", controlHint: "중앙 클릭으로 이동 / 스크롤로 확대", allLabel: "전체 여백", topLabel: "상", bottomLabel: "하", leftLabel: "좌", rightLabel: "우", keepOriginal: "원본 유지", batchMode: "일괄 모드", batchTip: "모든 레이어에 동일한 수치가 적용됩니다.", overlap: "간격 수정", overlapTip: "1px 중첩을 생성하여 선을 제거합니다.", generateBtn: "구성 요소 생성" },
       ru: { code: "RU", batchOverlay: "📦 Пакетный режим", emptyHint: "Выберите слой с изображением", controlHint: "Колесо: масштаб / Кнопка: панорама", allLabel: "Все отступы", topLabel: "Верх", bottomLabel: "Низ", leftLabel: "Лев", rightLabel: "Прав", keepOriginal: "Оригинал", batchMode: "Пакетный", batchTip: "Применить ко всем слоям.", overlap: "Без швов", overlapTip: "Устраняет линии на стыках.", generateBtn: "Создать компонент" },
@@ -137,24 +140,30 @@
 
       currentLang = lang;
       const restoreHint = i18n[lang].restoreHint || i18n.en.restoreHint;
-      const hints = lang === 'zh' ? [
-        '切换平移模式；选中图片后拖动预览（也可按鼠标中键）',
-        '放大选中图片的预览，不改变原图或组件尺寸',
-        '缩小选中图片的预览，不改变原图或组件尺寸',
-        '将选中图片适配到预览区域',
-        restoreHint,
-        '将选中图片转换为九宫格组件；批量时应用到所有选中图片，关闭保留原图会删除原图'
-      ] : [
-        'Toggle pan mode; drag the selected image preview (or use the middle mouse button)',
-        'Zoom in the preview without resizing the source or component',
-        'Zoom out the preview without resizing the source or component',
-        'Fit the selected image to the preview',
-        restoreHint,
-        'Convert selected images to 9-slice components; batch applies to all selected images. Disabling Keep Original deletes sources.'
-      ];
-      document.querySelectorAll('button').forEach((button, index) => {
-        button.title = hints[index];
-        button.setAttribute('aria-label', hints[index]);
+      // Titles are keyed by control, not by DOM order: the panel has changed
+      // shape between releases and index-based hints silently shift.
+      const hints = lang === 'zh' ? {
+        'btn-pan': '切换平移模式；选中图片后拖动预览（也可按鼠标中键）',
+        'changeZoom(0.1)': '放大选中图片的预览，不改变原图或组件尺寸',
+        'changeZoom(-0.1)': '缩小选中图片的预览，不改变原图或组件尺寸',
+        'resetView()': '将选中图片适配到预览区域',
+        'restore-btn': restoreHint,
+        'locate-btn': '在画布中选中该实例的主组件；不会修改实例或主组件',
+        'main-btn': '将选中图片转换为九宫格组件；批量时应用到所有选中图片，关闭保留原图会删除原图'
+      } : {
+        'btn-pan': 'Toggle pan mode; drag the selected image preview (or use the middle mouse button)',
+        'changeZoom(0.1)': 'Zoom in the preview without resizing the source or component',
+        'changeZoom(-0.1)': 'Zoom out the preview without resizing the source or component',
+        'resetView()': 'Fit the selected image to the preview',
+        'restore-btn': restoreHint,
+        'locate-btn': 'Select the main component of this instance on the canvas; the instance and its master are not modified',
+        'main-btn': 'Convert selected images to 9-slice components; batch applies to all selected images. Disabling Keep Original deletes sources.'
+      };
+      document.querySelectorAll('button').forEach(button => {
+        const hint = hints[button.id] || hints[button.getAttribute('onclick')];
+        if (!hint) return;
+        button.title = hint;
+        button.setAttribute('aria-label', hint);
       });
       document.getElementById('current-lang-code').innerText = i18n[lang].code;
       document.querySelectorAll('[data-t]').forEach(el => {
@@ -170,10 +179,32 @@
       return (i18n[currentLang] && i18n[currentLang][key]) || i18n.en[key];
     }
 
+    function showLocateAction() {
+      var locate = el('locate-btn');
+      locate.style.display = 'block';
+      locate.disabled = false;
+      locate.title = editText('locateHint');
+    }
+
+    function renderRestoreAction() {
+      var restore = el('restore-btn');
+      restore.style.display = 'block';
+      if (editState.project) {
+        restore.disabled = false;
+        restore.title = editText('restoreHint');
+      } else {
+        // Never offer a restore that would invent a project parameter.
+        restore.disabled = true;
+        restore.title = editText('restoreMissing');
+      }
+    }
+
     function renderEditState() {
-      var status = el('edit-status'), button = el('main-btn'), restore = el('restore-btn');
+      var status = el('edit-status'), button = el('main-btn'), restore = el('restore-btn'), locate = el('locate-btn');
       restore.style.display = 'none';
       restore.disabled = true;
+      locate.style.display = 'none';
+      locate.disabled = true;
       if (unsupportedState) {
         status.style.display = 'block';
         status.textContent = editText(unsupportedState === 'instance' ? 'unsupportedInstance' : 'unsupportedComponent');
@@ -182,6 +213,7 @@
         el('batchMode').disabled = true;
         el('keepOriginal').disabled = true;
         button.title = status.textContent;
+        if (unsupportedState === 'instance') showLocateAction();
         return;
       }
       if (!editState) {
@@ -202,6 +234,20 @@
         el('batchMode').disabled = true;
         el('keepOriginal').disabled = true;
         button.title = editText('editInstance');
+        showLocateAction();
+        return;
+      }
+      if (editState.target === 'upgrade') {
+        var size = editState.source ? '原图 ' + editState.source.width + '×' + editState.source.height : '';
+        var manual = editState.override ? editText('editManual') : '';
+        status.textContent = editText('upgradeStatus') + '：' + editState.name +
+          (size ? ' · ' + size : '') + (manual ? ' · ' + manual : '');
+        button.innerText = editText('upgradeBtn');
+        button.disabled = false;
+        el('batchMode').disabled = true;
+        el('keepOriginal').disabled = true;
+        button.title = editText('upgradeHint');
+        renderRestoreAction();
         return;
       }
       var state = editState.legacy ? editText('editLegacy')
@@ -213,11 +259,7 @@
       el('batchMode').disabled = true;
       el('keepOriginal').disabled = true;
       button.title = editText('updateHint');
-      if (editState.project && editState.override) {
-        restore.style.display = 'block';
-        restore.disabled = false;
-        restore.title = editText('restoreHint');
-      }
+      if (editState.override) renderRestoreAction();
     }
 
     window.addEventListener('click', (e) => {
@@ -356,6 +398,9 @@
     }
     function restoreProject() {
       parent.postMessage({ pluginMessage: { type: 'restore-project' }}, '*');
+    }
+    function locateMainComponent() {
+      parent.postMessage({ pluginMessage: { type: 'locate-main-component' }}, '*');
     }
     parent.postMessage({ pluginMessage: { type: 'ui-ready' } }, '*');
   </script>

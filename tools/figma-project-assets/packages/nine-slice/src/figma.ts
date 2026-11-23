@@ -31,7 +31,13 @@ export function applyNineSliceComponent(
     throw error;
   }
 
-  const previous = [...component.children];
+  const previousChildren = [...component.children];
+  const previous = {
+    width: component.width,
+    height: component.height,
+    fills: Array.isArray(component.fills) ? [...component.fills] : [],
+    layoutMode: component.layoutMode
+  };
   const appended: RectangleNode[] = [];
   try {
     component.resize(plan.width, plan.height);
@@ -43,9 +49,16 @@ export function applyNineSliceComponent(
       rect.x = slice.x;
       rect.y = slice.y;
     }
-    for (const child of previous) child.remove();
+    for (const child of previousChildren) child.remove();
   } catch (error) {
     for (const rect of appended) rect.remove();
+    // A failed upgrade must not leave the component half converted: restore
+    // the previous fill, size and layout so the source image stays usable.
+    try {
+      component.fills = previous.fills;
+      component.layoutMode = previous.layoutMode;
+      component.resize(previous.width, previous.height);
+    } catch { /* rollback is best effort; never hide the original failure */ }
     throw error;
   }
   return component;
