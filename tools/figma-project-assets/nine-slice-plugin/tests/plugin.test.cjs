@@ -422,9 +422,11 @@ test('selection payloads tell the UI whether margins are manual, project-driven 
 
 function plainComponent(options = {}) {
   const component = {
-    type: 'COMPONENT', name: options.name || '底板/普通底板', width: options.width ?? 160, height: options.height ?? 120,
-    children: [], layoutMode: 'NONE', removed: false, data: { ...(options.data || {}) }, shared: {},
-    fills: [{ type: 'IMAGE', imageHash: 'plain-image', scaleMode: 'FILL' }],
+    type: 'COMPONENT', id: options.id || 'component-id', name: options.name || '底板/普通底板',
+    width: options.width ?? 160, height: options.height ?? 120,
+    children: [], layoutMode: options.layoutMode || 'NONE', removed: false,
+    data: { ...(options.data || {}) }, shared: {},
+    fills: options.fills ?? [{ type: 'IMAGE', imageHash: 'plain-image', scaleMode: 'FILL' }],
     getPluginData(key) { return this.data[key] || ''; },
     setPluginData(key, value) { this.data[key] = value; },
     getSharedPluginData(ns, key) { return (this.shared || {})[ns + '/' + key] || ''; },
@@ -433,14 +435,40 @@ function plainComponent(options = {}) {
     appendChild(child) { child.parent = this; this.children.push(child); },
     remove() { this.removed = true; }
   };
-  // The importer writes this cross-plugin marker; a plain component without it
-  // could be any user-made master, which the upgrade must not touch.
+  // The importer may write this cross-plugin marker, but it is only an optional
+  // source hint; a hand-made single-image component must upgrade too.
   if (options.marked !== false) {
     component.setSharedPluginData('myfigma', 'atlas.origin', JSON.stringify({
       schemaVersion: 1, identity: JSON.stringify(['g1', 'atlas', 'res/buttons.png', 'plain'])
     }));
   }
   return component;
+}
+
+// A direct image child is the other Figma structure designers get when they
+// drop an image and create a component: the root stays empty and the image is a
+// single fully covering child layer.
+function imageChild(owner, options = {}) {
+  const child = {
+    type: options.type || 'RECTANGLE', name: options.name || '图片子层',
+    x: options.x ?? 0, y: options.y ?? 0,
+    width: options.width ?? owner.width, height: options.height ?? owner.height,
+    children: [], removed: false,
+    fills: options.fills ?? [{ type: 'IMAGE', imageHash: 'plain-image', scaleMode: 'FILL' }],
+    appendChild(node) { node.parent = this; this.children.push(node); },
+    remove() { this.removed = true; owner.children = owner.children.filter(item => item !== this); }
+  };
+  if (options.layoutMode) child.layoutMode = options.layoutMode;
+  if (options.cornerRadius !== undefined) child.cornerRadius = options.cornerRadius;
+  if (options.strokes) child.strokes = options.strokes;
+  if (options.effects) child.effects = options.effects;
+  owner.appendChild(child);
+  return child;
+}
+function childImageComponent(options = {}) {
+  const component = plainComponent({ ...options, fills: options.rootFills ?? [] });
+  const child = imageChild(component, options.child || {});
+  return { component, child };
 }
 
 test('upgrades an importer plain image main component in place, previewing original pixels and keeping its current size', async () => {
@@ -533,7 +561,7 @@ test('a manually changed or complex component is rejected without touching its c
   assert.equal(complex.children.length, 1);
   assert.equal(complex.fills.length, 1);
   assert.equal(complex.data['myfigma.nineSlice.v1'], undefined);
-  assert.ok(env.notices.some(text => /无法识别/.test(text)));
+  assert.ok(env.notices.some(text => /无法识别|额外/.test(text)));
 
   const multiFill = plainComponent({ name: '双层填充' });
   multiFill.fills = [{ type: 'IMAGE', imageHash: 'a' }, { type: 'SOLID', color: { r: 0, g: 0, b: 0 } }];
@@ -559,16 +587,163 @@ test('a failed upgrade leaves the plain component with its image fill and no par
 });
 
 
-test('an unmarked manually created plain component is not upgraded', async () => {
+test('an unmarked hand-made root-fill component upgrades without an importer marker', async () => {
   const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
   const component = plainComponent({ marked: false });
   env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(preview.edit.target, 'upgrade');
+  assert.equal(preview.edit.editable, true);
+  assert.equal(preview.edit.imported, false);
+  assert.deepEqual([preview.width, preview.height], [64, 40]);
+
+  await env.figma.ui.onmessage({ ...env.settings, left: 8, right: 8, top: 4, bottom: 4 });
+  assert.equal(env.created.length, 0);
+  assert.equal(component.removed, false);
+  assert.equal(component.fills.length, 0);
+  assert.equal(component.children.length, 9);
+  assert.deepEqual([component.width, component.height], [160, 120]);
+  assert.deepEqual(JSON.parse(component.data['myfigma.nineSlice.v1']).current,
+    { left: 8, right: 8, top: 4, bottom: 4 });
+});
+
+test('an importer marker only labels the upgrade source instead of gating it', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const component = plainComponent();
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(preview.edit.target, 'upgrade');
+  assert.equal(preview.edit.editable, true);
+  assert.equal(preview.edit.imported, true);
+
+  await env.figma.ui.onmessage({ ...env.settings, left: 8, right: 8, top: 4, bottom: 4 });
+  assert.equal(component.children.length, 9);
+  assert.equal(component.fills.length, 0);
+  assert.ok(component.data['myfigma.nineSlice.v1']);
+});
+
+test('upgrades a component whose only direct image child fully covers it and replaces that child in place', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const { component, child } = childImageComponent({ marked: false, id: 'component-7' });
+  const instance = {
+    type: 'INSTANCE', name: '普通底板实例', width: 300, height: 200, fills: [], children: [],
+    async getMainComponentAsync() { return component; }
+  };
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(preview.edit.target, 'upgrade');
+  assert.equal(preview.edit.editable, true);
+  assert.equal(preview.edit.imported, false);
+  assert.deepEqual([preview.width, preview.height], [64, 40]);
+
+  await env.figma.ui.onmessage({ ...env.settings, left: 16, right: 8, top: 4, bottom: 2 });
+  assert.equal(env.created.length, 0);
+  assert.equal(component.removed, false);
+  assert.equal(component.id, 'component-7');
+  assert.deepEqual([component.width, component.height], [160, 120]);
+  assert.equal(component.fills.length, 0);
+  assert.equal(child.removed, true);
+  assert.equal(component.children.length, 9);
+  assert.equal(component.children.includes(child), false);
+  assert.ok(component.children.every(node => /^切片 [1-3]-[1-3]$/.test(node.name)));
+  const slice = name => component.children.find(node => node.name === name);
+  assert.equal(slice('切片 2-1').width, 40);
+  assert.equal(slice('切片 1-2').height, 12);
+  assert.equal(slice('切片 2-3').width, 20);
+  assert.equal(slice('切片 3-2').height, 6);
+  const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.deepEqual(saved.current, { left: 16, right: 8, top: 4, bottom: 2 });
+  assert.deepEqual(saved.imageSize, { width: 64, height: 40 });
+  assert.deepEqual([saved.width, saved.height], [160, 120]);
+  assert.equal(await instance.getMainComponentAsync(), component);
+  assert.deepEqual([instance.width, instance.height], [300, 200]);
+});
+
+test('rejects a single image child that does not fully cover the component', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const { component, child } = childImageComponent({ marked: false, child: { width: 120, x: 4 } });
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(preview.unsupported, 'image-child-not-filled');
+  await env.figma.ui.onmessage({ ...env.settings, left: 8 });
+  assert.equal(component.children.length, 1);
+  assert.equal(component.children[0], child);
+  assert.equal(component.fills.length, 0);
+  assert.equal(component.data['myfigma.nineSlice.v1'], undefined);
+  assert.ok(env.notices.some(text => /铺满/.test(text)));
+});
+
+test('rejects multiple child layers and extra visible content in a plain image component', async () => {
+  const multiple = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const doubled = childImageComponent({ marked: false });
+  imageChild(doubled.component, { name: '第二张图片' });
+  multiple.figma.currentPage.selection = [doubled.component];
+  await multiple.figma.ui.onmessage(multiple.settings);
+  assert.equal(doubled.component.children.length, 2);
+  assert.equal(doubled.component.data['myfigma.nineSlice.v1'], undefined);
+  assert.ok(multiple.notices.some(text => /多个|额外|一张/.test(text)));
+
+  const extra = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const mixed = childImageComponent({
+    marked: false, rootFills: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0 }, visible: true }]
+  });
+  extra.figma.currentPage.selection = [mixed.component];
+  await extra.figma.ui.onmessage(extra.settings);
+  assert.equal(mixed.component.children.length, 1);
+  assert.equal(mixed.component.data['myfigma.nineSlice.v1'], undefined);
+  assert.ok(extra.notices.some(text => /多个|额外|一张/.test(text)));
+
+  // The image child must not carry its own layers or an extra visible fill.
+  for (const decorate of [
+    child => imageChild(child, { name: '子层的子层' }),
+    child => { child.fills = [{ type: 'IMAGE', imageHash: 'plain-image' },
+      { type: 'SOLID', color: { r: 0, g: 0, b: 0 }, visible: true }]; }
+  ]) {
+    const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+    const nested = childImageComponent({ marked: false });
+    decorate(nested.child);
+    env.figma.currentPage.selection = [nested.component];
+    await env.figma.ui.onmessage(env.settings);
+    assert.equal(nested.component.children.length, 1);
+    assert.equal(nested.component.data['myfigma.nineSlice.v1'], undefined);
+    assert.ok(env.notices.some(text => /多个|额外|一张/.test(text)));
+  }
+});
+
+test('rejects image children with rounded corners, strokes or effects instead of dropping them', async () => {
+  for (const decoration of [{ cornerRadius: 4 }, { strokes: [{ type: 'SOLID', visible: true }] },
+    { effects: [{ type: 'DROP_SHADOW', visible: true }] }]) {
+    const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+    const { component } = childImageComponent({ marked: false, child: decoration });
+    env.figma.currentPage.selection = [component];
+    await env.figma.ui.onmessage({ ...env.settings, left: 8 });
+    assert.equal(component.children.length, 1);
+    assert.equal(component.data['myfigma.nineSlice.v1'], undefined);
+    assert.ok(env.notices.some(text => /圆角|描边|效果/.test(text)), `missing hint for ${JSON.stringify(decoration)}`);
+  }
+});
+
+test('rejects Auto Layout plain image components and keeps them untouched', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const component = plainComponent({ marked: false, layoutMode: 'VERTICAL' });
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(preview.unsupported, 'auto-layout');
   await env.figma.ui.onmessage({ ...env.settings, left: 8 });
   assert.equal(component.children.length, 0);
   assert.equal(component.fills.length, 1);
   assert.equal(component.data['myfigma.nineSlice.v1'], undefined);
-  assert.equal(component.shared['myfigma/nineSlice.v1'], undefined);
-  assert.ok(env.notices.some(text => /无法识别|导入器/.test(text)));
+  assert.ok(env.notices.some(text => /Auto Layout|自动布局/.test(text)));
 });
 
 test('an invalid record falls back to slice geometry in image pixels without scaling it twice', async () => {
