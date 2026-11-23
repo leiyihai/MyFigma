@@ -23,10 +23,18 @@ type EditableSlice = {
   imageSize: Size; record?: NineSliceRecord; legacy: boolean;
 };
 
-/** An importer-created plain image main component that can be upgraded manually. */
+type UpgradeRejection = 'auto-layout' | 'image-child-not-filled' | 'image-child-decorated' |
+  'multiple-children' | 'extra-content';
+// A plain single-image component keeps its image either on the root or on one
+// direct child that fully covers the component.
+type PlainImageInspection =
+  | { ok: true; fill: ImagePaint; child?: SceneNode }
+  | { ok: false; reason: UpgradeRejection };
+
+/** A plain single-image main component that can be upgraded manually. */
 type Upgradeable = {
   component: ComponentNode; fill: ImagePaint; imageSize: Size;
-  margins: Margins; overlap: boolean; record?: NineSliceRecord;
+  margins: Margins; overlap: boolean; record?: NineSliceRecord; imported: boolean;
 };
 
 figma.showUI(__html__, { width: 360, height: 740, themeColors: true });
@@ -59,6 +67,39 @@ function isLanguage(value: string): value is Language {
 }
 function isImageNode(node: SceneNode): node is ImageNode {
   return 'fills' in node && Array.isArray(node.fills) && node.fills.some(fill => fill.type === 'IMAGE');
+}
+function visibleFills(node: SceneNode): readonly Paint[] {
+  return 'fills' in node && Array.isArray(node.fills) ? node.fills.filter(fill => fill.visible !== false) : [];
+}
+function visibleImageFills(node: SceneNode): ImagePaint[] {
+  return visibleFills(node).filter((fill): fill is ImagePaint => fill.type === 'IMAGE');
+}
+function usesAutoLayout(node: SceneNode): boolean {
+  return 'layoutMode' in node && node.layoutMode !== 'NONE';
+}
+function hasVisibleStrokes(node: SceneNode): boolean {
+  return 'strokes' in node && Array.isArray(node.strokes) && node.strokes.some(stroke => stroke.visible !== false);
+}
+function hasVisibleEffects(node: SceneNode): boolean {
+  return 'effects' in node && Array.isArray(node.effects) && node.effects.some(effect => effect.visible !== false);
+}
+function hasRoundedCorners(node: SceneNode): boolean {
+  const corner = node as SceneNode & {
+    cornerRadius?: number | symbol; topLeftRadius?: number; topRightRadius?: number;
+    bottomLeftRadius?: number; bottomRightRadius?: number;
+  };
+  return (typeof corner.cornerRadius === 'number' && corner.cornerRadius > 0) ||
+    [corner.topLeftRadius, corner.topRightRadius, corner.bottomLeftRadius, corner.bottomRightRadius]
+      .some(radius => typeof radius === 'number' && radius > 0);
+}
+function hasVisibleContent(node: SceneNode): boolean {
+  return visibleFills(node).length > 0 || hasVisibleStrokes(node) || hasVisibleEffects(node);
+}
+function childCount(node: SceneNode): number {
+  return 'children' in node ? node.children.length : 0;
+}
+function hasVisibleAppearance(node: SceneNode): boolean {
+  return hasRoundedCorners(node) || hasVisibleStrokes(node) || hasVisibleEffects(node);
 }
 // Converting an existing main component or an instance would break the source
 // identity and every linked instance, so only plain layers are convertible.
@@ -127,12 +168,40 @@ function findEditable(node: SceneNode | undefined): EditableSlice | null {
   return { component, margins, overlap, fill: fills[0], width: component.width, height: component.height,
     target: 'component', imageSize, record: saved, legacy: !saved };
 }
-// Only an untouched importer plain image master is safe: one image fill, no
-// children, no auto layout. Anything the designer built further is rejected.
-function isPlainImageComponent(node: SceneNode | undefined): node is ComponentNode {
-  if (!node || node.type !== 'COMPONENT' || node.children.length !== 0 || node.layoutMode !== 'NONE') return false;
-  const fills = Array.isArray(node.fills) ? node.fills : [];
-  return fills.length === 1 && fills[0].type === 'IMAGE';
+// The source marker is only a provenance hint. Structure decides whether a
+// component is a plain single image, so hand-made components upgrade too.
+function inspectPlainImageComponent(node: SceneNode | undefined): PlainImageInspection | null {
+  if (!node || node.type !== 'COMPONENT') return null;
+  const component = node;
+  const children = component.children;
+  const rootImages = visibleImageFills(component);
+  if (children.length === 0) {
+    if (rootImages.length === 0) return null;
+    if (usesAutoLayout(component)) return { ok: false, reason: 'auto-layout' };
+    // One visible fill, and it must be the image itself.
+    if (visibleFills(component).length !== 1) return { ok: false, reason: 'extra-content' };
+    return { ok: true, fill: rootImages[0] };
+  }
+  if (children.length > 1) {
+    if (rootImages.length === 0 && !children.some(child => visibleImageFills(child).length > 0)) return null;
+    return { ok: false, reason: 'multiple-children' };
+  }
+  const child = children[0];
+  const childImages = visibleImageFills(child);
+  if (childImages.length === 0) return rootImages.length ? { ok: false, reason: 'extra-content' } : null;
+  if (usesAutoLayout(component) || usesAutoLayout(child)) return { ok: false, reason: 'auto-layout' };
+  // Structure B: the root must not add visible content of its own.
+  if (hasVisibleContent(component)) return { ok: false, reason: 'extra-content' };
+  if (visibleFills(child).length !== 1) return { ok: false, reason: 'extra-content' };
+  if (childCount(child) > 0) return { ok: false, reason: 'extra-content' };
+  if (hasVisibleAppearance(child)) return { ok: false, reason: 'image-child-decorated' };
+  if (child.x !== 0 || child.y !== 0 || child.width !== component.width || child.height !== component.height)
+    return { ok: false, reason: 'image-child-not-filled' };
+  return { ok: true, fill: childImages[0], child };
+}
+function upgradeRejection(node: SceneNode | undefined): UpgradeRejection | null {
+  const inspection = inspectPlainImageComponent(node);
+  return inspection && !inspection.ok ? inspection.reason : null;
 }
 async function imagePixelSize(fill: ImagePaint): Promise<Size | null> {
   if (!fill.imageHash) return null;
@@ -147,21 +216,20 @@ async function imagePixelSize(fill: ImagePaint): Promise<Size | null> {
   return null;
 }
 async function findUpgradeable(node: SceneNode | undefined): Promise<Upgradeable | null> {
-  // Structure alone is not provenance: a hand-made single-image master looks
-  // the same. Only components carrying the importer's shared origin marker may
-  // use the manual upgrade entry.
-  if (!isPlainImageComponent(node) || !readImportMarker(node)) return null;
-  const fill = imageFill(node);
-  if (!fill) return null;
-  const imageSize = await imagePixelSize(fill);
+  if (!node || node.type !== 'COMPONENT') return null;
+  const inspection = inspectPlainImageComponent(node);
+  if (!inspection?.ok) return null;
+  const imageSize = await imagePixelSize(inspection.fill);
   if (!imageSize) return null;
   const record = savedMargins(node);
   const usable = !!record && planFits(imageSize, record.current, record.overlap);
   return {
-    component: node, fill, imageSize,
+    component: node, fill: inspection.fill, imageSize,
     margins: usable ? record!.current : { left: 0, top: 0, right: 0, bottom: 0 },
     overlap: usable ? record!.overlap : false,
-    record
+    record,
+    // The importer marker only labels the source; it never gates the upgrade.
+    imported: !!readImportMarker(node)
   };
 }
 function rememberSlice(component: ComponentNode, margins: Margins, overlap: boolean, override: boolean,
@@ -187,6 +255,7 @@ function editPayload(edit: EditableSlice, editable: boolean) {
 function upgradePayload(upgrade: Upgradeable, editable: boolean) {
   return { margins: upgrade.margins, overlap: upgrade.overlap, target: 'upgrade', name: upgrade.component.name,
     editable, legacy: false, project: upgrade.record?.project, override: upgrade.record?.override ?? true,
+    imported: upgrade.imported,
     imageSize: { width: upgrade.imageSize.width, height: upgrade.imageSize.height } };
 }
 
@@ -219,7 +288,8 @@ async function sendSelectionToUI() {
   const payload = edit ? editPayload(edit, true) : view ? editPayload(view, false)
     : upgrade ? upgradePayload(upgrade, node?.type === 'COMPONENT') : null;
   const unsupported = payload || !node ? null
-    : node.type === 'INSTANCE' ? 'instance' : node.type === 'COMPONENT' ? 'component' : null;
+    : node.type === 'INSTANCE' ? 'instance'
+    : node.type === 'COMPONENT' ? upgradeRejection(node) ?? 'component' : null;
   const fill = view?.fill ?? upgrade?.fill ?? (node && isImageNode(node) ? imageFill(node) : undefined);
   // A plain image main component is previewed and validated in original image
   // pixels, not at its current (possibly resized) canvas size.
@@ -299,7 +369,7 @@ function notifyInvalidMargins(where: 'image' | 'canvas'): void {
       : 'Margins must be non-negative; their sums must be smaller than the component width and height.', { error: true });
 }
 
-/** Manually upgrade the selected importer plain image main component, keeping its identity and canvas size. */
+/** Manually upgrade the selected plain single-image main component, keeping its identity and canvas size. */
 async function upgradePlainComponent(upgrade: Upgradeable, msg: Settings): Promise<void> {
   const canvas: Size = { width: upgrade.component.width, height: upgrade.component.height };
   const margins: Margins = { left: msg.left, top: msg.top, right: msg.right, bottom: msg.bottom };
@@ -328,8 +398,8 @@ async function upgradePlainComponent(upgrade: Upgradeable, msg: Settings): Promi
     applyNineSliceComponent(figma, upgrade.component,
       { width: canvas.width, height: canvas.height, fill: upgrade.fill }, scaled, { overlap: msg.overlap });
     figma.viewport.scrollAndZoomIntoView([upgrade.component]);
-    notifyLocalized('已在同一个主组件上完成手动九宫格升级；组件 ID、当前宽高、来源与实例关联均保留。',
-      'Manual 9-slice upgrade finished on the same main component; its ID, current size, source record and instances stay intact.');
+    notifyLocalized('已在同一个主组件上完成手动九宫格升级；组件 ID、当前宽高与实例关联均保留。',
+      'Manual 9-slice upgrade finished on the same main component; its ID, current size and instances stay intact.');
   } catch (error) {
     console.error('升级普通图片主组件失败', error);
     try { writeNineSliceRecord(upgrade.component, previousRecord); }
@@ -381,9 +451,32 @@ async function restoreProject(): Promise<void> {
     generating = false;
   }
 }
-function notifyUnsupported(): void {
-  notifyLocalized('无法识别该组件：请选择本工具生成的九宫格主组件、资源导入器创建的普通图片主组件或普通图片图层。未做修改。',
-    'Unrecognized component. Select a 9-slice main component created by this tool, an importer plain image main component, or an image layer. Nothing changed.',
+const upgradeRejectionText: Record<UpgradeRejection, { zh: string; en: string }> = {
+  'auto-layout': {
+    zh: '该组件使用了 Auto Layout，普通单图组件升级不支持自动布局；未做修改。',
+    en: 'This component uses Auto Layout, which the plain single-image upgrade does not support. Nothing changed.'
+  },
+  'image-child-not-filled': {
+    zh: '图片子层未完整铺满组件（需位于 0,0 且尺寸等于组件画布）；未做修改。',
+    en: 'The image child does not fully cover the component (it must sit at 0,0 with the component canvas size). Nothing changed.'
+  },
+  'image-child-decorated': {
+    zh: '图片子层带圆角、描边或效果；升级会丢失这些视觉属性，因此未做修改。',
+    en: 'The image child uses corner radius, strokes or effects that the upgrade would drop. Nothing changed.'
+  },
+  'multiple-children': {
+    zh: '普通单图组件只能包含一张可见图片；该组件有多个子层，未做修改。',
+    en: 'A plain single-image component may contain only one visible image; this component has multiple child layers. Nothing changed.'
+  },
+  'extra-content': {
+    zh: '普通单图组件不能混入额外可见内容；该组件除一张图片外还有其他内容，未做修改。',
+    en: 'A plain single-image component cannot contain extra visible content; this component has more than one image or an additional fill. Nothing changed.'
+  }
+};
+function notifyUnsupported(reason?: UpgradeRejection | null): void {
+  const detail = reason ? upgradeRejectionText[reason] : null;
+  notifyLocalized(detail?.zh ?? '无法识别该组件：请选择本工具生成的九宫格主组件、普通单图组件或普通图片图层。未做修改。',
+    detail?.en ?? 'Unrecognized component. Select a 9-slice main component created by this tool, a plain single-image component, or an image layer. Nothing changed.',
     { error: true });
 }
 async function locateMainComponent(): Promise<void> {
@@ -464,7 +557,7 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
         'An instance is selected. Locate its main component to edit; instances are never converted automatically.',
         { error: true });
     } else if (first?.type === 'COMPONENT') {
-      notifyUnsupported();
+      notifyUnsupported(upgradeRejection(first));
     } else notify('no_img');
     return;
   }

@@ -217,11 +217,41 @@ test('a plain image main component offers a manual 9-slice upgrade and explains 
   } }, '*'));
   await expect(page.locator('#main-btn')).toHaveText('升级为九宫格组件');
   await expect(page.locator('#edit-status')).toContainText('原图 64×40');
+  // No importer marker is required, so the source hint stays absent.
+  await expect(page.locator('#edit-status')).not.toContainText('导入器来源');
   const restore = page.locator('#restore-btn');
   await expect(restore).toBeVisible();
   await expect(restore).toBeDisabled();
   await expect(restore).toHaveAttribute('title', /没有记录项目参数/);
   await expect(page.locator('#locate-btn')).toBeHidden();
+
+  // The optional marker only adds a source hint; the upgrade entry is unchanged.
+  await page.evaluate(() => window.postMessage({ pluginMessage: {
+    type: 'update-preview', bytes: null,
+    edit: {
+      margins: { left: 0, right: 0, top: 0, bottom: 0 }, overlap: false, target: 'upgrade',
+      name: '底板/普通底板', editable: true, legacy: false, override: true, imported: true,
+      imageSize: { width: 64, height: 40 }
+    }
+  } }, '*'));
+  await expect(page.locator('#edit-status')).toContainText('导入器来源');
+  await expect(page.locator('#main-btn')).toHaveText('升级为九宫格组件');
+});
+
+test('a rejected plain image structure explains why the upgrade is unavailable', async ({ page }) => {
+  await openPreview(page);
+  for (const [reason, text] of [
+    ['image-child-not-filled', /铺满/],
+    ['image-child-decorated', /圆角|描边|效果/],
+    ['multiple-children', /多个|额外|一张/],
+    ['auto-layout', /Auto Layout|自动布局/]
+  ]) {
+    await page.evaluate(reason => window.postMessage({ pluginMessage: {
+      type: 'update-preview', bytes: null, edit: null, unsupported: reason
+    } }, '*'), reason);
+    await expect(page.locator('#edit-status')).toContainText(text);
+    await expect(page.locator('#main-btn')).toBeDisabled();
+  }
 });
 
 test('an instance exposes a locate action that never submits an upgrade', async ({ page }) => {
