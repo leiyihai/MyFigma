@@ -7,8 +7,9 @@ import { categoryConfigKey, categoryIndex, categoryOr, classify, componentName, 
 import { createNineSlicePlan, type Margins } from '../../packages/nine-slice/src/index';
 import { applyNineSliceComponent, createNineSliceComponent } from '../../packages/nine-slice/src/figma';
 import {
-  NINE_SLICE_RECORD_KEY, createNineSliceRecord, nineSliceSourceSize, parseNineSliceRecord,
-  readNineSliceRecord, scaleMargins, writeNineSliceRecord, serializeNineSliceRecord, type NineSliceRecord
+  NINE_SLICE_RECORD_KEY, createNineSliceRecord, nineSliceImageSize, parseNineSliceRecord,
+  readImportMarker, readNineSliceRecord, scaleMargins, writeImportMarker, writeNineSliceRecord,
+  serializeNineSliceRecord, type NineSliceRecord
 } from '../../packages/nine-slice/src/record';
 
 const bindingKey = 'atlas.binding';
@@ -163,7 +164,7 @@ function verifyNineSlice(component: ComponentNode, record: NineSliceRecord): boo
     // A manual upgrade keeps the designer's current canvas while its margins
     // stay in original image pixels; compare against scaled canvas margins.
     const canvas = {width:component.width,height:component.height};
-    plan = createNineSlicePlan(canvas, scaleMargins(record.current, nineSliceSourceSize(record), canvas), record.overlap);
+    plan = createNineSlicePlan(canvas, scaleMargins(record.current, nineSliceImageSize(record), canvas), record.overlap);
   }
   catch { return false; }
   if(component.children.length !== plan.slices.length) return false;
@@ -464,6 +465,12 @@ function existingComponents(page: PageNode, project: PublicProject): { items: Ex
          (legacyManagedParent(node) || looksManagedName(node, categoriesFor(node))))) corrupt.push(node.name);
       continue;
     }
+    // Backfill the cross-plugin origin marker for components imported before it
+    // existed. A scan stays usable if an old file cannot write shared data yet.
+    const marker = readImportMarker(node);
+    if(!marker || marker.identity !== source.identity) {
+      try { writeImportMarker(node, source.identity); } catch { /* retry on the next scan */ }
+    }
     const sync = parseSync(node,source.identity);
     const stored = storedRecord(node);
     const fills = Array.isArray(node.fills) ? node.fills : [];
@@ -493,14 +500,14 @@ function planState(existing: Existing | undefined, item: Candidate): Planned {
   const project = item.layout?.nineSlice?.margins;
   const record = existing?.record;
   const width = item.resource.width, height = item.resource.height;
-  // A record with an explicit source size was written by a manual upgrade: the
-  // canvas is the designer's decision, while margins stay in image pixels.
-  const keepCanvas = !!record?.source;
+  // A record with an explicit image size was written by a manual nine-slice
+  // upgrade: the canvas is the designer's decision, while margins stay in image pixels.
+  const keepCanvas = !!record?.imageSize;
   const canvas = keepCanvas && existing
     ? {width:existing.component.width,height:existing.component.height} : {width,height};
   const recordFor = (margins: Margins, options: {project?: Margins; overlap: boolean; override: boolean}) =>
     createNineSliceRecord(margins, canvas,
-      {project:options.project,overlap:options.overlap,override:options.override,source:keepCanvas?{width,height}:undefined});
+      {project:options.project,overlap:options.overlap,override:options.override,imageSize:keepCanvas?{width,height}:undefined});
   if(record?.override) {
     if(!validFor(record.current,width,height)) {
       // Never clamp a designer's margins; explain how to recover and retry instead.
@@ -541,7 +548,7 @@ function isUnchanged(existing: Existing, item: Candidate, planned: Planned): boo
   if(!existing.sync || existing.sync.status !== 'current' || existing.sync.contentHash !== item.hash ||
      existing.sync.sourceSize.w !== item.resource.width || existing.sync.sourceSize.h !== item.resource.height) return false;
   // Manual upgrades keep the designer's canvas; only the record canvas must match.
-  const explicitSource = !!existing.record?.source;
+  const explicitSource = !!existing.record?.imageSize;
   if(!explicitSource && (existing.component.width !== item.resource.width || existing.component.height !== item.resource.height)) return false;
   if(existing.shape !== planned.shape) return false;
   if(planned.shape === 'image') return true;
@@ -717,6 +724,9 @@ function writeSync(component: ComponentNode, item: Candidate, imageHash: string)
     sourceSize:{w:item.resource.width,h:item.resource.height},status:'current'};
   // One private record per new component. Legacy `atlas.sync.v1` remains a read fallback.
   component.setPluginData(sourceKey,JSON.stringify({...item.source, sync}));
+  // Shared, cross-plugin proof that this master came from the importer. The
+  // identity is project-relative and never contains a local machine path.
+  writeImportMarker(component, item.source.identity);
 }
 function writeRecord(component: ComponentNode, planned: Planned): void {
   if(planned.record) writeNineSliceRecord(component, serializeNineSliceRecord(planned.record));
@@ -779,7 +789,7 @@ function applyComponent(api: Pick<PluginAPI,'createRectangle'>, component: Compo
   const planned = item.planned;
   if(planned.shape === 'slices' && planned.margins) {
     // Manual upgrades keep their canvas; scale the image-pixel margins into it.
-    const keepCanvas = !!planned.record?.source;
+    const keepCanvas = !!planned.record?.imageSize;
     const canvas = keepCanvas
       ? {width:planned.record!.width,height:planned.record!.height}
       : {width:item.resource.width,height:item.resource.height};

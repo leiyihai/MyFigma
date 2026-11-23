@@ -206,13 +206,13 @@ test('an unrecognized component is explained and never offered an update action'
   await expect(page.locator('#restore-btn')).toBeHidden();
 });
 
-test('a plain image main component offers an in-place upgrade and explains the disabled restore entry', async ({ page }) => {
+test('a plain image main component offers a manual 9-slice upgrade and explains the disabled restore entry', async ({ page }) => {
   await openPreview(page);
   await page.evaluate(() => window.postMessage({ pluginMessage: {
     type: 'update-preview', bytes: null,
     edit: {
       margins: { left: 0, right: 0, top: 0, bottom: 0 }, overlap: false, target: 'upgrade',
-      name: '底板/普通底板', editable: true, legacy: false, override: true, source: { width: 64, height: 40 }
+      name: '底板/普通底板', editable: true, legacy: false, override: true, imageSize: { width: 64, height: 40 }
     }
   } }, '*'));
   await expect(page.locator('#main-btn')).toHaveText('升级为九宫格组件');
@@ -238,7 +238,7 @@ test('an instance exposes a locate action that never submits an upgrade', async 
       type: 'update-preview', bytes: null,
       edit: {
         margins: { left: 4, right: 4, top: 4, bottom: 4 }, overlap: false, target: 'upgrade',
-        name: '底板/普通底板', editable: false, legacy: false, override: true, source: { width: 20, height: 20 }
+        name: '底板/普通底板', editable: false, legacy: false, override: true, imageSize: { width: 20, height: 20 }
       }
     } }, '*');
   });

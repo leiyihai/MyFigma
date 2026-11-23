@@ -125,6 +125,26 @@ test('imports the most used grid margins as one nine-slice main component and ke
     assert.equal(plain.children.length, 0);
     assert.equal(plain.fills.length, 1);
     assert.equal(plain.data['myfigma.nineSlice.v1'], undefined);
+    // The importer leaves a cross-plugin identity marker so the nine-slice
+    // plugin can tell its plain components from hand-made masters.
+    const marker = JSON.parse(plain.getSharedPluginData('myfigma', 'atlas.origin'));
+    assert.equal(marker.schemaVersion, 1);
+    assert.equal(marker.identity, JSON.parse(plain.getPluginData('atlas.source')).identity);
+  } finally { await f.cleanup(); }
+});
+
+test('a scan backfills the cross-plugin origin marker on components imported before it existed', async () => {
+  const { f, workflow, page } = await setup();
+  try {
+    await workflow.scan();
+    await workflow.import();
+    const plain = component(page, 'plain');
+    plain.setSharedPluginData('myfigma', 'atlas.origin', '');
+    await workflow.scan();
+    const marker = JSON.parse(plain.getSharedPluginData('myfigma', 'atlas.origin'));
+    assert.equal(marker.schemaVersion, 1);
+    assert.equal(marker.identity, JSON.parse(plain.getPluginData('atlas.source')).identity);
+    assert.deepEqual(pick(workflow.state.plan), { added: 0, updated: 0, removed: 0, unchanged: 2, blocked: 0 });
   } finally { await f.cleanup(); }
 });
 
@@ -306,7 +326,7 @@ test('manually upgraded plain component keeps manual margins, its current size a
     assert.equal(plain.children.length, 9);
     const upgraded = record(plain);
     assert.deepEqual(upgraded.current, { left: 4, top: 4, right: 4, bottom: 4 });
-    assert.deepEqual(upgraded.source, { width: 20, height: 20 });
+    assert.deepEqual(upgraded.imageSize, { width: 20, height: 20 });
     assert.deepEqual([upgraded.width, upgraded.height], [120, 60]);
     assert.equal(upgraded.override, true);
     assert.match(plain.getPluginData('atlas.source'), /"frameName":"plain"/);
@@ -344,7 +364,7 @@ test('manually upgraded plain component keeps manual margins, its current size a
     assert.notEqual(plain.children[0].fills[0].imageHash, previousHash);
     assert.deepEqual([plain.width, plain.height], [120, 60]);
     assert.deepEqual(record(plain).current, { left: 4, top: 4, right: 4, bottom: 4 });
-    assert.deepEqual(record(plain).source, { width: 20, height: 20 });
+    assert.deepEqual(record(plain).imageSize, { width: 20, height: 20 });
     assert.deepEqual([instance.width, instance.height], [30, 30]);
 
     // The source shrinks below the manual margins: skip and explain, never clamp.
@@ -403,7 +423,7 @@ test('restoring project parameters on a manually upgraded component keeps its ca
     assert.deepEqual(restored.project, { left: 6, top: 6, right: 6, bottom: 6 });
     assert.equal(restored.override, false);
     assert.deepEqual([plain.width, plain.height], [120, 60]);
-    assert.deepEqual(restored.source, { width: 20, height: 20 });
+    assert.deepEqual(restored.imageSize, { width: 20, height: 20 });
     assert.equal(plain.children.length, 9);
     assert.equal(plain.children.find(child => child.name === '切片 2-1').width, 36);
     assert.deepEqual([instance.width, instance.height], [30, 30]);
