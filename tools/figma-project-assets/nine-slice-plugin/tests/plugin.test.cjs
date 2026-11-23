@@ -433,6 +433,13 @@ function plainComponent(options = {}) {
     appendChild(child) { child.parent = this; this.children.push(child); },
     remove() { this.removed = true; }
   };
+  // The importer writes this cross-plugin marker; a plain component without it
+  // could be any user-made master, which the upgrade must not touch.
+  if (options.marked !== false) {
+    component.setSharedPluginData('myfigma', 'atlas.origin', JSON.stringify({
+      schemaVersion: 1, identity: JSON.stringify(['g1', 'atlas', 'res/buttons.png', 'plain'])
+    }));
+  }
   return component;
 }
 
@@ -447,7 +454,7 @@ test('upgrades an importer plain image main component in place, previewing origi
   assert.equal(preview.height, 40);
   assert.equal(preview.edit.target, 'upgrade');
   assert.equal(preview.edit.editable, true);
-  assert.deepEqual(JSON.parse(JSON.stringify(preview.edit.source)), { width: 64, height: 40 });
+  assert.deepEqual(JSON.parse(JSON.stringify(preview.edit.imageSize)), { width: 64, height: 40 });
 
   await env.figma.ui.onmessage({ ...env.settings, left: 16, right: 8, top: 4, bottom: 2 });
   // Same component upgraded in place: no replacement component, no second master.
@@ -465,7 +472,7 @@ test('upgrades an importer plain image main component in place, previewing origi
   const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
   assert.deepEqual(saved.margins, { left: 16, right: 8, top: 4, bottom: 2 });
   assert.deepEqual(saved.current, { left: 16, right: 8, top: 4, bottom: 2 });
-  assert.deepEqual(saved.source, { width: 64, height: 40 });
+  assert.deepEqual(saved.imageSize, { width: 64, height: 40 });
   assert.deepEqual([saved.width, saved.height], [160, 120]);
   assert.equal(saved.override, true);
   assert.equal(saved.project, undefined);
@@ -498,6 +505,7 @@ test('an instance of a plain image component is never upgraded; it only locates 
   assert.equal(preview.edit.target, 'upgrade');
   assert.equal(preview.edit.editable, false);
   assert.deepEqual([preview.width, preview.height], [64, 40]);
+  assert.deepEqual(JSON.parse(JSON.stringify(preview.edit.imageSize)), { width: 64, height: 40 });
 
   await env.figma.ui.onmessage({ ...env.settings, left: 16 });
   assert.equal(component.children.length, 0);
@@ -546,6 +554,78 @@ test('a failed upgrade leaves the plain component with its image fill and no par
   assert.equal(component.fills.length, 1);
   assert.equal(component.fills[0].type, 'IMAGE');
   assert.deepEqual([component.width, component.height], [160, 120]);
-  assert.equal(component.data['myfigma.nineSlice.v1'], undefined);
+  assert.ok(!component.data['myfigma.nineSlice.v1']);
   assert.ok(env.notices.some(text => text.includes('升级失败')));
+});
+
+
+test('an unmarked manually created plain component is not upgraded', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const component = plainComponent({ marked: false });
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ ...env.settings, left: 8 });
+  assert.equal(component.children.length, 0);
+  assert.equal(component.fills.length, 1);
+  assert.equal(component.data['myfigma.nineSlice.v1'], undefined);
+  assert.equal(component.shared['myfigma/nineSlice.v1'], undefined);
+  assert.ok(env.notices.some(text => /无法识别|导入器/.test(text)));
+});
+
+test('an invalid record falls back to slice geometry in image pixels without scaling it twice', async () => {
+  const env = setup([[200, 100]], { imageSize: { width: 200, height: 100 } });
+  await env.figma.ui.onmessage({ ...env.settings, left: 20, right: 20, top: 10, bottom: 10 });
+  const component = env.created[0];
+  // The record keeps the designer's 200x100 canvas while margins stay in 50x25
+  // original image pixels; these saved margins no longer fit the canvas.
+  setRecord(component, {
+    schemaVersion: 1, margins: { left: 120, top: 50, right: 120, bottom: 50 }, overlap: false,
+    width: 200, height: 100, imageSize: { width: 50, height: 25 },
+    current: { left: 120, top: 50, right: 120, bottom: 50 }, override: true
+  });
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  // Canvas geometry 20/10/20/10 divided by the 4x scale belongs to the 50x25 image.
+  assert.deepEqual(JSON.parse(JSON.stringify(preview.edit.margins)), { left: 5, top: 2.5, right: 5, bottom: 2.5 });
+  assert.deepEqual(JSON.parse(JSON.stringify(preview.edit.imageSize)), { width: 50, height: 25 });
+
+  await env.figma.ui.onmessage({ ...env.settings, left: 5, right: 5, top: 2.5, bottom: 2.5 });
+  const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.deepEqual(saved.current, { left: 5, top: 2.5, right: 5, bottom: 2.5 });
+  assert.deepEqual(saved.imageSize, { width: 50, height: 25 });
+  assert.deepEqual([saved.width, saved.height], [200, 100]);
+  assert.equal(component.children.find(child => child.name === '切片 2-1').width, 20);
+  assert.equal(component.children.find(child => child.name === '切片 1-2').height, 10);
+});
+
+test('a failed shared record write aborts the manual upgrade instead of claiming success', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const component = plainComponent();
+  component.setSharedPluginData = () => { throw new Error('Simulated shared record failure'); };
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ ...env.settings, left: 16, right: 8, top: 4, bottom: 2 });
+  assert.equal(component.children.length, 0);
+  assert.equal(component.fills.length, 1);
+  assert.equal(component.data['myfigma.nineSlice.v1'], undefined);
+  assert.ok(env.notices.some(text => /记录/.test(text)));
+  assert.equal(env.notices.some(text => /保留/.test(text)), false);
+});
+
+test('an unchanged upgrade keeps the existing project override state', async () => {
+  const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+  const component = plainComponent();
+  setRecord(component, {
+    schemaVersion: 1, margins: { left: 8, top: 8, right: 8, bottom: 8 }, overlap: false,
+    width: 160, height: 120, imageSize: { width: 64, height: 40 },
+    project: { left: 8, top: 8, right: 8, bottom: 8 },
+    current: { left: 8, top: 8, right: 8, bottom: 8 }, override: false
+  });
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ ...env.settings, left: 8, right: 8, top: 8, bottom: 8 });
+  const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.equal(saved.override, false);
+  assert.deepEqual(saved.project, { left: 8, top: 8, right: 8, bottom: 8 });
+  assert.deepEqual(saved.current, { left: 8, top: 8, right: 8, bottom: 8 });
+  assert.deepEqual(saved.imageSize, { width: 64, height: 40 });
 });
