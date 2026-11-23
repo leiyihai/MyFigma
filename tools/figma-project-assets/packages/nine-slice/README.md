@@ -16,7 +16,7 @@ npm run typecheck
 - `@myfigma/nine-slice/figma`：`createNineSliceComponent(figma, {width, height, fill}, margins, {overlap?})`。
   返回无 Auto Layout 的主组件；失败移除本次半成品。调用方负责父级、名称、坐标、选择、来源状态和原图删除。
   `fill` 为 Figma `ImagePaint`；消费适配入口的工程需要 `@figma/plugin-typings`。
-- `@myfigma/nine-slice/record`：两个插件共用的 Figma shared plugin data 记录读写（兼容旧私有数据）。
+- `@myfigma/nine-slice/record`：两个插件共用的 Figma shared plugin data 记录读写（namespace `myfigma`、key `nineSlice.v1`，旧私有 `myfigma.nineSlice.v1` 仅兼容回退）。
   必填 `margins`、`overlap`、`width`、`height` 兼容旧版；新增 `project`（项目统计参数）、`current`（当前参数）和 `override`（人工覆盖）。
   旧记录缺少 `project` 时按人工覆盖读取，避免增量导入改动既有手工边距。
 
@@ -34,7 +34,7 @@ const component = createNineSliceComponent(
 component.name = '九宫格底板';
 ```
 
-本仓库独立插件直接从 `src/` 导入并 bundle，因此仅在插件目录 `npm ci && npm run build` 即可构建，不要求先安装或构建本包，也不依赖另一个插件。两个插件未来各自包含核心代码，不运行时互调。
+本仓库独立插件直接从 `src/` 导入并 bundle，因此仅在插件目录 `npm ci && npm run build` 即可构建，不要求先安装或构建本包，也不依赖另一个插件。两个插件各自包含核心代码，不运行时互调。
 
 ## 验证边界
 
