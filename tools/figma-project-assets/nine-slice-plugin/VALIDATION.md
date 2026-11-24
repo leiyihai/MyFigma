@@ -273,3 +273,33 @@ Figma 126.10.7，使用当前开发插件（manifest `tools/figma-project-assets
 - 本轮未操作真实 Figma。真实客户端仍需在放大后的 9 切片组件上确认：面板预览为原图尺寸、四边输入框和绿线显示原图边距、拖动不出现画布坐标，并读回记录 `imageSize`、当前画布和实例关联；该部分待真实 Figma 面板验收。
 - 浏览器回归不替代主线程消息测试；两者分别覆盖 UI 消费和插件消息入口。
 - 旧版九宫格插件仍不认识 `imageSize`，同时部署新旧构建时会按画布解释 `current` 边距，属于既有版本兼容限制。
+
+## #28 评审修正（`ticket/28-compact-nine-slice`）
+
+本轮只修正 #28 的代码评审问题：像素边距一致、`FILL` 取样、精简路径的 `overlap`、批量兼容路径、术语和普通图片图层预览尺寸。A／B 的公开消息入口、浏览器回归和未验收声明保持原范围。
+
+### 红→绿记录
+
+1. **像素边距一致**：新增核心用例「compact slicing uses the same integer pixel margins that the UI submits」和浏览器用例「fractional margins are rounded once…」。修复前浏览器请求发送 `12.5`（实际栅格按 `13` 切），面板仍显示 `12.5`；修复后 UI 先取整，请求、切片和记录共用 `13/13/13/13`，面板显示同一组整数。核心用例先因缺少 `compactPixelMargins` 导出而失败，实现后通过。
+2. **`FILL` 取样**：新增核心用例「FILL sampling covers the layer with a centred crop…」和浏览器用例「a plain image layer is FILL-cropped…」。修复前按图层宽高直接拉伸：核心导入失败，浏览器 `object-fit` 实际为 `fill`、100×200 自然图塞进 100×80 图层仍保留顶部色带，输出 `1×20`；修复后预览为 `cover`，可见像素为纯色，输出 `1×1`，裁剪求解在 Node 侧覆盖居中裁边、同比原样返回和非法尺寸。
+3. **精简 `overlap`**：新增入口回归「compact components ignore the seam overlap…」。修复前请求里的 `overlap:true` 让切片出现 `9.5`、`10.5` 等小数坐标；修复后切片坐标全为整数，记录 `overlap:false`。浏览器回归同时断言未开启批量时「消除缝隙」禁用、说明文案说明不适用，且旧勾选状态不会进入精简请求。
+4. **批量回归**：新增入口回归「batch keeps every original when retaining them is requested」和浏览器回归「batch mode keeps the legacy original-image path…」。修复前面板把批量开关静默置灰并强制关闭，主按钮不再提供批量路径（浏览器失败为 `Received: disabled`）；修复后批量开关保持可用，开启批量时主按钮发送旧 `generate`（`batchMode:true`、`keepOriginal:true`、`overlap:false`，不发精简消息），状态文案明确「批量模式使用原始图片、不精简」。A 仍只处理当前单张图片并始终保留原图。
+5. **术语**：通知、错误文案、按钮说明、README 和注释统一使用 GLOSSARY 的「九宫格图片」，「精简」只作为动作／处理描述。入口回归原先把「已生成精简九宫格图片」当成功文案（实际不匹配 `已生成九宫格图片`），改为规范术语后通过。
+6. **普通图片图层预览尺寸**：新增入口回归「a plain image layer previews its real size…」。修复前 `sendSelectionToUI` 把 `100.4×80.5` 取整为 `100×81`（断言 `100 !== 100.4` 失败）；修复后预览发送真实宽高，只有精简栅格在 UI 内取整。`scaleMode` 随预览下发，供 UI 选择覆盖裁切或沿用拉伸。
+
+### 界面检查
+
+制作前阅读 `frontend-design` 技能。本次只增加状态文案、开关禁用/说明和既有 `.edit-status` 文字，未重做布局或视觉：继续使用现有 `--primary`、`--border`、按钮与状态条 token；批量提示沿用已有的 `#batch-overlay` 小标记（`pointer-events:none`，不遮挡引导线）；错误提示继续使用 `.edit-status.error`。用构建后页面在 360×740 面板截图核对单张与批量两种状态：按钮层级不变，状态条最多三行、按钮仍在可视区，禁用开关保留原样式。没有引入新的视觉语言，也没有把截图当作真实 Figma 面板验收。
+
+### 已运行的自动验证
+
+- `packages/nine-slice`：`npm run typecheck`、`npm test` 通过（19/19）。
+- `nine-slice-plugin`：`npm run typecheck`、`npm test` 通过（61 个 Node 入口用例、23 个 Chromium 用例）。
+- `atlas-import-plugin`：`npm run test:all` 通过（类型检查、91 个 Node 用例、10 个浏览器用例；跨插件恢复用例未受影响）。
+- 修复前的红灯：核心模块导出缺失 1 项；插件入口 5 项失败（预览宽高取整、非整数边距仍生成、overlap 小数坐标、两处成功文案）；浏览器 4 项失败（批量开关禁用、请求边距仍为 `12.5`、`object-fit` 为 `fill`、批量路径缺失）。
+
+### 未验证／集成注意
+
+- 本轮仍未在真实 Figma 重新验收 A／B：`FILL` 覆盖裁切与预览一致性只由核心像素测试、插件入口替身和浏览器 Canvas 回归证明；真实 Figma 的图片填充可见像素、节点尺寸、记录和实例约束留给父任务验收。
+- 非 `FILL` 缩放模式（`FIT`、`CROP`、`TILE`）仍按拉伸采样，未单独建模；普通图片图层若使用这些模式，精简结果的可见像素可能与 Figma 显示不同。
+- 批量兼容路径按原契约在「保留原图」关闭时删除源图层；面板已明确提示该开关的作用，但没有改成强制保留。需要真实客户端确认这是否符合产品预期。

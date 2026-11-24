@@ -19,7 +19,6 @@ type CompactRequest = {
   width?: number;
   height?: number;
   margins?: Margins;
-  overlap?: boolean;
   sourceId?: string;
   lang?: Language;
 };
@@ -328,13 +327,17 @@ async function sendSelectionToUI() {
   // pixels, not at its current (possibly resized) canvas size. The same applies
   // to an existing 9-slice component: its record keeps margins in image pixels,
   // so an enlarged canvas must not become the guide coordinate system.
-  // A plain image layer is rasterised for compaction, so its preview/guide space
-  // is the rounded layer size and always matches the pixels the UI can sample.
+  // A plain image layer keeps its real size in the preview; only the compact
+  // raster needs integers, and the UI rounds there.
   const width = view?.imageSize.width ?? upgrade?.imageSize.width ??
-    (node && 'width' in node ? (plainSource ? Math.max(1, Math.round(node.width)) : node.width) : 0);
+    (node && 'width' in node ? node.width : 0);
   const height = view?.imageSize.height ?? upgrade?.imageSize.height ??
-    (node && 'height' in node ? (plainSource ? Math.max(1, Math.round(node.height)) : node.height) : 0);
-  const plainImage = plainSource ? { id: plainSource.id, name: plainSource.name, width, height } : undefined;
+    (node && 'height' in node ? node.height : 0);
+  // Plain layers are sampled with their fill's scale mode: FILL covers the layer
+  // and crops, while the UI keeps the previous stretch for other modes.
+  const plainImage = plainSource
+    ? { id: plainSource.id, name: plainSource.name, width, height, scaleMode: fill?.scaleMode ?? 'FILL' }
+    : undefined;
   try {
     const hash = fill?.imageHash;
     const image = hash ? figma.getImageByHash(hash) : null;
@@ -408,16 +411,24 @@ const COMPACT_GAP = 50;
 function validRequestSize(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 1_000_000;
 }
-function notifyCompactRejected(reason: 'selection' | 'stale' | 'size'): void {
+// The compact raster slices at whole pixels, so the request, the slices and the
+// shared record must all use the same integer margins.
+function validPixelMargins(value: unknown): value is Margins {
+  return validMargins(value) &&
+    [value.left, value.top, value.right, value.bottom].every(item => Number.isInteger(item));
+}
+function notifyCompactRejected(reason: 'selection' | 'stale' | 'size' | 'margins'): void {
   const zh = {
-    selection: '生成精简九宫格只处理普通图片图层；已有组件或非图片图层不会走该入口，未做修改。',
-    stale: '画布选择已变化，未生成精简九宫格；请重新选中原图片图层。',
-    size: '精简图片尺寸无效，未生成；请重新选中图片图层后再试。'
+    selection: '生成九宫格图片或组件只处理普通图片图层；已有组件或非图片图层不会走该入口，未做修改。',
+    stale: '画布选择已变化，未生成九宫格；请重新选中原图片图层。',
+    size: '九宫格图片尺寸无效，未生成；请重新选中图片图层后再试。',
+    margins: '九宫格图片要求整数像素边距，且左右之和小于宽度、上下之和小于高度；未生成，原图未修改。'
   }[reason];
   const en = {
-    selection: 'Compact nine-slice generation only handles plain image layers; components and non-image layers are not changed.',
+    selection: 'Generating a nine-slice image or component only handles plain image layers; components and non-image layers are not changed.',
     stale: 'The canvas selection changed, so nothing was generated. Select the source image layer again.',
-    size: 'The compact image size is invalid, so nothing was generated. Select the image layer again and retry.'
+    size: 'The nine-slice image size is invalid, so nothing was generated. Select the image layer again and retry.',
+    margins: 'A nine-slice image needs whole-pixel margins whose sums stay smaller than the width and height. Nothing was generated and the source is unchanged.'
   }[reason];
   notifyLocalized(zh, en, { error: true });
 }
@@ -437,9 +448,11 @@ async function generateCompact(msg: CompactRequest): Promise<void> {
   const width = msg.width, height = msg.height;
   if (!validRequestSize(width) || !validRequestSize(height)) { notifyCompactRejected('size'); return; }
   const margins = msg.margins;
-  const overlap = msg.overlap === true;
-  if (!validMargins(margins) || !planFits({ width, height }, margins, overlap)) {
-    notifyInvalidMargins('image');
+  // The compact image keeps 1px/25% side bands, so the 0.5px seam overlap would
+  // make corner and band boundaries fractional. Compact output never uses it.
+  const overlap = false;
+  if (!validPixelMargins(margins) || !planFits({ width, height }, margins, overlap)) {
+    notifyCompactRejected('margins');
     return;
   }
   if (!msg.bytes || msg.bytes.length === 0) { notifyUnsupported('image-unreadable'); return; }
@@ -461,8 +474,8 @@ async function generateCompact(msg: CompactRequest): Promise<void> {
       layer.y = source.y;
       figma.currentPage.selection = [layer];
       figma.viewport.scrollAndZoomIntoView([layer]);
-      notifyLocalized('✅ 已生成精简九宫格图片，原图保留。',
-        '✅ Compact nine-slice image generated; the source layer was kept.');
+      notifyLocalized('✅ 已生成九宫格图片，原图保留。',
+        '✅ Nine-slice image generated; the source layer was kept.');
     } else {
       const component = createNineSliceComponent(figma, { width, height, fill }, margins, { overlap });
       createdNode = component;
@@ -470,24 +483,24 @@ async function generateCompact(msg: CompactRequest): Promise<void> {
       component.name = source.name;
       component.x = source.x + source.width + COMPACT_GAP;
       component.y = source.y;
-      // The canvas is already the compact size, and the margins are the original
-      // values because the four corners keep their lengths.
+      // The canvas is already the compact size, and the margins are the integer
+      // pixel values the UI sliced, so the four corners keep their lengths.
       if (!rememberSlice(component, margins, overlap, true, { width, height }))
         throw new Error('九宫格共享记录写入失败');
       figma.currentPage.selection = [component];
       figma.viewport.scrollAndZoomIntoView([component]);
-      notifyLocalized('✅ 已生成精简九宫格组件，原图保留。',
-        '✅ Compact nine-slice component generated; the source layer was kept.');
+      notifyLocalized('✅ 已生成九宫格组件，原图保留。',
+        '✅ Nine-slice component generated; the source layer was kept.');
     }
   } catch (error) {
-    console.error('生成精简九宫格失败', error);
+    console.error('生成九宫格图片或组件失败', error);
     if (createdNode && !createdNode.removed) {
       try { createdNode.remove(); }
-      catch (removeError) { console.error('清理精简九宫格半成品失败', removeError); }
+      catch (removeError) { console.error('清理九宫格半成品失败', removeError); }
     }
     figma.currentPage.selection = previousSelection;
-    notifyLocalized('生成精简九宫格失败，原图未修改；请查看插件控制台。',
-      'Generating the compact nine-slice failed; the source was not changed. Check the plugin console.', { error: true });
+    notifyLocalized('生成九宫格图片或组件失败，原图未修改；请查看插件控制台。',
+      'Generating the nine-slice image or component failed; the source was not changed. Check the plugin console.', { error: true });
   } finally {
     generating = false;
   }
@@ -591,12 +604,12 @@ async function restoreProject(): Promise<void> {
 }
 const upgradeRejectionText: Record<UpgradeRejection, { zh: string; en: string }> = {
   'not-image': {
-    zh: '生成精简九宫格只处理普通图片图层；已有组件或非图片图层不会走该入口，未做修改。',
-    en: 'Compact nine-slice generation only handles plain image layers; components and non-image layers are not changed.'
+    zh: '生成九宫格图片或组件只处理普通图片图层；已有组件或非图片图层不会走该入口，未做修改。',
+    en: 'Generating a nine-slice image or component only handles plain image layers; components and non-image layers are not changed.'
   },
   'image-unreadable': {
-    zh: '无法读取该图片的像素数据，未生成精简九宫格；原图未修改。',
-    en: 'The pixels of this image cannot be read, so no compact nine-slice was generated. The source is unchanged.'
+    zh: '无法读取该图片的像素数据，未生成九宫格图片或组件；原图未修改。',
+    en: 'The pixels of this image cannot be read, so no nine-slice image or component was generated. The source is unchanged.'
   },
   'auto-layout': {
     zh: '该组件使用了 Auto Layout，普通单图组件升级不支持自动布局；未做修改。',

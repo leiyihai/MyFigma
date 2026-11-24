@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   COMPACT_COLOR_TOLERANCE, COMPACT_GRADIENT_RATIO,
-  analyzeCompactUniformity, compactImage, createCompactPlan
+  analyzeCompactUniformity, compactImage, compactPixelMargins, coverImage, createCompactPlan
 } from '../dist/compact.js';
 
 function imageOf(width, height, colorAt) {
@@ -138,6 +138,49 @@ test('four corners keep their exact pixels and alpha while the center is resampl
   const center = [];
   for (let x = 10; x < 10 + plan.targets.width; x++) center.push(pixel(result, x, 10)[0]);
   assert.ok(Math.max(...center) - Math.min(...center) > 20);
+});
+
+test('compact slicing uses the same integer pixel margins that the UI submits', () => {
+  const size = { width: 100, height: 80 };
+  const entered = { left: 12.5, top: 10.4, right: 7.6, bottom: 9.5 };
+  const pixels = compactPixelMargins(size, entered);
+  assert.deepEqual(pixels, { left: 13, top: 10, right: 8, bottom: 10 });
+  // The plan and the raster must slice exactly at those integer boundaries, so
+  // callers can reuse one margin set for the request, the slices and the record.
+  const plan = createCompactPlan(size, pixels, { horizontal: true, vertical: true });
+  assert.deepEqual(plan.pixelMargins, pixels);
+  assert.deepEqual([plan.width, plan.height], [13 + 1 + 8, 10 + 1 + 10]);
+  assert.deepEqual(createCompactPlan(size, entered, { horizontal: true, vertical: true }).pixelMargins, pixels);
+  assert.throws(() => compactPixelMargins(size, { ...entered, left: 70, right: 30 }), RangeError);
+});
+
+test('FILL sampling covers the layer with a centred crop instead of stretching the image', () => {
+  // 200x100 natural pixels shown in a 100x80 layer: cover keeps 125x100 source
+  // pixels, so the outermost 37.5px strips are cropped away.
+  const source = imageOf(200, 100, x => x < 20 ? [0, 255, 0, 255] : [0, 0, 255, 255]);
+  const visible = coverImage(source, { width: 100, height: 80 });
+  assert.deepEqual([visible.width, visible.height], [100, 80]);
+  // A stretch would keep the green strip on the left; cover crops it entirely.
+  assert.deepEqual(pixel(visible, 0, 0), [0, 0, 255, 255]);
+  assert.deepEqual(pixel(visible, 99, 79), [0, 0, 255, 255]);
+  assert.deepEqual(pixel(visible, 50, 40), [0, 0, 255, 255]);
+
+  // Same source shown in a 100x40 layer: cover keeps the full width and crops
+  // 10 source rows top and bottom, so a top band never leaks into the layer.
+  const banded = imageOf(200, 100, (x, y) => y < 10 ? [255, 0, 255, 255] : [0, 0, 255, 255]);
+  const cropped = coverImage(banded, { width: 100, height: 40 });
+  assert.deepEqual([cropped.width, cropped.height], [100, 40]);
+  assert.deepEqual(pixel(cropped, 0, 0), [0, 0, 255, 255]);
+  assert.deepEqual(pixel(cropped, 99, 39), [0, 0, 255, 255]);
+
+  // An equal-aspect layer samples the image unchanged, including its alpha.
+  const exact = imageOf(20, 10, (x, y) => [x * 10, y * 20, 40, x < 4 ? 0 : 255]);
+  const same = coverImage(exact, { width: 20, height: 10 });
+  assert.deepEqual([...same.data], [...exact.data]);
+  assert.deepEqual(pixel(same, 0, 0), [0, 0, 40, 0]);
+
+  assert.throws(() => coverImage(source, { width: 0, height: 10 }), RangeError);
+  assert.throws(() => coverImage(source, { width: 10.5, height: 10 }), RangeError);
 });
 
 test('zero margins compact the whole image and keep the transparency channel', () => {

@@ -121,8 +121,8 @@
   <!--__COMPACT_CORE__-->
   <script>
     const i18n = {
-      zh: { code: "ZH", updateBtn: "更新九宫格组件", editStatus: "正在编辑现有组件", editInstance: "选中实例；请定位主组件后编辑", locateMain: "请选中主组件后编辑", updateHint: "按当前边距更新已有九宫格组件；人工边距优先于项目参数；保留原图与批量模式不适用于编辑", restoreBtn: "恢复项目参数", editManual: "人工边距优先", editProject: "使用项目参数", editLegacy: "旧版组件：按切片结构推导边距", unsupportedComponent: "无法识别该组件：请选择本工具生成的九宫格主组件、普通单图组件或普通图片图层。未做修改。", unsupportedInstance: "选中的是实例；请定位主组件后编辑，不会自动改造实例。", unsupportedAutoLayout: "该组件使用了 Auto Layout，普通单图组件升级不支持自动布局；未做修改。", unsupportedNotFilled: "图片子层未完整铺满组件（需位于 0,0 且尺寸与组件画布一致，允许极小浮点误差）；未做修改。", unsupportedDecorated: "图片子层带圆角、描边或效果；升级会丢失这些视觉属性，因此未做修改。", unsupportedMultipleChildren: "普通单图组件只能包含一张可见图片；该组件有多个子层，未做修改。", unsupportedExtraContent: "普通单图组件只能有一张可见图片，不能混入其他可见内容（根节点或图片子层的额外填充、描边、效果、圆角或子层）；未做修改。", restoreHint: "清除手动边距，改用导入插件记录的项目统计参数；原位重建切片，主组件与实例关联保留。", locateBtn: "定位主组件", locateHint: "在画布中选中该实例的主组件；不会修改实例或主组件。", upgradeBtn: "升级为九宫格组件", upgradeStatus: "普通单图组件：按原图像素预览，升级保留组件与实例", upgradeImported: "导入器来源", upgradeHint: "按原图像素设置边距，在同一个主组件上完成手动九宫格升级；组件 ID、当前宽高与实例关联均保留，来源标记只作提示", restoreMissing: "该组件没有记录项目参数，无法恢复；请先导入包含项目参数的资源", batchOverlay: "📦 批量模式已开启", emptyHint: "请在画布选中图片图层", controlHint: "鼠标中键拖拽平移 / 滚轮缩放", allLabel: "统一边距 (All)", topLabel: "上", bottomLabel: "下", leftLabel: "左", rightLabel: "右", keepOriginal: "保留原图", batchMode: "批量模式", batchTip: "同步处理多张图片。开启后，选中的所有图层将统一应用当前切片数值。", overlap: "消除缝隙", overlapTip: "修正渲染缝隙。开启后切片间将产生 1px 重叠以消除拼接黑线（透明图片慎用）。", compactImageBtn: "生成九宫格图片", plainImageStatus: "普通图片图层：按边距生成精简图片或九宫格组件", compactImageHint: "按当前边距生成精简九宫格图片，放在原图右侧并保留原图", generateCompactHint: "按当前边距生成精简图片，再用它生成九宫格组件；原图保留，批量与保留原图开关不适用", unsupportedNotImage: "当前选区不是普通图片图层；请选择图片图层，已有组件请使用对应入口。未做修改。", unsupportedImageUnreadable: "无法读取该图片的像素数据，不能生成精简九宫格；原图未修改。", compactInvalidMargins: "边距无法用于精简图片：需为非负数，且左右之和小于宽度、上下之和小于高度。", compactComputeFailed: "精简图片处理失败，未生成；请重试或更换图片。", generateBtn: "生成九宫格组件" },
-      en: { code: "EN", updateBtn: "Update 9-Slice", editStatus: "Editing existing component", editInstance: "Instance selected; locate the main component to edit", locateMain: "Select the main component to edit", updateHint: "Update the existing 9-slice with these margins; manual margins take priority over the project parameter; Keep Original and Batch do not apply", restoreBtn: "Restore project parameter", editManual: "manual margins take priority", editProject: "using project parameter", editLegacy: "legacy component: margins derived from slices", unsupportedComponent: "Unrecognized component. Select a 9-slice main component created by this tool, a plain single-image component, or an image layer. Nothing changed.", unsupportedInstance: "An instance is selected. Locate its main component to edit; instances are never converted automatically.", unsupportedAutoLayout: "This component uses Auto Layout, which the plain single-image upgrade does not support. Nothing changed.", unsupportedNotFilled: "The image child does not fully cover the component (it must sit at 0,0 with the component canvas size, allowing for tiny floating-point differences). Nothing changed.", unsupportedDecorated: "The image child uses corner radius, strokes or effects that the upgrade would drop. Nothing changed.", unsupportedMultipleChildren: "A plain single-image component may contain only one visible image; this component has multiple child layers. Nothing changed.", unsupportedExtraContent: "A plain single-image component may contain only one visible image and no other visible content (extra fills, strokes, effects, corner radius or child layers on the root or image child). Nothing changed.", restoreHint: "Clear the manual margins and use the project statistic recorded by the importer; slices are rebuilt in place and main component/instance links stay intact.", locateBtn: "Locate main component", locateHint: "Select the main component of this instance on the canvas; the instance and its master are not modified.", upgradeBtn: "Upgrade to 9-slice", upgradeStatus: "Plain single-image component: previewed in original image pixels; the component and its instances stay linked", upgradeImported: "Importer source", upgradeHint: "Set margins in original image pixels and complete the manual 9-slice upgrade on this same main component; its ID, current size and instances are kept, while the source marker is only a hint", restoreMissing: "This component has no recorded project parameter, so it cannot be restored. Import a resource with a project parameter first.", batchOverlay: "📦 Batch Mode Active", emptyHint: "Please select an image layer", controlHint: "Middle click to pan / Scroll to zoom", allLabel: "All Margins", topLabel: "Top", bottomLabel: "Bottom", leftLabel: "Left", rightLabel: "Right", keepOriginal: "Keep Original", batchMode: "Batch Mode", batchTip: "Sync multiple images. All selected layers will use the same slice values.", overlap: "Fix Gaps", overlapTip: "Fix rendering gaps. Creates a 1px overlap to eliminate lines.", compactImageBtn: "Generate Compact Image", plainImageStatus: "Plain image layer: generate a compact image or a 9-slice component from these margins", compactImageHint: "Generate a compact 9-slice image to the right of the source; the source is kept", generateCompactHint: "Generate a compact image from these margins, then build a 9-slice component from it; the source is kept and batch/keep-original do not apply", unsupportedNotImage: "The selection is not a plain image layer. Select an image layer, or use the matching entry for an existing component. Nothing changed.", unsupportedImageUnreadable: "The pixels of this image cannot be read, so no compact nine-slice can be generated. The source is unchanged.", compactInvalidMargins: "These margins cannot be used for a compact image: they must be non-negative and each pair must be smaller than the image width and height.", compactComputeFailed: "Compacting the image failed, so nothing was generated. Retry or choose another image.", generateBtn: "Generate 9-Slice" },
+      zh: { code: "ZH", updateBtn: "更新九宫格组件", editStatus: "正在编辑现有组件", editInstance: "选中实例；请定位主组件后编辑", locateMain: "请选中主组件后编辑", updateHint: "按当前边距更新已有九宫格组件；人工边距优先于项目参数；保留原图与批量模式不适用于编辑", restoreBtn: "恢复项目参数", editManual: "人工边距优先", editProject: "使用项目参数", editLegacy: "旧版组件：按切片结构推导边距", unsupportedComponent: "无法识别该组件：请选择本工具生成的九宫格主组件、普通单图组件或普通图片图层。未做修改。", unsupportedInstance: "选中的是实例；请定位主组件后编辑，不会自动改造实例。", unsupportedAutoLayout: "该组件使用了 Auto Layout，普通单图组件升级不支持自动布局；未做修改。", unsupportedNotFilled: "图片子层未完整铺满组件（需位于 0,0 且尺寸与组件画布一致，允许极小浮点误差）；未做修改。", unsupportedDecorated: "图片子层带圆角、描边或效果；升级会丢失这些视觉属性，因此未做修改。", unsupportedMultipleChildren: "普通单图组件只能包含一张可见图片；该组件有多个子层，未做修改。", unsupportedExtraContent: "普通单图组件只能有一张可见图片，不能混入其他可见内容（根节点或图片子层的额外填充、描边、效果、圆角或子层）；未做修改。", restoreHint: "清除手动边距，改用导入插件记录的项目统计参数；原位重建切片，主组件与实例关联保留。", locateBtn: "定位主组件", locateHint: "在画布中选中该实例的主组件；不会修改实例或主组件。", upgradeBtn: "升级为九宫格组件", upgradeStatus: "普通单图组件：按原图像素预览，升级保留组件与实例", upgradeImported: "导入器来源", upgradeHint: "按原图像素设置边距，在同一个主组件上完成手动九宫格升级；组件 ID、当前宽高与实例关联均保留，来源标记只作提示", restoreMissing: "该组件没有记录项目参数，无法恢复；请先导入包含项目参数的资源", batchOverlay: "📦 批量模式已开启", emptyHint: "请在画布选中图片图层", controlHint: "鼠标中键拖拽平移 / 滚轮缩放", allLabel: "统一边距 (All)", topLabel: "上", bottomLabel: "下", leftLabel: "左", rightLabel: "右", keepOriginal: "保留原图", batchMode: "批量模式", batchTip: "同步处理多张图片。开启后，选中的所有图层将统一应用当前切片数值。", overlap: "消除缝隙", overlapTip: "修正渲染缝隙。开启后切片间将产生 1px 重叠以消除拼接黑线（透明图片慎用）。", compactImageBtn: "生成九宫格图片", plainImageStatus: "普通图片图层：精简后生成九宫格图片或九宫格组件", compactImageHint: "按当前边距精简后生成九宫格图片；边距按整数像素取整，新图片放在原图右侧并保留原图", generateCompactHint: "按当前边距精简后生成九宫格图片，再用它生成九宫格组件；边距按整数像素取整，原图保留", batchLegacyNotice: "批量模式使用原始图片、不精简；保留原图开关决定是否删除源图层", batchLegacyHint: "按当前边距用原始图片批量生成九宫格组件，不精简；保留原图与消除缝隙按当前设置生效", overlapCompactTip: "九宫格图片的四边带为 1px 或 25%，不使用 0.5px 重叠；普通图片图层上的精简动作固定关闭消除缝隙。", unsupportedNotImage: "当前选区不是普通图片图层；请选择图片图层，已有组件请使用对应入口。未做修改。", unsupportedImageUnreadable: "无法读取该图片的像素数据，不能生成九宫格图片或组件；原图未修改。", compactInvalidMargins: "边距无法用于九宫格图片：需为非负数，且左右之和小于宽度、上下之和小于高度。", compactComputeFailed: "九宫格图片处理失败，未生成；请重试或更换图片。", generateBtn: "生成九宫格组件" },
+      en: { code: "EN", updateBtn: "Update 9-Slice", editStatus: "Editing existing component", editInstance: "Instance selected; locate the main component to edit", locateMain: "Select the main component to edit", updateHint: "Update the existing 9-slice with these margins; manual margins take priority over the project parameter; Keep Original and Batch do not apply", restoreBtn: "Restore project parameter", editManual: "manual margins take priority", editProject: "using project parameter", editLegacy: "legacy component: margins derived from slices", unsupportedComponent: "Unrecognized component. Select a 9-slice main component created by this tool, a plain single-image component, or an image layer. Nothing changed.", unsupportedInstance: "An instance is selected. Locate its main component to edit; instances are never converted automatically.", unsupportedAutoLayout: "This component uses Auto Layout, which the plain single-image upgrade does not support. Nothing changed.", unsupportedNotFilled: "The image child does not fully cover the component (it must sit at 0,0 with the component canvas size, allowing for tiny floating-point differences). Nothing changed.", unsupportedDecorated: "The image child uses corner radius, strokes or effects that the upgrade would drop. Nothing changed.", unsupportedMultipleChildren: "A plain single-image component may contain only one visible image; this component has multiple child layers. Nothing changed.", unsupportedExtraContent: "A plain single-image component may contain only one visible image and no other visible content (extra fills, strokes, effects, corner radius or child layers on the root or image child). Nothing changed.", restoreHint: "Clear the manual margins and use the project statistic recorded by the importer; slices are rebuilt in place and main component/instance links stay intact.", locateBtn: "Locate main component", locateHint: "Select the main component of this instance on the canvas; the instance and its master are not modified.", upgradeBtn: "Upgrade to 9-slice", upgradeStatus: "Plain single-image component: previewed in original image pixels; the component and its instances stay linked", upgradeImported: "Importer source", upgradeHint: "Set margins in original image pixels and complete the manual 9-slice upgrade on this same main component; its ID, current size and instances are kept, while the source marker is only a hint", restoreMissing: "This component has no recorded project parameter, so it cannot be restored. Import a resource with a project parameter first.", batchOverlay: "📦 Batch Mode Active", emptyHint: "Please select an image layer", controlHint: "Middle click to pan / Scroll to zoom", allLabel: "All Margins", topLabel: "Top", bottomLabel: "Bottom", leftLabel: "Left", rightLabel: "Right", keepOriginal: "Keep Original", batchMode: "Batch Mode", batchTip: "Sync multiple images. All selected layers will use the same slice values.", overlap: "Fix Gaps", overlapTip: "Fix rendering gaps. Creates a 1px overlap to eliminate lines.", compactImageBtn: "Generate Compact Image", plainImageStatus: "Plain image layer: generate a nine-slice image or a nine-slice component after compacting", compactImageHint: "Compact the image from these margins, then create a nine-slice image to the right of the source; margins are rounded to whole pixels and the source is kept", generateCompactHint: "Compact the image from these margins, then build a nine-slice component from it; margins are rounded to whole pixels and the source is kept", batchLegacyNotice: "Batch mode uses the original images without compacting; Keep Original decides whether the source layers are deleted", batchLegacyHint: "Generate nine-slice components from the original images in batch without compacting; Keep Original and Fix Gaps follow the current settings", overlapCompactTip: "A nine-slice image keeps 1px or 25% side bands, so the 0.5px gap overlap does not apply; the compact actions always disable Fix Gaps.", unsupportedNotImage: "The selection is not a plain image layer. Select an image layer, or use the matching entry for an existing component. Nothing changed.", unsupportedImageUnreadable: "The pixels of this image cannot be read, so no nine-slice image or component can be generated. The source is unchanged.", compactInvalidMargins: "These margins cannot be used for a nine-slice image: they must be non-negative and each pair must be smaller than the image width and height.", compactComputeFailed: "Processing the nine-slice image failed, so nothing was generated. Retry or choose another image.", generateBtn: "Generate 9-Slice" },
       ja: { code: "JP", batchOverlay: "📦 一括モード有効", emptyHint: "画像レイヤーを選択してください", controlHint: "中ボタンでパン / スクロールでズーム", allLabel: "一括余白", topLabel: "上", bottomLabel: "下", leftLabel: "左", rightLabel: "右", keepOriginal: "元画像を保持", batchMode: "一括モード", batchTip: "複数の画像を同期します。", overlap: "隙間を補正", overlapTip: "1pxの重なりを作り、境界線を消去します。", generateBtn: "コンポーネント作成" },
       ko: { code: "KO", batchOverlay: "📦 일괄 모드 활성화", emptyHint: "이미지 레이어를 선택하세요", controlHint: "중앙 클릭으로 이동 / 스크롤로 확대", allLabel: "전체 여백", topLabel: "상", bottomLabel: "하", leftLabel: "좌", rightLabel: "우", keepOriginal: "원본 유지", batchMode: "일괄 모드", batchTip: "모든 레이어에 동일한 수치가 적용됩니다.", overlap: "간격 수정", overlapTip: "1px 중첩을 생성하여 선을 제거합니다.", generateBtn: "구성 요소 생성" },
       ru: { code: "RU", batchOverlay: "📦 Пакетный режим", emptyHint: "Выберите слой с изображением", controlHint: "Колесо: масштаб / Кнопка: панорама", allLabel: "Все отступы", topLabel: "Верх", bottomLabel: "Низ", leftLabel: "Лев", rightLabel: "Прав", keepOriginal: "Оригинал", batchMode: "Пакетный", batchTip: "Применить ко всем слоям.", overlap: "Без швов", overlapTip: "Устраняет линии на стыках.", generateBtn: "Создать компонент" },
@@ -154,8 +154,8 @@
         'resetView()': '将选中图片适配到预览区域',
         'restore-btn': restoreHint,
         'locate-btn': '在画布中选中该实例的主组件；不会修改实例或主组件',
-        'compact-btn': '按当前边距生成精简九宫格图片；原图保留，新图片放在右侧',
-        'main-btn': '按当前边距生成精简九宫格组件；原图保留，批量与保留原图开关不适用'
+        'compact-btn': '按当前边距精简后生成九宫格图片；边距按整数像素取整，新图片放在右侧，原图保留',
+        'main-btn': '按当前边距精简后生成九宫格组件；边距按整数像素取整，原图保留；开启批量时改用原始图片批量生成、不精简'
       } : {
         'btn-pan': 'Toggle pan mode; drag the selected image preview (or use the middle mouse button)',
         'changeZoom(0.1)': 'Zoom in the preview without resizing the source or component',
@@ -163,8 +163,8 @@
         'resetView()': 'Fit the selected image to the preview',
         'restore-btn': restoreHint,
         'locate-btn': 'Select the main component of this instance on the canvas; the instance and its master are not modified',
-        'compact-btn': 'Generate a compact 9-slice image from these margins; the source is kept and the new image sits to its right',
-        'main-btn': 'Generate a compact 9-slice component from these margins; the source is kept and batch/keep-original do not apply'
+        'compact-btn': 'Compact the image from these margins and create a nine-slice image; margins round to whole pixels and the source is kept',
+        'main-btn': 'Compact the image from these margins and build a nine-slice component; margins round to whole pixels and the source is kept. With batch on, it falls back to the original images in batch without compacting'
       };
       document.querySelectorAll('button').forEach(button => {
         const hint = hints[button.id] || hints[button.getAttribute('onclick')];
@@ -221,6 +221,11 @@
       }
     }
 
+    function setOverlapHint(text) {
+      var tip = document.querySelector('.tooltip[data-t="overlapTip"]');
+      if (tip) tip.textContent = text;
+    }
+
     function renderEditState() {
       var status = el('edit-status'), button = el('main-btn'), restore = el('restore-btn'), locate = el('locate-btn');
       var compact = el('compact-btn');
@@ -229,6 +234,10 @@
       restore.disabled = true;
       locate.style.display = 'none';
       locate.disabled = true;
+      // Every non-plain state restores the general seam-overlap explanation;
+      // the plain image branch below replaces it with the compact rule.
+      el('overlap').disabled = false;
+      setOverlapHint(editText('overlapTip'));
       // Button A only belongs to a plain image layer; edit, upgrade and
       // unsupported states keep their existing single main action.
       compact.style.display = 'none';
@@ -246,21 +255,34 @@
       }
       if (!editState) {
         if (plainImageState && sourceBytes) {
+          // Batch keeps its existing entry: it falls back to the legacy
+          // original-image path instead of silently disappearing. A stays a
+          // single-image compact action and never deletes the source.
+          var batch = el('batchMode').checked;
           status.style.display = 'block';
-          status.textContent = editText('plainImageStatus') + '：' + plainImageState.name;
+          status.textContent = editText('plainImageStatus') + '：' + plainImageState.name +
+            (batch ? ' · ' + editText('batchLegacyNotice') : '');
           button.disabled = false;
           button.innerText = editText('generateBtn');
           compact.style.display = 'block';
           compact.disabled = false;
           compact.innerText = editText('compactImageBtn');
           compact.title = editText('compactImageHint');
-          // A/B only handle the single current image; the legacy batch path and
-          // source deletion must never be reachable from these actions.
-          el('batchMode').checked = false;
-          el('batchMode').disabled = true;
-          el('keepOriginal').checked = false;
-          el('keepOriginal').disabled = true;
-          button.title = editText('generateCompactHint');
+          el('batchMode').disabled = false;
+          // Keep Original only governs the legacy batch path; the compact actions
+          // always keep the source, so the locked switch shows that promise.
+          el('keepOriginal').disabled = !batch;
+          if (!batch) el('keepOriginal').checked = true;
+          // The 1px/25% side bands must never use the 0.5px seam overlap, so the
+          // compact actions force it off instead of pretending to honour it.
+          el('overlap').disabled = !batch;
+          if (batch) {
+            setOverlapHint(editText('overlapTip'));
+          } else {
+            el('overlap').checked = false;
+            setOverlapHint(editText('overlapCompactTip'));
+          }
+          button.title = batch ? editText('batchLegacyHint') : editText('generateCompactHint');
           return;
         }
         status.style.display = 'none';
@@ -389,6 +411,11 @@
           el('preview-img').src = previewURL;
           el('preview-img').style.width = msg.width + 'px';
           el('preview-img').style.height = msg.height + 'px';
+          // A plain image layer is painted by Figma with its fill scale mode.
+          // FILL covers the layer and crops the overflow, so the preview must
+          // crop too instead of showing a stretched image.
+          el('preview-img').style.objectFit = plainImageState && (plainImageState.scaleMode || 'FILL') === 'FILL'
+            ? 'cover' : 'fill';
           state.imgW = msg.width; state.imgH = msg.height;
           resetView();
           syncGuidesFromInputs();
@@ -428,11 +455,11 @@
     }
     function syncGuidesFromInputs() { if(state.imgW === 0) return; var t = Number(el('top').value) || 0, b = Number(el('bottom').value) || 0, l = Number(el('left').value) || 0, r = Number(el('right').value) || 0; var halfHit = 10 / state.zoom; el('g-top').style.top = (t - halfHit) + 'px'; el('g-bottom').style.top = (state.imgH - b - halfHit) + 'px'; el('g-left').style.left = (l - halfHit) + 'px'; el('g-right').style.left = (state.imgW - r - halfHit) + 'px'; }
 
-    el('batchMode').onchange = () => { updateUIState(); saveSettings(); };
+    el('batchMode').onchange = () => { renderEditState(); updateUIState(); saveSettings(); };
     el('overlap').onchange = saveSettings;
     el('keepOriginal').onchange = saveSettings;
 
-    function updateUIState() { var isBatch = el('batchMode').checked && !editState && !plainImageState; el('batch-overlay').style.display = isBatch ? 'block' : 'none'; el('empty-hint').style.display = state.imgW === 0 ? 'block' : 'none'; }
+    function updateUIState() { var isBatch = el('batchMode').checked && !editState; el('batch-overlay').style.display = isBatch ? 'block' : 'none'; el('empty-hint').style.display = state.imgW === 0 ? 'block' : 'none'; }
 
     function currentSettings() {
       return {
@@ -450,47 +477,97 @@
     });
 
     function submit() {
-      // For a plain image layer the main action is button B: build the compact
-      // pixels in the UI, then let the main thread create the component. The
-      // legacy generate path (which can delete sources) is never used here.
-      if (plainImageState) { void submitCompact('generate-compact-component'); return; }
+      if (plainImageState) {
+        // Batch keeps its existing path: the legacy flow generates components
+        // from the original images (no compaction) and honours Keep Original /
+        // Fix Gaps. Without batch, the main action is button B: build the
+        // compact pixels in the UI, then let the main thread create the component.
+        if (el('batchMode').checked) {
+          parent.postMessage({ pluginMessage: { type: 'generate', ...currentSettings() }}, '*');
+          return;
+        }
+        void submitCompact('generate-compact-component');
+        return;
+      }
       parent.postMessage({ pluginMessage: { type: 'generate', ...currentSettings() }}, '*');
+    }
+
+    // The compact raster slices at whole pixels. The panel reports the same
+    // integers it used, so the generated slices and the shared record cannot
+    // drift from the pixels that were compacted.
+    function applyPixelMargins(pixelMargins) {
+      var rounded = {
+        left: String(pixelMargins.left), top: String(pixelMargins.top),
+        right: String(pixelMargins.right), bottom: String(pixelMargins.bottom)
+      };
+      if (['left', 'top', 'right', 'bottom'].every(function(side) { return el(side).value === rounded[side]; })) return;
+      ['left', 'top', 'right', 'bottom'].forEach(function(side) { el(side).value = rounded[side]; });
+      // The All field is a shortcut for equal sides; keep it truthful when it no longer is.
+      if (rounded.left === rounded.top && rounded.top === rounded.right && rounded.right === rounded.bottom) {
+        el('all').value = rounded.left;
+      }
+      syncGuidesFromInputs();
+      saveSettings();
+    }
+
+    function samplingSize(source) {
+      return {
+        width: Math.max(1, Math.round(Number(source.width) || 0)),
+        height: Math.max(1, Math.round(Number(source.height) || 0))
+      };
+    }
+
+    // Pixels the layer actually shows. FILL is a centred cover crop of the
+    // natural image; any other scale mode keeps the previous stretch so this
+    // change cannot silently re-interpret modes it does not model.
+    async function visiblePixelImage(source, bytes, size) {
+      var bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+      try {
+        if ((source.scaleMode || 'FILL') !== 'FILL') {
+          var stretched = document.createElement('canvas');
+          stretched.width = size.width; stretched.height = size.height;
+          var stretchedContext = stretched.getContext('2d', { willReadFrequently: true });
+          if (!stretchedContext) throw new Error('无法创建图片画布');
+          stretchedContext.clearRect(0, 0, size.width, size.height);
+          stretchedContext.drawImage(bitmap, 0, 0, size.width, size.height);
+          return { width: size.width, height: size.height,
+            data: stretchedContext.getImageData(0, 0, size.width, size.height).data };
+        }
+        var natural = document.createElement('canvas');
+        natural.width = bitmap.width; natural.height = bitmap.height;
+        var naturalContext = natural.getContext('2d', { willReadFrequently: true });
+        if (!naturalContext) throw new Error('无法创建图片画布');
+        naturalContext.drawImage(bitmap, 0, 0);
+        var pixels = naturalContext.getImageData(0, 0, bitmap.width, bitmap.height).data;
+        return NineSliceCompact.coverImage({ width: bitmap.width, height: bitmap.height, data: pixels }, size);
+      } finally {
+        if (typeof bitmap.close === 'function') bitmap.close();
+      }
     }
 
     async function buildCompactRequest(type) {
       var source = plainImageState, bytes = sourceBytes;
       if (!source || !bytes) throw new Error('没有可读取的图片像素');
+      var size = samplingSize(source);
       var margins = {
         left: Number(el('left').value) || 0, top: Number(el('top').value) || 0,
         right: Number(el('right').value) || 0, bottom: Number(el('bottom').value) || 0
       };
-      var canvas = document.createElement('canvas');
-      canvas.width = source.width; canvas.height = source.height;
-      var context = canvas.getContext('2d', { willReadFrequently: true });
-      if (!context) throw new Error('无法创建图片画布');
-      var bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
-      try {
-        context.clearRect(0, 0, source.width, source.height);
-        // Draw into the layer's rounded size so margins keep the same
-        // coordinate space as the preview and the generated slices.
-        context.drawImage(bitmap, 0, 0, source.width, source.height);
-      } finally {
-        if (typeof bitmap.close === 'function') bitmap.close();
-      }
-      var pixels = context.getImageData(0, 0, source.width, source.height).data;
-      var compact = NineSliceCompact.compactImage(
-        { width: source.width, height: source.height, data: pixels }, margins);
+      var pixelMargins = NineSliceCompact.compactPixelMargins(size, margins);
+      var visible = await visiblePixelImage(source, bytes, size);
+      var compact = NineSliceCompact.compactImage(visible, pixelMargins);
       var output = document.createElement('canvas');
       output.width = compact.plan.width; output.height = compact.plan.height;
       var outputContext = output.getContext('2d');
-      if (!outputContext) throw new Error('无法创建精简图片画布');
+      if (!outputContext) throw new Error('无法创建九宫格图片画布');
       outputContext.putImageData(new ImageData(compact.data, compact.plan.width, compact.plan.height), 0, 0);
       var blob = await new Promise(function(resolve) { output.toBlob(resolve, 'image/png'); });
-      if (!blob) throw new Error('精简图片编码失败');
+      if (!blob) throw new Error('九宫格图片编码失败');
       return {
         type: type, bytes: new Uint8Array(await blob.arrayBuffer()),
-        width: compact.plan.width, height: compact.plan.height, margins: margins,
-        overlap: el('overlap').checked, sourceId: source.id, lang: currentLang
+        width: compact.plan.width, height: compact.plan.height,
+        margins: compact.plan.pixelMargins, overlap: false,
+        sourceId: source.id, lang: currentLang
       };
     }
 
@@ -501,9 +578,10 @@
       compact.disabled = true; button.disabled = true;
       try {
         var request = await buildCompactRequest(type);
+        applyPixelMargins(request.margins);
         parent.postMessage({ pluginMessage: request }, '*');
       } catch (error) {
-        console.error('生成精简九宫格失败', error);
+        console.error('生成九宫格图片失败', error);
         var status = el('edit-status');
         status.style.display = 'block';
         status.classList.add('error');
