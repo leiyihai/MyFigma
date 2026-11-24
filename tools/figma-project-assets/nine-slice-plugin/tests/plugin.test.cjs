@@ -140,8 +140,61 @@ test('editing a generated component updates it in place and keeps one component'
   assert.equal(env.created.length, 1);
   assert.equal(component.children.length, 9);
   const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  // An unscaled edit keeps the generated record shape; adding an explicit
+  // imageSize would change the importer's canvas-preservation decision.
+  assert.equal(saved.imageSize, undefined);
   assert.deepEqual(saved.margins, { left: 20, right: 5, top: 6, bottom: 7 });
   assert.equal(component.children.find(child => child.name === '切片 2-1').width, 20);
+});
+
+test('a resized 9-slice component previews margins in original image pixels', async () => {
+  const env = setup([[256, 256]], { imageSize: { width: 256, height: 256 } });
+  const settings = { ...env.settings, left: 60, right: 40, top: 50, bottom: 80 };
+  await env.figma.ui.onmessage(settings);
+  const component = env.created[0];
+  assert.deepEqual([component.width, component.height], [256, 256]);
+  component.resize(858, 769);
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  assert.equal(preview.edit.target, 'component');
+  assert.deepEqual(JSON.parse(JSON.stringify(preview.edit.margins)),
+    { left: 60, right: 40, top: 50, bottom: 80 });
+  assert.deepEqual(JSON.parse(JSON.stringify(preview.edit.imageSize)), { width: 256, height: 256 });
+  assert.equal(preview.width, 256);
+  assert.equal(preview.height, 256);
+});
+
+test('applying margins to a resized 9-slice component keeps its image-pixel record and instances', async () => {
+  const env = setup([[256, 256]], { imageSize: { width: 256, height: 256 } });
+  await env.figma.ui.onmessage({ ...env.settings, left: 60, right: 40, top: 50, bottom: 80 });
+  const component = env.created[0];
+  const instance = {
+    type: 'INSTANCE', name: '底板实例', width: 300, height: 200, fills: [], children: [],
+    async getMainComponentAsync() { return component; },
+    resize(width, height) { this.width = width; this.height = height; }
+  };
+  component.resize(858, 769);
+  env.figma.currentPage.selection = [component];
+  await env.figma.ui.onmessage({ ...env.settings, left: 70, right: 30, top: 45, bottom: 85 });
+
+  assert.equal(env.created.length, 1);
+  assert.equal(env.created[0], component);
+  assert.deepEqual([component.width, component.height], [858, 769]);
+  assert.equal(await instance.getMainComponentAsync(), component);
+  assert.deepEqual([instance.width, instance.height], [300, 200]);
+
+  const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.deepEqual(saved.current, { left: 70, right: 30, top: 45, bottom: 85 });
+  assert.deepEqual(saved.imageSize, { width: 256, height: 256 });
+  assert.deepEqual([saved.width, saved.height], [858, 769]);
+  const child = name => component.children.find(node => node.name === name);
+  // Submitted values stay image pixels; only the slices use the enlarged canvas.
+  assert.equal(child('切片 2-1').width, 70 * 858 / 256);
+  assert.equal(child('切片 2-3').width, 30 * 858 / 256);
+  assert.equal(child('切片 1-2').height, 45 * 769 / 256);
+  assert.equal(child('切片 3-2').height, 85 * 769 / 256);
 });
 
 test('editing a legacy overlap component preserves overlap and derives margins', async () => {
@@ -951,8 +1004,10 @@ test('a successful upgrade refreshes the selection preview into the editable 9-s
     assert.equal(preview.edit.override, true);
     assert.equal(preview.edit.project, undefined);
     assert.equal(preview.unsupported, null);
-    assert.equal(preview.width, 160);
-    assert.equal(preview.height, 120);
+    // Editing coordinates stay in original image pixels even though the upgraded
+    // component keeps its larger canvas.
+    assert.equal(preview.width, 64);
+    assert.equal(preview.height, 40);
   }
 });
 

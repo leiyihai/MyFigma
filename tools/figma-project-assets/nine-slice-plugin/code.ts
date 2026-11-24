@@ -310,9 +310,11 @@ async function sendSelectionToUI() {
     : node.type === 'COMPONENT' ? upgradeRejection(node) ?? 'component' : null;
   const fill = view?.fill ?? upgrade?.fill ?? (node && isImageNode(node) ? imageFill(node) : undefined);
   // A plain image main component is previewed and validated in original image
-  // pixels, not at its current (possibly resized) canvas size.
-  const width = view?.width ?? upgrade?.imageSize.width ?? (node && 'width' in node ? node.width : 0);
-  const height = view?.height ?? upgrade?.imageSize.height ?? (node && 'height' in node ? node.height : 0);
+  // pixels, not at its current (possibly resized) canvas size. The same applies
+  // to an existing 9-slice component: its record keeps margins in image pixels,
+  // so an enlarged canvas must not become the guide coordinate system.
+  const width = view?.imageSize.width ?? upgrade?.imageSize.width ?? (node && 'width' in node ? node.width : 0);
+  const height = view?.imageSize.height ?? upgrade?.imageSize.height ?? (node && 'height' in node ? node.height : 0);
   try {
     const hash = fill?.imageHash;
     const image = hash ? figma.getImageByHash(hash) : null;
@@ -552,7 +554,13 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
       const override = edit.record && unchanged ? edit.record.override : true;
       applyNineSliceComponent(figma, edit.component, { width: canvas.width, height: canvas.height, fill: edit.fill },
         scaled, { overlap: msg.overlap });
-      const recorded = rememberSlice(edit.component, margins, msg.overlap, override, edit.record?.imageSize);
+      // Keep the record's effective image size when it already exists or when a
+      // resized canvas needs it to preserve the original coordinate system.
+      // Unscaled generated/legacy records keep their old shape so the importer's
+      // "manual upgrade keeps canvas" decision does not change.
+      const imageSize = edit.record?.imageSize ??
+        (canvas.width === edit.imageSize.width && canvas.height === edit.imageSize.height ? undefined : edit.imageSize);
+      const recorded = rememberSlice(edit.component, margins, msg.overlap, override, imageSize);
       figma.viewport.scrollAndZoomIntoView([edit.component]);
       if (recorded) notify('success');
       else notifyLocalized('九宫格切片已按边距更新，但共享记录写入失败；来源、项目参数与人工覆盖状态未能确认保存。',
