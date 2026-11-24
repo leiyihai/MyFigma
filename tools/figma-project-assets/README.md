@@ -11,6 +11,7 @@
 | 启动、配对、扫描协议及本机安全 | [本地助手](local-helper/README.md) |
 | 导入、分类、撤销、训练样本和命名规律 | [资源导入器插件](atlas-import-plugin/README.md) |
 | 普通图片转换、普通单图组件手动九宫格升级、原位修改边距和恢复项目参数 | [独立九宫格插件](nine-slice-plugin/README.md) |
+| 九宫格图片精简、生成组件与缩放后边距修复规格 | [九宫格图片精简规格](docs/compact-nine-slice.md) |
 | 共用切片规划、Figma 适配与共享记录 | [九宫格核心](packages/nine-slice/README.md) |
 | 真实客户端自动化与平台问题排查 | [真实 Figma 测试指南](docs/real-figma-testing.md) |
 | 三个真实游戏的数量、性能和覆盖限制 | [历史验收记录](docs/real-project-acceptance.md) |
