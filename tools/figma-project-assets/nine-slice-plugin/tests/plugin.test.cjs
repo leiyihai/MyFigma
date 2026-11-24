@@ -5,8 +5,10 @@ const fs = require('node:fs');
 
 function setup(sizes = [[100, 80]], options = {}) {
   const created = [], notices = [], messages = [], saved = [], events = {};
+  const rectangles = [], images = [];
   const parent = { appendChild(node) { node.parent = this; } };
-  const sources = sizes.map(([width, height]) => ({
+  const sources = sizes.map(([width, height], index) => ({
+    id: `source-${index}`,
     width, height, x: 20, y: 30, name: 'Test', parent,
     fills: [{ type: 'IMAGE', imageHash: 'image' }],
     remove() { this.removed = true; }
@@ -36,14 +38,19 @@ function setup(sizes = [[100, 80]], options = {}) {
     },
     notify(text) { notices.push(text); }, viewport: { scrollAndZoomIntoView() {} },
     createComponent() { const result = node('COMPONENT'); created.push(result); return result; },
-    createRectangle: node
+    createRectangle() { const result = node('RECTANGLE'); rectangles.push(result); return result; },
+    createImage(bytes) {
+      images.push(bytes);
+      return { hash: 'created-image-' + images.length,
+        getBytesAsync: async () => bytes, getSizeAsync: async () => ({ width: 1, height: 1 }) };
+    }
   };
   vm.runInNewContext(fs.readFileSync('dist/code.js', 'utf8'), { figma, __html__: '', console });
   const settings = {
     type: 'generate', left: 10, right: 10, top: 10, bottom: 10, all: 10,
     overlap: false, keepOriginal: true, batchMode: false, lang: 'zh'
   };
-  return { figma, created, sources, notices, messages, settings, saved, events };
+  return { figma, created, rectangles, images, sources, notices, messages, settings, saved, events };
 }
 
 test('generates nine constrained slices in the original parent', async () => {
@@ -1065,4 +1072,140 @@ test('code and UI rejection reason sets stay in sync', () => {
   assert.ok(mappingMatch, 'unsupportedText must map every rejection reason');
   const uiReasons = [...mappingMatch[1].matchAll(/'([^']+)':/g)].map(match => match[1]).sort();
   assert.deepEqual(uiReasons, codeReasons);
+});
+
+function compactRequest(env, overrides = {}) {
+  return {
+    type: 'generate-compact-image', bytes: new Uint8Array([9, 8, 7]), width: 21, height: 21,
+    margins: { left: 10, top: 10, right: 10, bottom: 10 }, overlap: false,
+    sourceId: env.sources[0].id, lang: 'zh', ...overrides
+  };
+}
+
+test('compact image action creates a new plain image layer beside the untouched source', async () => {
+  const env = setup();
+  const source = env.sources[0];
+  await env.figma.ui.onmessage(compactRequest(env));
+
+  assert.equal(env.created.length, 0, 'the image action must not create a component');
+  assert.equal(env.rectangles.length, 1);
+  const layer = env.rectangles[0];
+  assert.equal(layer.name, source.name);
+  assert.equal(layer.parent, source.parent);
+  assert.deepEqual([layer.width, layer.height], [21, 21]);
+  assert.equal(layer.x, source.x + source.width + 50);
+  assert.equal(layer.y, source.y);
+  assert.equal(layer.fills[0].type, 'IMAGE');
+  assert.equal(layer.fills[0].imageHash, 'created-image-1');
+  assert.deepEqual([...env.images[0]], [9, 8, 7]);
+  assert.equal(source.removed, undefined, 'the source layer must never be deleted');
+  assert.deepEqual([source.width, source.height], [100, 80]);
+  assert.equal(env.figma.currentPage.selection.length, 1);
+  assert.equal(env.figma.currentPage.selection[0], layer);
+  assert.ok(env.notices.some(text => /图片/.test(text)));
+});
+
+test('compact component action keeps the source and records the compact canvas and original margins', async () => {
+  const env = setup();
+  const source = env.sources[0];
+  await env.figma.ui.onmessage(compactRequest(env, { type: 'generate-compact-component', keepOriginal: false }));
+
+  assert.equal(env.created.length, 1);
+  const component = env.created[0];
+  assert.equal(component.name, source.name);
+  assert.equal(component.parent, source.parent);
+  assert.deepEqual([component.width, component.height], [21, 21]);
+  assert.equal(component.x, source.x + source.width + 50);
+  assert.equal(component.y, source.y);
+  assert.equal(component.children.length, 9);
+  assert.equal(component.children.find(child => child.name === '切片 2-1').width, 10);
+  assert.equal(component.children.find(child => child.name === '切片 1-2').height, 10);
+  assert.equal(component.children.find(child => child.name === '切片 1-2').constraints.horizontal, 'STRETCH');
+  assert.equal(component.children.find(child => child.name === '切片 2-1').constraints.vertical, 'STRETCH');
+
+  const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.deepEqual(saved.current, { left: 10, top: 10, right: 10, bottom: 10 });
+  assert.deepEqual(saved.margins, { left: 10, top: 10, right: 10, bottom: 10 });
+  assert.deepEqual(saved.imageSize, { width: 21, height: 21 });
+  assert.deepEqual([saved.width, saved.height], [21, 21]);
+  assert.equal(saved.override, true);
+  assert.equal(component.shared['myfigma/nineSlice.v1'], component.data['myfigma.nineSlice.v1']);
+  assert.equal(source.removed, undefined, 'generating the component must keep the source layer');
+  assert.equal(env.figma.currentPage.selection.length, 1);
+  assert.equal(env.figma.currentPage.selection[0], component);
+  assert.ok(env.notices.some(text => /九宫格|组件/.test(text)));
+});
+
+test('compact actions reject invalid margins, stale ids and missing bytes without creating anything', async () => {
+  for (const request of [
+    { margins: { left: 20, top: 10, right: 20, bottom: 10 } },
+    { margins: { left: -1, top: 10, right: 10, bottom: 10 } },
+    { width: 0 }, { width: NaN }, { height: Infinity },
+    { sourceId: 'another-layer' }, { bytes: null }, { bytes: new Uint8Array() }
+  ]) {
+    const env = setup();
+    await env.figma.ui.onmessage(compactRequest(env, request));
+    assert.equal(env.images.length, 0, `createImage must not run for ${JSON.stringify(request)}`);
+    assert.equal(env.rectangles.length, 0);
+    assert.equal(env.created.length, 0);
+    assert.equal(env.sources[0].removed, undefined);
+    assert.ok(env.notices.some(text => /边距|变化|图片|无法/.test(text)), JSON.stringify(request));
+  }
+});
+
+test('compact actions reject non-image layers, existing 9-slice components and plain image components', async () => {
+  const nonImage = setup();
+  const frame = { id: 'frame-1', type: 'FRAME', name: 'Frame', width: 100, height: 80, children: [], fills: [] };
+  nonImage.figma.currentPage.selection = [frame];
+  await nonImage.figma.ui.onmessage(compactRequest(nonImage, { sourceId: 'frame-1' }));
+  assert.equal(nonImage.rectangles.length, 0);
+  assert.equal(nonImage.created.length, 0);
+  assert.ok(nonImage.notices.some(text => /图片|无法/.test(text)));
+
+  const slice = setup();
+  await slice.figma.ui.onmessage(slice.settings);
+  const component = slice.created[0];
+  slice.figma.currentPage.selection = [component];
+  await slice.figma.ui.onmessage(compactRequest(slice, { sourceId: component.id }));
+  assert.equal(slice.created.length, 1);
+  assert.equal(slice.rectangles.length, 9, 'only the existing slices exist');
+  assert.equal(component.children.length, 9);
+  assert.ok(slice.notices.some(text => /普通图片图层|未做修改/.test(text)));
+
+  const plain = setup();
+  const plainImageComponent = plainComponent({ marked: false });
+  plain.figma.currentPage.selection = [plainImageComponent];
+  await plain.figma.ui.onmessage(compactRequest(plain, { sourceId: plainImageComponent.id }));
+  assert.equal(plain.created.length, 0);
+  assert.equal(plain.rectangles.length, 0);
+  assert.equal(plainImageComponent.children.length, 0);
+  assert.equal(plainImageComponent.fills.length, 1);
+  assert.ok(plain.notices.some(text => /普通图片图层|未做修改/.test(text)));
+});
+
+test('a failed compact image write removes its partial node and reports the failure', async () => {
+  for (const type of ['generate-compact-image', 'generate-compact-component']) {
+    const env = setup();
+    env.figma.createImage = () => { throw new Error('Simulated image failure'); };
+    await env.figma.ui.onmessage(compactRequest(env, { type }));
+    assert.equal(env.rectangles.length, 0);
+    assert.equal(env.created.length, 0);
+    assert.equal(env.sources[0].removed, undefined);
+    assert.ok(env.notices.some(text => /失败|无法/.test(text)), type);
+  }
+});
+
+test('a failed compact component record write removes the partial component and keeps the source', async () => {
+  const env = setup();
+  const createComponent = env.figma.createComponent;
+  env.figma.createComponent = () => {
+    const component = createComponent();
+    component.setSharedPluginData = () => { throw new Error('Simulated record failure'); };
+    return component;
+  };
+  await env.figma.ui.onmessage(compactRequest(env, { type: 'generate-compact-component' }));
+  assert.equal(env.created.length, 1);
+  assert.equal(env.created[0].removed, true);
+  assert.equal(env.sources[0].removed, undefined);
+  assert.ok(env.notices.some(text => /失败|记录/.test(text)));
 });

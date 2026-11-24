@@ -13,6 +13,8 @@ npm run typecheck
 - `@myfigma/nine-slice`：`createNineSlicePlan({width, height}, {left, top, right, bottom}, overlap?)`。
   尺寸必须为有限正数，边距为有限非负数，两边之和严格小于对应尺寸；否则抛出 `RangeError`，不钳制人工输入。
   返回按行排序的非零切片、位置和约束：角固定、边单向拉伸、中心双向拉伸。
+- `@myfigma/nine-slice/compact`：`createCompactPlan(size, margins, {horizontal, vertical})`、`analyzeCompactUniformity(image, margins)`、`compactImage(image, margins)`。
+  四角保持原像素；可拉伸方向近似纯色时目标为 `1px`，渐变／非均匀时目标为 `max(1, round(原尺寸 × 25%))`，不设上限。`image` 为 `{width, height, data}` 的 RGBA `Uint8ClampedArray`，宽高必须是整数且数据长度匹配；面积重采样在预乘颜色上计算并还原透明通道，四角逐像素复制。非法尺寸、边距或像素数据抛出 `RangeError`，不钳制。该模块不依赖 DOM 或 Figma，插件 UI 只负责 Canvas 解码与 PNG 编码。
 - `@myfigma/nine-slice/figma`：`createNineSliceComponent(figma, {width, height, fill}, margins, {overlap?})`。
   返回无 Auto Layout 的主组件；失败移除本次半成品，并尽力恢复已移除的旧子层与原填充、尺寸、布局。Figma 不提供事务原语，恢复本身仍可能失败。调用方负责父级、名称、坐标、选择、来源状态和原图删除。
   `fill` 为 Figma `ImagePaint`；消费适配入口的工程需要 `@figma/plugin-typings`。
@@ -41,6 +43,6 @@ component.name = '九宫格底板';
 
 ## 验证边界
 
-纯核心测试证明切片规划与非法输入校验。Figma 适配由独立插件的公开消息入口回归覆盖；这些平台替身**不证明**真实图片裁剪、约束传播、不同尺寸拉伸或透明边缘接缝。
+纯核心测试证明切片规划、非法输入校验和真实 RGBA 数组上的精简几何／均匀性判断／面积重采样：四角逐像素保持、水平／垂直／双轴方向分别按 1px 或 25% 处理、无上限、透明通道保留。插件 UI 用同一份 `compact` 源码 bundle 到单文件 HTML，不复制第二套算法。Figma 适配由独立插件的公开消息入口回归覆盖；这些平台替身**不证明**真实图片裁剪、约束传播、不同尺寸拉伸或透明边缘接缝。
 
 生成适配沿用旧插件的切片裁剪和可选重叠公式。重叠默认关闭；透明图建议关闭。原图有自定义裁剪／平铺／旋转、多填充、遮罩、特效或 Auto Layout 父级时不保证视觉兼容。共享记录已支持项目参数、当前参数、人工覆盖状态与原图像素尺寸；独立九宫格插件已实现人工编辑标记、恢复项目参数、不可识别组件提示，以及不要求来源标记的普通单图组件手动九宫格升级（根填充或唯一完整铺满的图片子层）；导入插件按同一记录尊重人工边距，并在失效时跳过等待恢复。真实 Figma 126.10.7 已用实际 API、构建后的主线程 bundle 和当前开发插件面板验证组件身份、实例关联、宽高、四角/边/中心约束及真实重新导入 unchanged；无标记根填充与唯一完整铺满的图片子层均可升级，升级后面板立即进入更新状态。实例逐像素导出及父级变换下的极端几何仍未覆盖。

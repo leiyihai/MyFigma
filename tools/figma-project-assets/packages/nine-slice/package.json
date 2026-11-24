@@ -15,6 +15,10 @@
     "./record": {
       "types": "./dist/record.d.ts",
       "default": "./dist/record.js"
+    },
+    "./compact": {
+      "types": "./dist/compact.d.ts",
+      "default": "./dist/compact.js"
     }
   },
   "scripts": {

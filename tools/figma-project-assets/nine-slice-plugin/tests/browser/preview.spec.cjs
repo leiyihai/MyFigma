@@ -15,7 +15,8 @@ async function openPreview(page, batchMode = false) {
     ctx.fillStyle = '#f80'; ctx.fillRect(0, 0, 100, 80);
     const blob = await new Promise(resolve => canvas.toBlob(resolve));
     window.postMessage({ pluginMessage: { type: 'update-preview',
-      bytes: new Uint8Array(await blob.arrayBuffer()), width: 100, height: 80 } }, '*');
+      bytes: new Uint8Array(await blob.arrayBuffer()), width: 100, height: 80,
+      plainImage: { id: 'layer-1', name: '测试图片', width: 100, height: 80 } } }, '*');
   }, batchMode);
   await expect(page.locator('#preview-img')).toBeVisible();
   await page.locator('#preview-img').evaluate(img => img.decode());
@@ -32,7 +33,7 @@ test('preview controls describe their action and batch state leaves empty-select
   await expect(page.locator('#empty-hint')).toBeVisible();
 });
 
-test('user can zoom, pan, reset, set margins and submit original standalone options', async ({ page }) => {
+test('user can zoom, pan, reset and set margins while batch and source deletion stay unavailable', async ({ page }) => {
   await openPreview(page);
   const image = page.locator('#preview-img');
   const fitted = await image.boundingBox();
@@ -51,21 +52,93 @@ test('user can zoom, pan, reset, set margins and submit original standalone opti
   await page.locator('#all').fill('12.5');
   for (const side of ['top', 'bottom', 'left', 'right']) await expect(page.locator(`#${side}`)).toHaveValue('12.5');
   await page.locator('#right').fill('7');
-  // Drive visible switches, not hidden checkboxes or private handlers.
-  await page.locator('.switch').nth(0).click();
-  await page.locator('.switch').nth(1).click();
-  await page.locator('.switch').nth(2).click();
+  // A plain image layer gets exactly the two compact actions; the legacy batch
+  // path (which could delete the source) is not reachable from this panel.
+  await expect(page.locator('#compact-btn')).toBeVisible();
+  await expect(page.locator('#compact-btn')).toHaveText('生成九宫格图片');
+  await expect(page.locator('#main-btn')).toHaveText('生成九宫格组件');
+  await expect(page.locator('#main-btn')).toBeEnabled();
+  await expect(page.locator('#batchMode')).toBeDisabled();
+  await expect(page.locator('#keepOriginal')).toBeDisabled();
+  await expect(page.locator('#overlap')).toBeEnabled();
+  await expect(page.locator('#restore-btn')).toBeHidden();
+  await expect(page.locator('#locate-btn')).toBeHidden();
+});
+
+test('compact image and component actions send analysed pixels, size, margins and source id', async ({ page }) => {
+  await openPreview(page);
   await page.evaluate(() => {
-    window.generatedMessages = [];
+    window.compactMessages = [];
+    window.legacyGenerateMessages = [];
     window.addEventListener('message', e => {
-      if (e.data?.pluginMessage?.type === 'generate') window.generatedMessages.push(e.data.pluginMessage);
+      const message = e.data?.pluginMessage;
+      if (!message) return;
+      if (message.type === 'generate') window.legacyGenerateMessages.push(message);
+      if (message.type === 'generate-compact-image' || message.type === 'generate-compact-component') {
+        window.compactMessages.push({
+          type: message.type, width: message.width, height: message.height,
+          margins: message.margins, overlap: message.overlap, sourceId: message.sourceId,
+          length: message.bytes.length, signature: [...message.bytes.slice(0, 4)]
+        });
+      }
     });
   });
+
+  await page.locator('#compact-btn').click();
+  await expect.poll(() => page.evaluate(() => window.compactMessages.length)).toBe(1);
+  let request = await page.evaluate(() => window.compactMessages[0]);
+  // A solid 100x80 image with 10px margins collapses both stretchable axes.
+  expect(request.type).toBe('generate-compact-image');
+  expect([request.width, request.height]).toEqual([21, 21]);
+  expect(request.margins).toEqual({ left: 10, top: 10, right: 10, bottom: 10 });
+  expect(request.sourceId).toBe('layer-1');
+  expect(request.overlap).toBe(false);
+  expect(request.signature).toEqual([137, 80, 78, 71]);
+  expect(request.length).toBeGreaterThan(8);
+
   await page.locator('#main-btn').click();
-  await expect.poll(() => page.evaluate(() => window.generatedMessages)).toEqual([{
-    type: 'generate', top: 12.5, bottom: 12.5, left: 12.5, right: 7, all: 12.5,
-    keepOriginal: false, batchMode: true, overlap: true, lang: 'zh'
-  }]);
+  await expect.poll(() => page.evaluate(() => window.compactMessages.length)).toBe(2);
+  request = await page.evaluate(() => window.compactMessages[1]);
+  expect(request.type).toBe('generate-compact-component');
+  expect([request.width, request.height]).toEqual([21, 21]);
+  expect(request.margins).toEqual({ left: 10, top: 10, right: 10, bottom: 10 });
+  expect(request.sourceId).toBe('layer-1');
+  expect(request.signature).toEqual([137, 80, 78, 71]);
+  expect(await page.evaluate(() => window.legacyGenerateMessages)).toEqual([]);
+});
+
+test('invalid margins keep the compact actions available and explain the failure', async ({ page }) => {
+  await openPreview(page);
+  await page.evaluate(() => {
+    window.compactMessages = [];
+    window.addEventListener('message', e => {
+      const message = e.data?.pluginMessage;
+      if (message?.type === 'generate-compact-image') window.compactMessages.push(message);
+    });
+  });
+  // 90 + 10 is not smaller than the 100px source width.
+  await page.locator('#left').fill('90');
+  await page.locator('#compact-btn').click();
+  await expect(page.locator('#edit-status')).toHaveClass(/error/);
+  await expect(page.locator('#edit-status')).toContainText(/边距/);
+  expect(await page.evaluate(() => window.compactMessages)).toEqual([]);
+  await expect(page.locator('#compact-btn')).toBeVisible();
+  await expect(page.locator('#compact-btn')).toBeEnabled();
+});
+
+test('unreadable images and non-image selections disable both compact actions', async ({ page }) => {
+  await openPreview(page);
+  for (const [reason, text] of [
+    ['image-unreadable', /无法读取/],
+    ['not-image', /不是普通图片图层/]
+  ]) {
+    await page.evaluate(reason => window.postMessage({ pluginMessage: {
+      type: 'update-preview', bytes: null, edit: null, unsupported: reason
+    } }, '*'), reason);
+    await expect(page.locator('#edit-status')).toContainText(text);
+    await expect(page.locator('#compact-btn')).toBeHidden();
+    await expect(page.locator('#main-btn')).toBeDisabled();
+  }
 });
 
 test('selecting an existing component enters update mode with its margins', async ({ page }) => {
@@ -75,6 +148,7 @@ test('selecting an existing component enters update mode with its margins', asyn
     edit: { margins: { left: 20, right: 8, top: 10, bottom: 12 }, overlap: false, target: 'component', name: '已有底板' }
   } }, '*'));
   await expect(page.locator('#main-btn')).toHaveText('更新九宫格组件');
+  await expect(page.locator('#compact-btn')).toBeHidden();
   await expect(page.locator('#edit-status')).toContainText('已有底板');
   await expect(page.locator('#left')).toHaveValue('20');
   await expect(page.locator('#top')).toHaveValue('10');
@@ -267,6 +341,7 @@ test('a plain image main component offers a manual 9-slice upgrade and explains 
     }
   } }, '*'));
   await expect(page.locator('#main-btn')).toHaveText('升级为九宫格组件');
+  await expect(page.locator('#compact-btn')).toBeHidden();
   await expect(page.locator('#edit-status')).toContainText('原图 64×40');
   // No importer marker is required, so the source hint stays absent.
   await expect(page.locator('#edit-status')).not.toContainText('导入器来源');

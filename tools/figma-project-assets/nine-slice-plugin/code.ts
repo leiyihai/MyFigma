@@ -4,7 +4,7 @@ import { applyNineSliceComponent, createNineSliceComponent } from '../packages/n
 import {
   NINE_SLICE_RECORD_KEY, createNineSliceRecord, nineSliceImageSize, parseNineSliceRecord,
   readImportMarker, readNineSliceRecord, scaleMargins, writeNineSliceRecord, serializeNineSliceRecord,
-  type NineSliceRecord
+  validMargins, type NineSliceRecord
 } from '../packages/nine-slice/src/record';
 
 type Language = 'zh' | 'en' | 'ja' | 'ko' | 'ru' | 'de' | 'fr';
@@ -13,7 +13,17 @@ type Settings = {
   overlap: boolean; keepOriginal: boolean; batchMode: boolean;
   lang: Language | 'auto'; settingsVersion: number;
 };
-type PluginMessage = (Settings & { type: 'save-only' | 'generate' }) |
+type CompactRequest = {
+  type: 'generate-compact-image' | 'generate-compact-component';
+  bytes?: Uint8Array | null;
+  width?: number;
+  height?: number;
+  margins?: Margins;
+  overlap?: boolean;
+  sourceId?: string;
+  lang?: Language;
+};
+type PluginMessage = (Settings & { type: 'save-only' | 'generate' }) | CompactRequest |
   { type: 'ui-ready' } | { type: 'restore-project' } | { type: 'locate-main-component' };
 type ImageNode = SceneNode & GeometryMixin;
 
@@ -24,7 +34,7 @@ type EditableSlice = {
 };
 
 const UPGRADE_REJECTIONS = ['auto-layout', 'image-child-not-filled', 'image-child-decorated',
-  'multiple-children', 'extra-content'] as const;
+  'multiple-children', 'extra-content', 'not-image', 'image-unreadable'] as const;
 type UpgradeRejection = (typeof UPGRADE_REJECTIONS)[number];
 // A plain single-image component keeps its image either on the root or on one
 // direct child that fully covers the component.
@@ -305,30 +315,45 @@ async function sendSelectionToUI() {
   }
   const payload = edit ? editPayload(edit, true) : view ? editPayload(view, false)
     : upgrade ? upgradePayload(upgrade, node?.type === 'COMPONENT') : null;
+  // A plain image layer is the only selection that may create a compact image
+  // or a compact nine-slice component. Components, instances and non-image
+  // layers keep their existing entries instead.
+  const plainSource = !payload && node && isConvertibleImageNode(node) ? node : null;
   const unsupported = payload || !node ? null
     : node.type === 'INSTANCE' ? 'instance'
-    : node.type === 'COMPONENT' ? upgradeRejection(node) ?? 'component' : null;
+    : node.type === 'COMPONENT' ? upgradeRejection(node) ?? 'component'
+    : plainSource ? null : 'not-image';
   const fill = view?.fill ?? upgrade?.fill ?? (node && isImageNode(node) ? imageFill(node) : undefined);
   // A plain image main component is previewed and validated in original image
   // pixels, not at its current (possibly resized) canvas size. The same applies
   // to an existing 9-slice component: its record keeps margins in image pixels,
   // so an enlarged canvas must not become the guide coordinate system.
-  const width = view?.imageSize.width ?? upgrade?.imageSize.width ?? (node && 'width' in node ? node.width : 0);
-  const height = view?.imageSize.height ?? upgrade?.imageSize.height ?? (node && 'height' in node ? node.height : 0);
+  // A plain image layer is rasterised for compaction, so its preview/guide space
+  // is the rounded layer size and always matches the pixels the UI can sample.
+  const width = view?.imageSize.width ?? upgrade?.imageSize.width ??
+    (node && 'width' in node ? (plainSource ? Math.max(1, Math.round(node.width)) : node.width) : 0);
+  const height = view?.imageSize.height ?? upgrade?.imageSize.height ??
+    (node && 'height' in node ? (plainSource ? Math.max(1, Math.round(node.height)) : node.height) : 0);
+  const plainImage = plainSource ? { id: plainSource.id, name: plainSource.name, width, height } : undefined;
   try {
     const hash = fill?.imageHash;
     const image = hash ? figma.getImageByHash(hash) : null;
     if (image) {
       const bytes = await image.getBytesAsync();
       if (version === previewVersion) {
-        figma.ui.postMessage({ type: 'update-preview', bytes, width, height, edit: payload, unsupported });
+        figma.ui.postMessage({ type: 'update-preview', bytes, width, height, edit: payload, unsupported, plainImage });
       }
       return;
     }
   } catch (error) {
     console.error('读取图片预览失败', error);
   }
-  if (version === previewVersion) figma.ui.postMessage({ type: 'update-preview', bytes: null, edit: payload, unsupported });
+  if (version === previewVersion) {
+    // An image layer whose bytes cannot be read must not offer the compact
+    // actions; they would have no pixels to analyse.
+    figma.ui.postMessage({ type: 'update-preview', bytes: null, edit: payload,
+      unsupported: unsupported ?? (plainSource ? 'image-unreadable' : null) });
+  }
 }
 
 async function initSettings() {
@@ -376,6 +401,95 @@ function generate(source: ImageNode, msg: Settings): ComponentNode {
   } catch (error) {
     component.remove();
     throw error;
+  }
+}
+
+const COMPACT_GAP = 50;
+function validRequestSize(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 1_000_000;
+}
+function notifyCompactRejected(reason: 'selection' | 'stale' | 'size'): void {
+  const zh = {
+    selection: '生成精简九宫格只处理普通图片图层；已有组件或非图片图层不会走该入口，未做修改。',
+    stale: '画布选择已变化，未生成精简九宫格；请重新选中原图片图层。',
+    size: '精简图片尺寸无效，未生成；请重新选中图片图层后再试。'
+  }[reason];
+  const en = {
+    selection: 'Compact nine-slice generation only handles plain image layers; components and non-image layers are not changed.',
+    stale: 'The canvas selection changed, so nothing was generated. Select the source image layer again.',
+    size: 'The compact image size is invalid, so nothing was generated. Select the image layer again and retry.'
+  }[reason];
+  notifyLocalized(zh, en, { error: true });
+}
+
+/**
+ * Create a compact plain image layer or a compact nine-slice component from the
+ * pixels the UI already analysed. The selected source layer is only read: it is
+ * never replaced, deleted or used through the legacy generate path.
+ */
+async function generateCompact(msg: CompactRequest): Promise<void> {
+  if (msg.lang && isLanguage(msg.lang)) currentLang = msg.lang;
+  if (generating) return;
+  const source = figma.currentPage.selection[0];
+  // Existing components and instances keep their own edit/upgrade/locate entries.
+  if (!source || !isConvertibleImageNode(source)) { notifyCompactRejected('selection'); return; }
+  if (msg.sourceId && source.id && source.id !== msg.sourceId) { notifyCompactRejected('stale'); return; }
+  const width = msg.width, height = msg.height;
+  if (!validRequestSize(width) || !validRequestSize(height)) { notifyCompactRejected('size'); return; }
+  const margins = msg.margins;
+  const overlap = msg.overlap === true;
+  if (!validMargins(margins) || !planFits({ width, height }, margins, overlap)) {
+    notifyInvalidMargins('image');
+    return;
+  }
+  if (!msg.bytes || msg.bytes.length === 0) { notifyUnsupported('image-unreadable'); return; }
+  generating = true;
+  const previousSelection = [...figma.currentPage.selection];
+  let createdNode: SceneNode | null = null;
+  try {
+    const image = figma.createImage(msg.bytes);
+    const fill: ImagePaint = { type: 'IMAGE', imageHash: image.hash, scaleMode: 'FILL' };
+    const parent = source.parent;
+    if (msg.type === 'generate-compact-image') {
+      const layer = figma.createRectangle();
+      createdNode = layer;
+      layer.name = source.name;
+      layer.resize(width, height);
+      layer.fills = [fill];
+      if (parent && 'appendChild' in parent) parent.appendChild(layer);
+      layer.x = source.x + source.width + COMPACT_GAP;
+      layer.y = source.y;
+      figma.currentPage.selection = [layer];
+      figma.viewport.scrollAndZoomIntoView([layer]);
+      notifyLocalized('✅ 已生成精简九宫格图片，原图保留。',
+        '✅ Compact nine-slice image generated; the source layer was kept.');
+    } else {
+      const component = createNineSliceComponent(figma, { width, height, fill }, margins, { overlap });
+      createdNode = component;
+      if (parent && 'appendChild' in parent) parent.appendChild(component);
+      component.name = source.name;
+      component.x = source.x + source.width + COMPACT_GAP;
+      component.y = source.y;
+      // The canvas is already the compact size, and the margins are the original
+      // values because the four corners keep their lengths.
+      if (!rememberSlice(component, margins, overlap, true, { width, height }))
+        throw new Error('九宫格共享记录写入失败');
+      figma.currentPage.selection = [component];
+      figma.viewport.scrollAndZoomIntoView([component]);
+      notifyLocalized('✅ 已生成精简九宫格组件，原图保留。',
+        '✅ Compact nine-slice component generated; the source layer was kept.');
+    }
+  } catch (error) {
+    console.error('生成精简九宫格失败', error);
+    if (createdNode && !createdNode.removed) {
+      try { createdNode.remove(); }
+      catch (removeError) { console.error('清理精简九宫格半成品失败', removeError); }
+    }
+    figma.currentPage.selection = previousSelection;
+    notifyLocalized('生成精简九宫格失败，原图未修改；请查看插件控制台。',
+      'Generating the compact nine-slice failed; the source was not changed. Check the plugin console.', { error: true });
+  } finally {
+    generating = false;
   }
 }
 
@@ -476,6 +590,14 @@ async function restoreProject(): Promise<void> {
   }
 }
 const upgradeRejectionText: Record<UpgradeRejection, { zh: string; en: string }> = {
+  'not-image': {
+    zh: '生成精简九宫格只处理普通图片图层；已有组件或非图片图层不会走该入口，未做修改。',
+    en: 'Compact nine-slice generation only handles plain image layers; components and non-image layers are not changed.'
+  },
+  'image-unreadable': {
+    zh: '无法读取该图片的像素数据，未生成精简九宫格；原图未修改。',
+    en: 'The pixels of this image cannot be read, so no compact nine-slice was generated. The source is unchanged.'
+  },
   'auto-layout': {
     zh: '该组件使用了 Auto Layout，普通单图组件升级不支持自动布局；未做修改。',
     en: 'This component uses Auto Layout, which the plain single-image upgrade does not support. Nothing changed.'
@@ -527,6 +649,10 @@ async function locateMainComponent(): Promise<void> {
   void sendSelectionToUI();
 }
 figma.ui.onmessage = async (msg: PluginMessage) => {
+  if (msg?.type === 'generate-compact-image' || msg?.type === 'generate-compact-component') {
+    await generateCompact(msg);
+    return;
+  }
   if (msg?.type === 'ui-ready') { void sendSelectionToUI(); return; }
   if (msg?.type === 'restore-project') { await restoreProject(); return; }
   if (msg?.type === 'locate-main-component') { await locateMainComponent(); return; }
