@@ -90,6 +90,57 @@ test('selecting an existing component enters update mode with its margins', asyn
   await expect(page.locator('#edit-status')).toContainText('请定位主组件');
 });
 
+test('a resized component previews and drags margins in original image pixels', async ({ page }) => {
+  await openPreview(page);
+  await page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#4a8'; ctx.fillRect(0, 0, 256, 256);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve));
+    // This is what the main thread sends for an 858×769 component whose record
+    // still keeps 256×256 original image pixels.
+    window.postMessage({ pluginMessage: { type: 'update-preview',
+      bytes: new Uint8Array(await blob.arrayBuffer()), width: 256, height: 256,
+      edit: {
+        margins: { left: 60, right: 40, top: 50, bottom: 80 }, overlap: false,
+        target: 'component', name: '放大底板', editable: true, legacy: false, override: true,
+        imageSize: { width: 256, height: 256 }
+      }
+    } }, '*');
+  });
+  await page.locator('#preview-img').evaluate(img => img.decode());
+  await page.waitForTimeout(150);
+  for (const side of ['top', 'bottom', 'left', 'right']) {
+    await expect(page.locator(`#${side}`)).toHaveValue(String({ top: 50, bottom: 80, left: 60, right: 40 }[side]));
+  }
+  const image = await page.locator('#preview-img').boundingBox();
+  expect(Math.abs(image.width - image.height)).toBeLessThan(1);
+  for (const side of ['top', 'bottom', 'left', 'right']) {
+    await expect.poll(async () => page.locator(`#g-${side}`).evaluate((guide, { side, size }) => {
+      const preview = document.getElementById('preview-img').getBoundingClientRect();
+      const line = guide.getBoundingClientRect();
+      const scale = preview.width / size;
+      if (side === 'top') return (line.y + line.height / 2 - preview.y) / scale;
+      if (side === 'bottom') return (preview.bottom - line.y - line.height / 2) / scale;
+      if (side === 'left') return (line.x + line.width / 2 - preview.x) / scale;
+      return (preview.right - line.x - line.width / 2) / scale;
+    }, { side, size: 256 })).toBeCloseTo({ top: 50, bottom: 80, left: 60, right: 40 }[side], 1);
+  }
+
+  const scale = image.width / 256;
+  await page.mouse.move(image.x + 60 * scale, image.y + 128 * scale);
+  await page.mouse.down();
+  await page.mouse.move(image.x + 70.5 * scale, image.y + 128 * scale, { steps: 5 });
+  await page.mouse.up();
+  const dragged = Number(await page.locator('#left').inputValue());
+  expect(dragged).toBeGreaterThanOrEqual(69);
+  expect(dragged).toBeLessThanOrEqual(71);
+  // The old canvas coordinate (about 405 for a 858-wide component) must never
+  // appear in the image-pixel input or guide space.
+  expect(dragged).toBeLessThanOrEqual(256);
+});
+
 test('help tooltip stays inside the narrow plugin viewport', async ({ page }) => {
   await openPreview(page);
   const help = page.locator('.help-icon').first();
