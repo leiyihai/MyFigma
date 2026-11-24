@@ -58,9 +58,17 @@ test('user can zoom, pan, reset and set margins while batch and source deletion 
   await expect(page.locator('#compact-btn')).toHaveText('生成九宫格图片');
   await expect(page.locator('#main-btn')).toHaveText('生成九宫格组件');
   await expect(page.locator('#main-btn')).toBeEnabled();
-  await expect(page.locator('#batchMode')).toBeDisabled();
+  // Batch keeps its existing entry; it is the legacy original-image path, not
+  // a hidden no-op. Keep Original only applies to that path, and the compact
+  // actions always force the 0.5px seam overlap off.
+  await expect(page.locator('#batchMode')).toBeEnabled();
+  await expect(page.locator('#batchMode')).not.toBeChecked();
   await expect(page.locator('#keepOriginal')).toBeDisabled();
-  await expect(page.locator('#overlap')).toBeEnabled();
+  // The compact actions always keep the source, so the locked switch says so.
+  await expect(page.locator('#keepOriginal')).toBeChecked();
+  await expect(page.locator('#overlap')).toBeDisabled();
+  await expect(page.locator('#overlap')).not.toBeChecked();
+  await expect(page.locator('.help-wrap').nth(1).locator('.tooltip')).toContainText(/0.5px 重叠|关闭消除缝隙/);
   await expect(page.locator('#restore-btn')).toBeHidden();
   await expect(page.locator('#locate-btn')).toBeHidden();
 });
@@ -139,6 +147,140 @@ test('unreadable images and non-image selections disable both compact actions', 
     await expect(page.locator('#compact-btn')).toBeHidden();
     await expect(page.locator('#main-btn')).toBeDisabled();
   }
+});
+
+test('fractional margins are rounded once, then reused by the request and the panel', async ({ page }) => {
+  await openPreview(page);
+  await page.evaluate(() => {
+    window.compactMessages = [];
+    window.addEventListener('message', e => {
+      const message = e.data?.pluginMessage;
+      if (message?.type === 'generate-compact-image') window.compactMessages.push({
+        width: message.width, height: message.height, margins: message.margins, overlap: message.overlap });
+    });
+  });
+  await page.locator('#all').fill('12.5');
+  // A stale checked state must never turn the seam overlap on for compact output.
+  await page.evaluate(() => { document.getElementById('overlap').checked = true; });
+  await page.locator('#compact-btn').click();
+  await expect.poll(() => page.evaluate(() => window.compactMessages.length)).toBe(1);
+  const request = await page.evaluate(() => window.compactMessages[0]);
+  // 100x80 source with 13px margins: 100 - 26 = 74 and 80 - 26 = 54, both solid,
+  // so each axis collapses to 1px and the output is 27x27.
+  expect(request.margins).toEqual({ left: 13, top: 13, right: 13, bottom: 13 });
+  expect([request.width, request.height]).toEqual([27, 27]);
+  expect(request.overlap).toBe(false);
+  // The panel shows the same integers it just used, so the next edit cannot
+  // drift from the pixels that were sliced.
+  for (const side of ['top', 'bottom', 'left', 'right']) {
+    await expect(page.locator('#' + side)).toHaveValue('13');
+    await expect.poll(async () => page.locator('#g-' + side).evaluate((guide, side) => {
+      const image = document.getElementById('preview-img').getBoundingClientRect();
+      const line = guide.getBoundingClientRect();
+      const scale = image.width / 100;
+      if (side === 'top') return (line.y + line.height / 2 - image.y) / scale;
+      if (side === 'bottom') return (image.bottom - line.y - line.height / 2) / scale;
+      if (side === 'left') return (line.x + line.width / 2 - image.x) / scale;
+      return (image.right - line.x - line.width / 2) / scale;
+    }, side)).toBeCloseTo(13, 1);
+  }
+  // The All shortcut now shows the same rounded value as the four sides.
+  await expect(page.locator('#all')).toHaveValue('13');
+});
+
+test('a plain image layer is FILL-cropped to its visible pixels before compacting', async ({ page }) => {
+  await page.goto(pathToFileURL(path.resolve('dist/ui.html')).href);
+  await page.evaluate(async () => {
+    window.postMessage({ pluginMessage: { type: 'init-settings', settings: {
+      top: 0, bottom: 0, left: 0, right: 0, all: 0,
+      overlap: false, keepOriginal: false, batchMode: false, lang: 'zh'
+    } } }, '*');
+    // 100x200 natural pixels shown in a 100x80 layer. FILL covers the layer by
+    // keeping rows 60-140, so the 20px magenta band at the top disappears;
+    // stretching would keep it as the top 8 rows.
+    const canvas = document.createElement('canvas');
+    canvas.width = 100; canvas.height = 200;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#00f'; ctx.fillRect(0, 0, 100, 200);
+    ctx.fillStyle = '#f0f'; ctx.fillRect(0, 0, 100, 20);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve));
+    window.postMessage({ pluginMessage: { type: 'update-preview',
+      bytes: new Uint8Array(await blob.arrayBuffer()), width: 100, height: 80,
+      plainImage: { id: 'layer-fill', name: '裁切图片', width: 100, height: 80, scaleMode: 'FILL' } } }, '*');
+  });
+  await expect(page.locator('#preview-img')).toBeVisible();
+  await page.locator('#preview-img').evaluate(img => img.decode());
+  await page.waitForTimeout(150);
+  // The preview shows what the layer shows, not a stretched image.
+  await expect(page.locator('#preview-img')).toHaveCSS('object-fit', 'cover');
+  await page.evaluate(() => {
+    window.compactMessages = [];
+    window.addEventListener('message', e => {
+      const message = e.data?.pluginMessage;
+      if (message?.type === 'generate-compact-image') window.compactMessages.push(message);
+    });
+  });
+  await page.locator('#compact-btn').click();
+  await expect.poll(() => page.evaluate(() => window.compactMessages.length)).toBe(1);
+  const sampled = await page.evaluate(async () => {
+    const message = window.compactMessages[0];
+    const bitmap = await createImageBitmap(new Blob([message.bytes], { type: 'image/png' }));
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width; canvas.height = bitmap.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    return { width: bitmap.width, height: bitmap.height, pixel: [...ctx.getImageData(0, 0, 1, 1).data] };
+  });
+  // Every visible pixel is blue, so both axes collapse to 1px. A stretch would
+  // keep the magenta band and produce a 1x20 image instead.
+  expect([sampled.width, sampled.height]).toEqual([1, 1]);
+  expect(sampled.pixel).toEqual([0, 0, 255, 255]);
+});
+
+test('batch mode keeps the legacy original-image path and says it does not compact', async ({ page }) => {
+  await openPreview(page, true);
+  await expect(page.locator('#batchMode')).toBeEnabled();
+  await expect(page.locator('#batchMode')).toBeChecked();
+  await expect(page.locator('#keepOriginal')).toBeEnabled();
+  await expect(page.locator('#overlap')).toBeEnabled();
+  await expect(page.locator('#batch-overlay')).toBeVisible();
+  await expect(page.locator('#edit-status')).toContainText('批量模式使用原始图片、不精简');
+  await expect(page.locator('#main-btn')).toHaveAttribute('title', /原始图片|不精简/);
+  // A still only handles the current image.
+  await expect(page.locator('#compact-btn')).toBeVisible();
+  await page.evaluate(() => {
+    window.legacyMessages = [];
+    window.compactMessages = [];
+    window.addEventListener('message', e => {
+      const message = e.data?.pluginMessage;
+      if (message?.type === 'generate') window.legacyMessages.push({
+        type: message.type, batchMode: message.batchMode, keepOriginal: message.keepOriginal, overlap: message.overlap });
+      if (message?.type === 'generate-compact-image' || message?.type === 'generate-compact-component') {
+        window.compactMessages.push(message.type);
+      }
+    });
+  });
+  await page.locator('#main-btn').click();
+  await expect.poll(() => page.evaluate(() => window.legacyMessages.length)).toBe(1);
+  expect(await page.evaluate(() => window.legacyMessages[0])).toEqual({
+    type: 'generate', batchMode: true, keepOriginal: true, overlap: false });
+  // The batch entry never posts compacted pixels, so it cannot claim the compact promise.
+  expect(await page.evaluate(() => window.compactMessages)).toEqual([]);
+  await page.locator('#compact-btn').click();
+  await expect.poll(() => page.evaluate(() => window.compactMessages.length)).toBe(1);
+  expect(await page.evaluate(() => window.compactMessages[0])).toBe('generate-compact-image');
+  // Turning batch off returns the main button to the compact component path and
+  // restores the locked Keep Original / Fix Gaps state without a new selection.
+  await page.locator('.row:has(#batchMode) label.switch').click();
+  await expect(page.locator('#batch-overlay')).toBeHidden();
+  await expect(page.locator('#keepOriginal')).toBeDisabled();
+  await expect(page.locator('#keepOriginal')).toBeChecked();
+  await expect(page.locator('#overlap')).toBeDisabled();
+  await expect(page.locator('#edit-status')).not.toContainText('批量模式使用原始图片');
+  await page.locator('#main-btn').click();
+  await expect.poll(() => page.evaluate(() => window.compactMessages.length)).toBe(2);
+  expect(await page.evaluate(() => window.compactMessages[1])).toBe('generate-compact-component');
+  expect(await page.evaluate(() => window.legacyMessages.length)).toBe(1);
 });
 
 test('selecting an existing component enters update mode with its margins', async ({ page }) => {

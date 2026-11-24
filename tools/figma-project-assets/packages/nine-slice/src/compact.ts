@@ -74,8 +74,19 @@ function pixelMargins(size: Size, margins: Margins): { source: Size; pixelMargin
 }
 
 /**
+ * Integer pixel margins used for raster slicing. The plugin UI must submit
+ * exactly these values so the compacted pixels, the generated slices and the
+ * shared record cannot drift apart by a fraction of a pixel.
+ */
+export function compactPixelMargins(size: Size, margins: Margins): Margins {
+  return pixelMargins(size, margins).pixelMargins;
+}
+
+/**
  * Build the compact geometry without looking at pixels. `uniform` lets callers
  * test the 1px / 25% rule directly; `compactImage` derives it from the pixels.
+ * Fractional input is rounded to whole pixels, and `plan.pixelMargins` reports
+ * the values that were actually sliced.
  */
 export function createCompactPlan(size: Size, margins: Margins, uniform: CompactUniformity): CompactPlan {
   const { source, pixelMargins: px, center } = pixelMargins(size, margins);
@@ -285,6 +296,41 @@ function copyBlock(source: RgbaImage, target: Uint8ClampedArray, targetWidth: nu
     const targetRow = ((targetY + y) * targetWidth + targetX) * 4;
     target.set(source.data.subarray(sourceRow, sourceRow + width * 4), targetRow);
   }
+}
+
+/**
+ * Visible pixels of an image painted with Figma's `FILL` scale mode. `FILL`
+ * scales the image until it covers the layer and crops the overflow from the
+ * centre, so it is not the same as stretching the image to the layer size.
+ * `image` holds the natural pixel size; `size` is the integer layer size.
+ * Resampling happens on premultiplied colour, so cropped transparent edges
+ * stay clean, and an equal-size request returns the source pixels untouched.
+ */
+export function coverImage(image: RgbaImage, size: Size): RgbaImage {
+  validateImage(image);
+  if (!Number.isInteger(size.width) || !Number.isInteger(size.height))
+    throw new RangeError('FILL 取样的目标尺寸必须为整数像素。');
+  const target = quantizedSize(size);
+  if (image.width === target.width && image.height === target.height)
+    return { width: image.width, height: image.height, data: image.data };
+  const scale = Math.max(target.width / image.width, target.height / image.height);
+  const visibleWidth = target.width / scale;
+  const visibleHeight = target.height / scale;
+  const weightsX = coverWeights((image.width - visibleWidth) / 2, visibleWidth, target.width, image.width);
+  const weightsY = coverWeights((image.height - visibleHeight) / 2, visibleHeight, target.height, image.height);
+  const premultiplied = resampleHorizontal(image, weightsX, target.width);
+  const data = resampleVertical(premultiplied, target.width, weightsY, target.height);
+  return { width: target.width, height: target.height, data };
+}
+
+function coverWeights(offset: number, visible: number, target: number, sourceSize: number): Weight[][] {
+  const weights: Weight[][] = new Array(target);
+  const step = visible / target;
+  for (let position = 0; position < target; position++) {
+    const start = offset + position * step;
+    weights[position] = sourceWeights(start, start + step, sourceSize);
+  }
+  return weights;
 }
 
 /**

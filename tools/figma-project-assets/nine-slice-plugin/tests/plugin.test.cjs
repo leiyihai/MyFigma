@@ -80,6 +80,13 @@ test('batch validates even the smallest target before creating anything', async 
   await env.figma.ui.onmessage({ ...env.settings, batchMode: true });
   assert.equal(env.created.length, 0);
 });
+test('batch keeps every original when retaining them is requested', async () => {
+  const env = setup([[100, 80], [60, 60]]);
+  await env.figma.ui.onmessage({ ...env.settings, batchMode: true, keepOriginal: true });
+  assert.equal(env.created.length, 2);
+  assert.equal(env.created[0].parent, env.sources[0].parent);
+  assert.ok(env.sources.every(source => source.removed === undefined));
+});
 test('batch creates components and removes originals only when requested', async () => {
   const env = setup([[100, 80], [60, 60]]);
   await env.figma.ui.onmessage({ ...env.settings, batchMode: true, keepOriginal: false });
@@ -1077,10 +1084,57 @@ test('code and UI rejection reason sets stay in sync', () => {
 function compactRequest(env, overrides = {}) {
   return {
     type: 'generate-compact-image', bytes: new Uint8Array([9, 8, 7]), width: 21, height: 21,
-    margins: { left: 10, top: 10, right: 10, bottom: 10 }, overlap: false,
+    margins: { left: 10, top: 10, right: 10, bottom: 10 },
     sourceId: env.sources[0].id, lang: 'zh', ...overrides
   };
 }
+
+test('a plain image layer previews its real size so only pixel sampling rounds it', async () => {
+  const env = setup([[100.4, 80.5]]);
+  await env.figma.ui.onmessage({ type: 'ui-ready' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const preview = env.messages.filter(message => message.type === 'update-preview').at(-1);
+  // The panel keeps the layer's real geometry; rounding belongs to the compact
+  // raster, not to a general preview of an ordinary image layer.
+  assert.equal(preview.width, 100.4);
+  assert.equal(preview.height, 80.5);
+  assert.deepEqual(JSON.parse(JSON.stringify(preview.plainImage)), {
+    id: 'source-0', name: 'Test', width: 100.4, height: 80.5, scaleMode: 'FILL'
+  });
+});
+
+test('compact actions require integer pixel margins so the raster, slices and record cannot drift', async () => {
+  for (const margins of [
+    { left: 10.5, top: 10, right: 10, bottom: 10 },
+    { left: 10, top: 10.4, right: 10, bottom: 10 }
+  ]) {
+    const env = setup();
+    await env.figma.ui.onmessage(compactRequest(env, { margins }));
+    assert.equal(env.images.length, 0, JSON.stringify(margins));
+    assert.equal(env.rectangles.length, 0);
+    assert.equal(env.created.length, 0);
+    assert.equal(env.sources[0].removed, undefined);
+    assert.ok(env.notices.some(text => /整数/.test(text)), JSON.stringify(margins));
+  }
+});
+
+test('compact components ignore the seam overlap and keep whole-pixel slice geometry', async () => {
+  const env = setup();
+  await env.figma.ui.onmessage(compactRequest(env, { type: 'generate-compact-component', overlap: true }));
+  const component = env.created[0];
+  assert.ok(component.children.every(child =>
+    Number.isInteger(child.x) && Number.isInteger(child.y) &&
+    Number.isInteger(child.width) && Number.isInteger(child.height)));
+  assert.deepEqual(component.children.map(child => [child.x, child.y]), [
+    [0, 0], [10, 0], [11, 0],
+    [0, 10], [10, 10], [11, 10],
+    [0, 11], [10, 11], [11, 11]
+  ]);
+  const saved = JSON.parse(component.data['myfigma.nineSlice.v1']);
+  assert.equal(saved.overlap, false);
+  assert.deepEqual(saved.current, { left: 10, top: 10, right: 10, bottom: 10 });
+  assert.deepEqual(saved.margins, { left: 10, top: 10, right: 10, bottom: 10 });
+});
 
 test('compact image action creates a new plain image layer beside the untouched source', async () => {
   const env = setup();
@@ -1102,7 +1156,7 @@ test('compact image action creates a new plain image layer beside the untouched 
   assert.deepEqual([source.width, source.height], [100, 80]);
   assert.equal(env.figma.currentPage.selection.length, 1);
   assert.equal(env.figma.currentPage.selection[0], layer);
-  assert.ok(env.notices.some(text => /图片/.test(text)));
+  assert.ok(env.notices.some(text => text.includes('已生成九宫格图片')));
 });
 
 test('compact component action keeps the source and records the compact canvas and original margins', async () => {
@@ -1133,7 +1187,7 @@ test('compact component action keeps the source and records the compact canvas a
   assert.equal(source.removed, undefined, 'generating the component must keep the source layer');
   assert.equal(env.figma.currentPage.selection.length, 1);
   assert.equal(env.figma.currentPage.selection[0], component);
-  assert.ok(env.notices.some(text => /九宫格|组件/.test(text)));
+  assert.ok(env.notices.some(text => text.includes('已生成九宫格组件')));
 });
 
 test('compact actions reject invalid margins, stale ids and missing bytes without creating anything', async () => {
