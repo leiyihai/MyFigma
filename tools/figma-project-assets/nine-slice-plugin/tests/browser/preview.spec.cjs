@@ -238,6 +238,55 @@ test('a plain image main component offers a manual 9-slice upgrade and explains 
   await expect(page.locator('#main-btn')).toHaveText('升级为九宫格组件');
 });
 
+test('a finished upgrade switches the panel from the upgrade entry to the edit entry', async ({ page }) => {
+  await openPreview(page);
+  await page.evaluate(() => window.postMessage({ pluginMessage: {
+    type: 'update-preview', bytes: null,
+    edit: {
+      margins: { left: 16, right: 8, top: 4, bottom: 2 }, overlap: false, target: 'upgrade',
+      name: '底板/普通底板', editable: true, legacy: false, override: true, imageSize: { width: 64, height: 40 }
+    }
+  } }, '*'));
+  await expect(page.locator('#main-btn')).toHaveText('升级为九宫格组件');
+  await expect(page.locator('#edit-status')).toContainText('原图 64×40');
+  await expect(page.locator('#restore-btn')).toBeDisabled();
+
+  // After the upgrade the main thread refreshes the same selection; the panel
+  // must leave the upgrade entry and offer the normal in-place update.
+  await page.evaluate(() => window.postMessage({ pluginMessage: {
+    type: 'update-preview', bytes: null,
+    edit: {
+      margins: { left: 16, right: 8, top: 4, bottom: 2 }, overlap: false, target: 'component',
+      name: '底板/普通底板', editable: true, legacy: false, override: true, imageSize: { width: 64, height: 40 }
+    }
+  } }, '*'));
+  await expect(page.locator('#main-btn')).toHaveText('更新九宫格组件');
+  await expect(page.locator('#main-btn')).toBeEnabled();
+  await expect(page.locator('#edit-status')).toContainText('正在编辑现有组件');
+  await expect(page.locator('#edit-status')).toContainText('人工边距优先');
+  await expect(page.locator('#edit-status')).not.toContainText('普通单图组件');
+  await expect(page.locator('#left')).toHaveValue('16');
+  await expect(page.locator('#top')).toHaveValue('4');
+  await expect(page.locator('#batchMode')).toBeDisabled();
+  await expect(page.locator('#keepOriginal')).toBeDisabled();
+  // No project parameter was recorded during a standalone upgrade.
+  await expect(page.locator('#restore-btn')).toBeVisible();
+  await expect(page.locator('#restore-btn')).toBeDisabled();
+  await expect(page.locator('#restore-btn')).toHaveAttribute('title', /没有记录项目参数/);
+
+  // A project-driven record keeps the restore entry usable in the same view.
+  await page.evaluate(() => window.postMessage({ pluginMessage: {
+    type: 'update-preview', bytes: null,
+    edit: {
+      margins: { left: 16, right: 8, top: 4, bottom: 2 }, overlap: false, target: 'component',
+      name: '底板/普通底板', editable: true, legacy: false, override: true,
+      project: { left: 6, right: 6, top: 6, bottom: 6 }, imageSize: { width: 64, height: 40 }
+    }
+  } }, '*'));
+  await expect(page.locator('#restore-btn')).toBeEnabled();
+  await expect(page.locator('#restore-btn')).toHaveAttribute('title', /清除手动|项目统计/);
+});
+
 test('a rejected plain image structure explains why the upgrade is unavailable', async ({ page }) => {
   await openPreview(page);
   for (const [reason, text] of [

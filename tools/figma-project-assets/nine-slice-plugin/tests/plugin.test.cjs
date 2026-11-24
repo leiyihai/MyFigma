@@ -923,6 +923,63 @@ test('a failed child-based upgrade keeps the old image child and writes no parti
   assert.ok(env.notices.some(text => text.includes('升级失败')));
 });
 
+test('a successful upgrade refreshes the selection preview into the editable 9-slice state', async () => {
+  const structures = [
+    { name: 'root fill', make: () => plainComponent({ marked: false }) },
+    { name: 'image child', make: () => childImageComponent({ marked: false }).component }
+  ];
+  for (const structure of structures) {
+    const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+    const component = structure.make();
+    env.figma.currentPage.selection = [component];
+    await env.figma.ui.onmessage({ type: 'ui-ready' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    // Only the refresh caused by the upgrade itself counts; an extra
+    // selectionchange-style duplicate would surface below as a second message.
+    env.messages.length = 0;
+    await env.figma.ui.onmessage({ ...env.settings, left: 16, right: 8, top: 4, bottom: 2 });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const previews = env.messages.filter(message => message.type === 'update-preview');
+    assert.equal(previews.length, 1, `${structure.name} should refresh exactly once`);
+    const preview = previews[0];
+    assert.equal(preview.edit.target, 'component', `${structure.name} should switch to the edit entry`);
+    assert.equal(preview.edit.editable, true);
+    assert.equal(preview.edit.name, component.name);
+    assert.deepEqual(JSON.parse(JSON.stringify(preview.edit.margins)),
+      { left: 16, right: 8, top: 4, bottom: 2 });
+    assert.deepEqual(JSON.parse(JSON.stringify(preview.edit.imageSize)), { width: 64, height: 40 });
+    assert.equal(preview.edit.override, true);
+    assert.equal(preview.edit.project, undefined);
+    assert.equal(preview.unsupported, null);
+    assert.equal(preview.width, 160);
+    assert.equal(preview.height, 120);
+  }
+});
+
+test('a failed upgrade never refreshes the UI into the upgraded edit state', async () => {
+  const failures = [
+    { name: 'shared record write', break: component => {
+      component.setSharedPluginData = () => { throw new Error('Simulated shared record failure'); };
+    } },
+    { name: 'structural append', break: component => {
+      component.appendChild = function () { throw new Error('Simulated append failure'); };
+    } }
+  ];
+  for (const failure of failures) {
+    const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
+    const component = plainComponent({ marked: false });
+    failure.break(component);
+    env.figma.currentPage.selection = [component];
+    env.messages.length = 0;
+    await env.figma.ui.onmessage({ ...env.settings, left: 16, right: 8, top: 4, bottom: 2 });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    // A failed upgrade must not present itself as a finished 9-slice.
+    assert.equal(env.messages.filter(message => message.type === 'update-preview' &&
+      message.edit?.target === 'component').length, 0, `${failure.name} must not refresh as success`);
+    assert.ok(env.notices.some(text => /升级失败|记录/.test(text)), `${failure.name} should report a failure`);
+  }
+});
+
 test('a failed child removal restores the old image child before reporting the upgrade failure', async () => {
   const env = setup([[10, 10]], { imageSize: { width: 64, height: 40 } });
   const { component, child } = childImageComponent({ marked: false });

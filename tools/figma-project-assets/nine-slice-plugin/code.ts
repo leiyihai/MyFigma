@@ -416,6 +416,10 @@ async function upgradePlainComponent(upgrade: Upgradeable, msg: Settings): Promi
     applyNineSliceComponent(figma, upgrade.component,
       { width: canvas.width, height: canvas.height, fill: upgrade.fill }, scaled, { overlap: msg.overlap });
     figma.viewport.scrollAndZoomIntoView([upgrade.component]);
+    // The selected node did not change, so no selectionchange event fires. A
+    // successful upgrade must refresh explicitly, or the panel keeps showing the
+    // "upgrade" entry even though the component is already a 9-slice.
+    void sendSelectionToUI();
     notifyLocalized('已在同一个主组件上完成手动九宫格升级；组件 ID、当前宽高与实例关联均保留。',
       'Manual 9-slice upgrade finished on the same main component; its ID, current size and instances stay intact.');
   } catch (error) {
