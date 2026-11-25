@@ -92,6 +92,9 @@ test('compact image and component actions send analysed pixels, size, margins an
     });
   });
 
+  // The new plain layer starts at zero; set the margins explicitly for this
+  // compact fixture.
+  for (const side of ['top', 'bottom', 'left', 'right']) await page.locator('#' + side).fill('10');
   await page.locator('#compact-btn').click();
   await expect.poll(() => page.evaluate(() => window.compactMessages.length)).toBe(1);
   let request = await page.evaluate(() => window.compactMessages[0]);
@@ -124,8 +127,8 @@ test('invalid margins keep the compact actions available and explain the failure
       if (message?.type === 'generate-compact-image') window.compactMessages.push(message);
     });
   });
-  // 90 + 10 is not smaller than the 100px source width.
-  await page.locator('#left').fill('90');
+  // 100 is not smaller than the 100px source width.
+  await page.locator('#left').fill('100');
   await page.locator('#compact-btn').click();
   await expect(page.locator('#edit-status')).toHaveClass(/error/);
   await expect(page.locator('#edit-status')).toContainText(/边距/);
@@ -410,6 +413,9 @@ test('a small selected image keeps the top guide draggable at fit-to-view zoom',
 for (const batchMode of [false, true]) {
   test(`selected image allows dragging all four margins (batch=${batchMode})`, async ({ page }) => {
     await openPreview(page, batchMode);
+    // New layers start at zero; establish the 10px starting guides for this
+    // drag fixture explicitly.
+    for (const side of ['top', 'bottom', 'left', 'right']) await page.locator('#' + side).fill('10');
     const image = await page.locator('#preview-img').boundingBox();
     const scale = image.width / 100;
     for (const [side, startX, startY, endX, endY] of [
@@ -598,4 +604,47 @@ test('an instance exposes a locate action that never submits an upgrade', async 
   await locate.click();
   await expect.poll(() => page.evaluate(() => window.locateMessages)).toEqual([{ type: 'locate-main-component' }]);
   expect(await page.evaluate(() => window.generatedMessages)).toEqual([]);
+});
+
+test('switching plain image layers resets margins and guides to the image edges', async ({ page }) => {
+  await openPreview(page);
+  // A first image keeps its current margins while the same layer is selected.
+  await page.locator('#all').fill('10');
+  await expect(page.locator('#left')).toHaveValue('10');
+  // A different, smaller layer must not inherit the previous layer's margins.
+  await page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 37; canvas.height = 36;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#4af'; ctx.fillRect(0, 0, 37, 36);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve));
+    window.postMessage({ pluginMessage: { type: 'update-preview',
+      bytes: new Uint8Array(await blob.arrayBuffer()), width: 37, height: 36,
+      plainImage: { id: 'layer-2', name: '小图', width: 37, height: 36 } } }, '*');
+  });
+  for (const side of ['top', 'bottom', 'left', 'right', 'all']) {
+    await expect(page.locator('#' + side)).toHaveValue('0');
+  }
+  // The guide lines sit at 0/edge, not at the previous layer's position.
+  await expect.poll(async () => page.locator('#g-top').evaluate(guide => {
+    const image = document.getElementById('preview-img').getBoundingClientRect();
+    const line = guide.getBoundingClientRect();
+    return (line.y + line.height / 2 - image.y) / (image.height / 36);
+  })).toBeCloseTo(0, 0);
+  await expect.poll(async () => page.locator('#g-left').evaluate(guide => {
+    const image = document.getElementById('preview-img').getBoundingClientRect();
+    const line = guide.getBoundingClientRect();
+    return (line.x + line.width / 2 - image.x) / (image.width / 37);
+  })).toBeCloseTo(0, 0);
+  // The second image remembers its own values; returning to the first restores
+  // the first image's values, not the second image's.
+  await page.locator('#all').fill('5');
+  await page.evaluate(() => window.postMessage({ pluginMessage: { type: 'update-preview',
+    bytes: new Uint8Array([137,80,78,71]), width: 100, height: 80,
+    plainImage: { id: 'layer-1', name: '测试图片', width: 100, height: 80 } } }, '*'));
+  for (const side of ['top', 'bottom', 'left', 'right']) await expect(page.locator('#' + side)).toHaveValue('10');
+  await page.evaluate(() => window.postMessage({ pluginMessage: { type: 'update-preview',
+    bytes: new Uint8Array([137,80,78,71]), width: 37, height: 36,
+    plainImage: { id: 'layer-2', name: '小图', width: 37, height: 36 } } }, '*'));
+  for (const side of ['top', 'bottom', 'left', 'right']) await expect(page.locator('#' + side)).toHaveValue('5');
 });

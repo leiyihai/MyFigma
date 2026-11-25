@@ -346,6 +346,7 @@
     // compact actions. They are replaced on every selection preview.
     var plainImageState = null;
     var sourceBytes = null;
+    var plainMargins = {};
     var compactBusy = false;
     var el = function(id) { return document.getElementById(id); };
     function placeHelpTooltip(wrap) {
@@ -389,6 +390,7 @@
         syncGuidesFromInputs();
       }
       if (msg.type === 'update-preview') {
+        var previousPlainId = plainImageState && plainImageState.id;
         editState = msg.edit || null;
         unsupportedState = msg.unsupported || null;
         plainImageState = msg.plainImage || null;
@@ -398,6 +400,16 @@
           el('overlap').checked = !!editState.overlap;
           el('batchMode').checked = false;
           el('keepOriginal').checked = false;
+          syncGuidesFromInputs();
+        } else if (plainImageState && plainImageState.id !== previousPlainId) {
+          // A newly selected plain image starts at its edges. Re-selecting an
+          // image that the designer already adjusted restores that image's own
+          // margins instead of carrying the previous layer's values across.
+          var remembered = plainMargins[plainImageState.id];
+          ['top','bottom','left','right'].forEach(k => {
+            el(k).value = remembered && remembered[k] !== undefined ? remembered[k] : '0';
+          });
+          el('all').value = '0';
           syncGuidesFromInputs();
         }
         renderEditState();
@@ -467,6 +479,14 @@
       };
     }
     function saveSettings() {
+      if (plainImageState) {
+        plainMargins[plainImageState.id] = {
+          top: Number(el('top').value) || 0,
+          bottom: Number(el('bottom').value) || 0,
+          left: Number(el('left').value) || 0,
+          right: Number(el('right').value) || 0
+        };
+      }
       parent.postMessage({ pluginMessage: { type: 'save-only', ...currentSettings() }}, '*');
     }
 
