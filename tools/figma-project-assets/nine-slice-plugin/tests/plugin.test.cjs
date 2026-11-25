@@ -204,11 +204,14 @@ test('applying margins to a resized 9-slice component keeps its image-pixel reco
   assert.deepEqual(saved.imageSize, { width: 256, height: 256 });
   assert.deepEqual([saved.width, saved.height], [858, 769]);
   const child = name => component.children.find(node => node.name === name);
-  // Submitted values stay image pixels; only the slices use the enlarged canvas.
-  assert.equal(child('切片 2-1').width, 70 * 858 / 256);
-  assert.equal(child('切片 2-3').width, 30 * 858 / 256);
-  assert.equal(child('切片 1-2').height, 45 * 769 / 256);
-  assert.equal(child('切片 3-2').height, 85 * 769 / 256);
+  // The slices are rebuilt at the original image size and then the component
+  // returns to its current canvas. Figma constraints keep the image-pixel
+  // margins fixed while the centre stretches, matching a freshly generated
+  // component that was resized afterwards.
+  assert.equal(child('切片 2-1').width, 70);
+  assert.equal(child('切片 2-3').width, 30);
+  assert.equal(child('切片 1-2').height, 45);
+  assert.equal(child('切片 3-2').height, 85);
 });
 
 test('editing a legacy overlap component preserves overlap and derives margins', async () => {
@@ -837,8 +840,10 @@ test('an invalid record falls back to slice geometry in image pixels without sca
   assert.deepEqual(saved.current, { left: 5, top: 2.5, right: 5, bottom: 2.5 });
   assert.deepEqual(saved.imageSize, { width: 50, height: 25 });
   assert.deepEqual([saved.width, saved.height], [200, 100]);
-  assert.equal(component.children.find(child => child.name === '切片 2-1').width, 20);
-  assert.equal(component.children.find(child => child.name === '切片 1-2').height, 10);
+  // The edit rebuilds at the 50x25 image size, then restores the 200x100
+  // canvas; the fixed edge strips therefore keep the image-pixel values.
+  assert.equal(component.children.find(child => child.name === '切片 2-1').width, 5);
+  assert.equal(component.children.find(child => child.name === '切片 1-2').height, 2.5);
 });
 
 test('a failed shared record write aborts the manual upgrade instead of claiming success', async () => {

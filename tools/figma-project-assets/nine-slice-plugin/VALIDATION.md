@@ -333,3 +333,11 @@ Figma 126.10.7，当前开发插件真实面板；测试文件 `Tc6L9E4cwVuJ1Dmb
 修复：某一轴两侧边距都为 0 时，该轴保留原长度；只有设置了该轴边距才按纯色 1px / 渐变 25% 规则压缩。新增核心回归“an axis with both opposite margins at zero is preserved instead of compacted”，并更新零边距测试。真实 Figma 同一原图设置左右 0、上下 10 后生成 `163×69`，宽度保持原尺寸；临时生成节点已清理，原图保留。
 
 自动验证：`packages/nine-slice` 20/20 通过；插件完整套件在重新构建后通过。
+
+## 放大组件更新后与新建组件不一致（后续修复）
+
+真实 Figma Page 3 的 `img_itembd_claim2_test1`（新建后放大）和 `img_itembd_claim2_test2`（更新边距）对比：test2 上/下切片高度为 `84.95/91`，test1 为 `49/55`；test2 的 `imageTransform` 按放大后的画布计算，拉伸效果与 test1 不一致。
+
+根因：编辑路径把当前画布和按画布放大的边距直接传给 `applyNineSliceComponent`，导致固定边距被放大。修复：编辑时按 `imageSize` 重建切片，再把组件恢复到当前画布；固定边距保持原图像素，中心由 Figma 约束拉伸。新增入口回归先把预期改为未缩放切片，再修改实现；真实 Figma 将 test2 更新为与 test1 相同的 49/55 后，三者切片坐标/尺寸和 `imageTransform` 一致，组件画布仍为 163×267。
+
+自动验证：九宫格插件 typecheck、61 Node + 24 浏览器通过；真实 Figma 临时编辑结果与 test1 一致。

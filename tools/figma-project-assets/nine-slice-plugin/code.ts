@@ -691,8 +691,16 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
       // project-driven component into a manual override.
       const unchanged = sameMargins(edit.record?.current ?? edit.margins, margins) && (edit.record?.overlap ?? edit.overlap) === msg.overlap;
       const override = edit.record && unchanged ? edit.record.override : true;
-      applyNineSliceComponent(figma, edit.component, { width: canvas.width, height: canvas.height, fill: edit.fill },
-        scaled, { overlap: msg.overlap });
+      // Rebuild at the image's own pixel size, then restore the designer's
+      // current canvas. Building directly at the enlarged canvas would scale
+      // the fixed edge margins (for example 42 -> 85) and make an edited
+      // component visually differ from a newly generated component that was
+      // merely resized afterwards.
+      applyNineSliceComponent(figma, edit.component,
+        { width: edit.imageSize.width, height: edit.imageSize.height, fill: edit.fill },
+        margins, { overlap: msg.overlap });
+      if (canvas.width !== edit.imageSize.width || canvas.height !== edit.imageSize.height)
+        edit.component.resize(canvas.width, canvas.height);
       // Keep the record's effective image size when it already exists or when a
       // resized canvas needs it to preserve the original coordinate system.
       // Unscaled generated/legacy records keep their old shape so the importer's
