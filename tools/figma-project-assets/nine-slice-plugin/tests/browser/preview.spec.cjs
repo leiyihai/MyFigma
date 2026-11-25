@@ -223,6 +223,9 @@ test('a plain image layer is FILL-cropped to its visible pixels before compactin
       if (message?.type === 'generate-compact-image') window.compactMessages.push(message);
     });
   });
+  // Give this fixture real margins so both stretchable axes are compacted;
+  // zero/zero margins intentionally preserve the axis now.
+  for (const side of ['top', 'bottom', 'left', 'right']) await page.locator('#' + side).fill('10');
   await page.locator('#compact-btn').click();
   await expect.poll(() => page.evaluate(() => window.compactMessages.length)).toBe(1);
   const sampled = await page.evaluate(async () => {
@@ -234,9 +237,9 @@ test('a plain image layer is FILL-cropped to its visible pixels before compactin
     ctx.drawImage(bitmap, 0, 0);
     return { width: bitmap.width, height: bitmap.height, pixel: [...ctx.getImageData(0, 0, 1, 1).data] };
   });
-  // Every visible pixel is blue, so both axes collapse to 1px. A stretch would
-  // keep the magenta band and produce a 1x20 image instead.
-  expect([sampled.width, sampled.height]).toEqual([1, 1]);
+  // Every visible pixel is blue, so both axes collapse to 1px plus the 10px
+  // margins. A stretch would keep the magenta band instead.
+  expect([sampled.width, sampled.height]).toEqual([21, 21]);
   expect(sampled.pixel).toEqual([0, 0, 255, 255]);
 });
 

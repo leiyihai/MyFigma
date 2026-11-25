@@ -90,9 +90,15 @@ export function compactPixelMargins(size: Size, margins: Margins): Margins {
  */
 export function createCompactPlan(size: Size, margins: Margins, uniform: CompactUniformity): CompactPlan {
   const { source, pixelMargins: px, center } = pixelMargins(size, margins);
+  // A zero/zero margin pair means the designer did not define a nine-slice
+  // axis there. Preserve that axis instead of treating the whole image as a
+  // stretchable band; otherwise a top/bottom-only setup would unexpectedly
+  // shrink the width to 25%.
   const targets = {
-    width: compactTarget(center.width, uniform.horizontal),
-    height: compactTarget(center.height, uniform.vertical)
+    width: px.left === 0 && px.right === 0
+      ? center.width : compactTarget(center.width, uniform.horizontal),
+    height: px.top === 0 && px.bottom === 0
+      ? center.height : compactTarget(center.height, uniform.vertical)
   };
   return {
     width: px.left + targets.width + px.right,

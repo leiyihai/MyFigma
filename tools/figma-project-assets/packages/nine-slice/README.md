@@ -14,7 +14,7 @@ npm run typecheck
   尺寸必须为有限正数，边距为有限非负数，两边之和严格小于对应尺寸；否则抛出 `RangeError`，不钳制人工输入。
   返回按行排序的非零切片、位置和约束：角固定、边单向拉伸、中心双向拉伸。
 - `@myfigma/nine-slice/compact`：`createCompactPlan(size, margins, {horizontal, vertical})`、`compactPixelMargins(size, margins)`、`analyzeCompactUniformity(image, margins)`、`compactImage(image, margins)`、`coverImage(image, size)`。
-  四角保持原像素；可拉伸方向近似纯色时目标为 `1px`，渐变／非均匀时目标为 `max(1, round(原尺寸 × 25%))`，不设上限。`compactPixelMargins` 返回栅格实际切分用的整数像素边距，调用方必须把同一组值用于请求、切片和记录。`coverImage` 按 Figma `FILL`（居中覆盖并裁掉溢出）从自然像素得到图层整数尺寸的可见像素；尺寸相同时原样返回。`image` 为 `{width, height, data}` 的 RGBA `Uint8ClampedArray`，宽高必须是整数且数据长度匹配；面积重采样在预乘颜色上计算并还原透明通道，四角逐像素复制。非法尺寸、边距或像素数据抛出 `RangeError`，不钳制。该模块不依赖 DOM 或 Figma，插件 UI 只负责 Canvas 解码与 PNG 编码。
+  四角保持原像素；可拉伸方向近似纯色时目标为 `1px`，渐变／非均匀时目标为 `max(1, round(原尺寸 × 25%))`，不设上限。某一轴两侧边距都为 `0` 时表示该轴没有定义九宫格，保持原长度，不压缩。`compactPixelMargins` 返回栅格实际切分用的整数像素边距，调用方必须把同一组值用于请求、切片和记录。`coverImage` 按 Figma `FILL`（居中覆盖并裁掉溢出）从自然像素得到图层整数尺寸的可见像素；尺寸相同时原样返回。`image` 为 `{width, height, data}` 的 RGBA `Uint8ClampedArray`，宽高必须是整数且数据长度匹配；面积重采样在预乘颜色上计算并还原透明通道，四角逐像素复制。非法尺寸、边距或像素数据抛出 `RangeError`，不钳制。该模块不依赖 DOM 或 Figma，插件 UI 只负责 Canvas 解码与 PNG 编码。
 - `@myfigma/nine-slice/figma`：`createNineSliceComponent(figma, {width, height, fill}, margins, {overlap?})`。
   返回无 Auto Layout 的主组件；失败移除本次半成品，并尽力恢复已移除的旧子层与原填充、尺寸、布局。Figma 不提供事务原语，恢复本身仍可能失败。调用方负责父级、名称、坐标、选择、来源状态和原图删除。
   `fill` 为 Figma `ImagePaint`；消费适配入口的工程需要 `@figma/plugin-typings`。

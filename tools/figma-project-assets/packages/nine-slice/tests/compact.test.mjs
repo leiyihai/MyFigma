@@ -45,10 +45,11 @@ test('uniform axes collapse to one pixel while gradient axes keep 25% without a 
   assert.deepEqual(horizontal.targets, { width: 20, height: 1 });
   assert.deepEqual(vertical.targets, { width: 1, height: 15 });
 
+  // No margins means no stretchable axis to compact at all.
   const dual = createCompactPlan({ width: 4000, height: 4000 }, { left: 0, top: 0, right: 0, bottom: 0 },
     { horizontal: false, vertical: false });
-  assert.deepEqual(dual.targets, { width: 1000, height: 1000 });
-  assert.deepEqual([dual.width, dual.height], [1000, 1000]);
+  assert.deepEqual(dual.targets, { width: 4000, height: 4000 });
+  assert.deepEqual([dual.width, dual.height], [4000, 4000]);
   assert.equal(COMPACT_GRADIENT_RATIO, 0.25);
 });
 
@@ -183,16 +184,34 @@ test('FILL sampling covers the layer with a centred crop instead of stretching t
   assert.throws(() => coverImage(source, { width: 10.5, height: 10 }), RangeError);
 });
 
-test('zero margins compact the whole image and keep the transparency channel', () => {
+test('zero/zero margins preserve both axes and the transparency channel', () => {
   const source = imageOf(20, 20, (x, y) => [40, 80, 120, Math.round((x + y) * 255 / 38)]);
   const { plan, data } = compactImage(source, { left: 0, top: 0, right: 0, bottom: 0 });
   assert.deepEqual(plan.pixelMargins, { left: 0, top: 0, right: 0, bottom: 0 });
   assert.equal(plan.uniform.horizontal, false);
   assert.equal(plan.uniform.vertical, false);
-  assert.deepEqual([plan.width, plan.height], [5, 5]);
+  // No margins means no nine-slice axis to compact; leave the image intact.
+  assert.deepEqual([plan.width, plan.height], [20, 20]);
   const alphas = new Set();
   for (let i = 3; i < data.length; i += 4) alphas.add(data[i]);
   assert.ok(alphas.size > 1, 'transparency variants must survive resampling');
   assert.ok([...alphas].every(alpha => alpha >= 0 && alpha <= 255));
   assert.equal(data.length, plan.width * plan.height * 4);
+});
+
+test('an axis with both opposite margins at zero is preserved instead of compacted', () => {
+  const source = imageOf(40, 30, (x, y) => [x * 5, y * 6, 90, 255]);
+  // Horizontal margins are absent: the user did not mark a horizontal 9-slice,
+  // so compacting must only affect the configured vertical axis.
+  const onlyVertical = compactImage(source, { left: 0, top: 10, right: 0, bottom: 10 });
+  assert.deepEqual([onlyVertical.plan.width, onlyVertical.plan.height], [40, 23]);
+  assert.deepEqual(onlyVertical.plan.targets, { width: 40, height: 3 });
+
+  const onlyHorizontal = compactImage(source, { left: 10, top: 0, right: 10, bottom: 0 });
+  assert.deepEqual([onlyHorizontal.plan.width, onlyHorizontal.plan.height], [25, 30]);
+  assert.deepEqual(onlyHorizontal.plan.targets, { width: 5, height: 30 });
+
+  const untouched = compactImage(source, { left: 0, top: 0, right: 0, bottom: 0 });
+  assert.deepEqual([untouched.plan.width, untouched.plan.height], [40, 30]);
+  assert.deepEqual(untouched.plan.targets, { width: 40, height: 30 });
 });
