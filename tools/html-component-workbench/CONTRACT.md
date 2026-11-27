@@ -75,7 +75,7 @@ $env:WORKBENCH_PLAYWRIGHT_ROOT = 'E:\MyFigma\tools\figma-project-assets\nine-sli
 - 候选专用 port 的 pending response 可在尚未 active 时响应初始化命令；selection/location 事件始终只接受 active 原型，不向宿主泄漏候选状态。调用方在 await load 成功后同步 replaceProject/updateUI，不再发可失败的初始化命令。
 - `await request(type, payload={})`：向当前原型发送有超时的命令，返回 JSON 结果。基础命令 `navigate`、`mode`、`selection`（设置 IDs），`inspect`（返回当前稳定节点的标签、父 ID、bounds）；后续提取扩展注册新命令。
 - 原型业务导航也必须调用公开 `window.WorkbenchPrototype.navigate(location)`，不可绕过它调用私有渲染函数；桥接包装此方法并发送 `location`，让宿主当前页面保持一致。
-- `subscribe(listener)`：事件 `{type:'location',payload:{pageId,stateId}}` 或 `{type:'selection', payload:{nodeIds, pageId,stateId}}`；订阅函数返回 unsubscribe。宿主只接受当前 iframe、专用 MessagePort、正确协议和 requestId 的预期消息，任何原型消息都不能直接 patch 项目。
+- `subscribe(listener)`：事件 `{type:'location',payload:{pageId,stateId}}` 或 `{type:'selection', payload:{nodeIds, pageId,stateId, clickedId}}`；订阅函数返回 unsubscribe。`clickedId` 仅在编辑点击时给出，是当次点击的稳定节点 ID（纯追加、向后兼容），特性应按它判断加选/减选，不能用选择前后差集推断被点节点。宿主只接受当前 iframe、专用 MessagePort、正确协议和 requestId 的预期消息，任何原型消息都不能直接 patch 项目。
 - `stop()` 销毁当前运行画布并拒绝 pending 命令，不修改项目资料。基础 `navigate`/`setMode` 若拒绝或超时，宿主不冒充成功：停止不可靠画布、设置 UI `blockedReason` 并提供“重新载入当前原型”；重新载入会重置原型业务状态，已有组件稿/人工关系保留。
 - `element` 当前 iframe（只作布局/可访问定位，不依赖跨源 DOM）；`manifest` 当前清单。
 
@@ -83,7 +83,7 @@ $env:WORKBENCH_PLAYWRIGHT_ROOT = 'E:\MyFigma\tools\figma-project-assets\nine-sli
 ```js
 WorkbenchBridge.register('extract', async payload => { /* 验证参数，读取真实 DOM，返回 JSON */ });
 ```
-`WorkbenchBridge` 提供 `getNode(id)`、`getContext()` → `{manifest,mode,pageId,stateId,selection}`；模块自己负责支持条件校验。节点选择事件使用同一个 port，编辑点击只发稳定节点 ID、Shift 加选/再次点减选。Bridge 不向原型暴露宿主项目资料。直接向 parent.postMessage 伪造 project/update 或 selection 无效。
+`WorkbenchBridge` 提供 `getNode(id)`、`getContext()` → `{manifest,mode,pageId,stateId,selection}`；模块自己负责支持条件校验。节点选择事件使用同一个 port，编辑点击只发稳定节点 ID、Shift 加选/再次点减选，`selection` 事件附带当次 `clickedId`（被点击的 `data-wb-node`）。Bridge 不向原型暴露宿主项目资料。直接向 parent.postMessage 伪造 project/update 或 selection 无效。
 
 ## 宿主状态与壳层扩展
 
