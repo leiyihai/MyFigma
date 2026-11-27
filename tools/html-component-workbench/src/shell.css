@@ -38,6 +38,11 @@ h1,h2,h3,p{margin:0}
 .canvas-toolbar{height:55px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 20px;background:#f9fafb;border-bottom:1px solid var(--line)}
 .canvas-toolbar strong{font-size:13px}
 .canvas-toolbar #canvas-description{font-size:12px;color:var(--quiet);margin-left:16px}
+.canvas-toolbar-meta{display:flex;align-items:center;gap:14px;min-width:0}
+.canvas-fit{display:flex;align-items:center;gap:8px;min-width:0}
+#canvas-overflow-note{font-size:11px;color:var(--quiet);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#fit-canvas{padding:5px 9px;font-size:11px;white-space:nowrap}
+#fit-canvas[aria-pressed=true]{background:var(--accent-wash);border-color:#b9c9e8;color:var(--accent)}
 .canvas-mode{font-size:12px;color:var(--quiet);white-space:nowrap}
 .prototype-stage{flex:1;min-height:450px;position:relative;overflow:auto;padding:40px;background-image:radial-gradient(#a5b3be75 .75px,transparent .75px);background-size:12px 12px}
 #frame-container{width:max-content;min-width:100%;display:flex;justify-content:center;align-items:flex-start}
@@ -64,6 +69,7 @@ h1,h2,h3,p{margin:0}
 .workbench-header{gap:12px;padding:14px}
 .identity{min-width:205px}
 .canvas-toolbar #canvas-description{display:none}
+#canvas-overflow-note{max-width:200px}
 .right-pane{padding:20px 14px}
 .prototype-stage{padding:24px}
 }

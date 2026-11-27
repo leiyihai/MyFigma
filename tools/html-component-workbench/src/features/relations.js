@@ -564,6 +564,10 @@
     }
     head.append(copy, legend);
     const board = el('div', undefined, 'relations-board');
+    // 每条引用独占一条右侧通道；按引用数量预留标签宽度，避免多引用时标签挤成一团。
+    if (project.references.length) {
+      board.style.paddingRight = Math.max(138, 26 + 18 * (project.references.length - 1) + 42) + 'px';
+    }
     for (const group of project.groups) board.append(groupCluster(project, group, ui));
     if (project.drafts.some(draft => !groupOf(project, draft.id))) board.append(looseCluster(project, ui));
     if (!project.groups.length && !project.drafts.some(draft => !groupOf(project, draft.id))) board.append(el('p', '暂无组件稿。', 'relations-note'));
@@ -594,45 +598,85 @@
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
     defs.innerHTML = '<marker id="relations-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"></path></marker>';
     svg.append(defs);
+    const laneBase = 26, laneGap = 18;
+    const placedLabels = [];
+    const overlap = (one, two) => Math.min(one.right, two.right) - Math.max(one.left, two.left) > 0.5
+      && Math.min(one.bottom, two.bottom) - Math.max(one.top, two.top) > 0.5;
+    // 标签按 14px 行高在通道内纵向避让，绝不互相压字；仍在连线区域内才可见。
+    function placeLabel(x, baseline, anchor) {
+      const candidates = [0, -16, 16, -32, 32, -48, 48, -64, 64, -80, 80];
+      for (const offset of candidates) {
+        const y = baseline + offset;
+        if (y - 11 < 2 || y + 3 > base.height - 2) continue;
+        const rect = anchor === 'middle' ? {left: x - 13, right: x + 13, top: y - 11, bottom: y + 3}
+          : {left: x - 1, right: x + 24, top: y - 11, bottom: y + 3};
+        if (!placedLabels.some(item => overlap(item, rect))) { placedLabels.push(rect); return y; }
+      }
+      return null;
+    }
     for (let index = 0; index < project.references.length; index++) {
       const ref = project.references[index];
       const owner = board.querySelector('[data-draft-id="' + CSS.escape(ref.ownerDraftId) + '"]');
       const target = board.querySelector('[data-draft-id="' + CSS.escape(ref.targetDraftId) + '"]');
       if (!owner || !target) continue;
       const from = owner.getBoundingClientRect(), to = target.getBoundingClientRect();
-      const fromRight = from.right - base.left, fromCenterY = from.top + from.height / 2 - base.top;
-      const toLeft = to.left - base.left, toRight = to.right - base.left, toCenterY = to.top + to.height / 2 - base.top;
-      let sx = fromRight, sy = fromCenterY, tx = toLeft, ty = toCenterY, labelX, labelY, d;
-      if (toLeft > fromRight + 1) {
-        // 目标在右侧：从使用方右缘直达目标左缘。
-        const gap = Math.max(18, (tx - sx) * 0.5);
-        d = 'M ' + sx + ' ' + sy + ' C ' + (sx + gap) + ' ' + sy + ', ' + (tx - gap) + ' ' + ty + ', ' + tx + ' ' + ty;
-        labelX = (sx + tx) / 2;
-        labelY = Math.min(from.top, to.top) - base.top - 5;
+      const outgoing = project.references.filter(item => item.ownerDraftId === ref.ownerDraftId);
+      const incoming = project.references.filter(item => item.targetDraftId === ref.targetDraftId);
+      // 同一使用方的多条引用、同一被引用组件的多个使用方都错开锚点，避免箭头堆在同一点上。
+      const clampAnchor = (value, height) => Math.max(-(height / 2 - 4), Math.min(height / 2 - 4, value));
+      const sy = from.top + from.height / 2 - base.top
+        + clampAnchor((outgoing.indexOf(ref) - (outgoing.length - 1) / 2) * 8, from.height);
+      const ty = to.top + to.height / 2 - base.top
+        + clampAnchor((incoming.indexOf(ref) - (incoming.length - 1) / 2) * 10, to.height);
+      const fromRight = from.right - base.left, toLeft = to.left - base.left, toRight = to.right - base.left;
+      let d, labelX, labelY, anchor;
+      if (toLeft > fromRight + 30) {
+        // 目标在右侧：从使用方右缘直达目标左缘，标签放在两卡片之间的空隙上方。
+        const gap = Math.max(24, (toLeft - fromRight) * 0.5);
+        d = 'M ' + fromRight + ' ' + sy + ' C ' + (fromRight + gap) + ' ' + sy + ', ' + (toLeft - gap) + ' ' + ty + ', ' + toLeft + ' ' + ty;
+        labelX = Math.max(16, Math.min(base.width - 16, (fromRight + toLeft) / 2));
+        labelY = Math.max(16, Math.min(from.top, to.top) - base.top - 6);
+        anchor = 'middle';
       } else {
-        // 其余情况沿右侧专用通道绕行，通道保留在组件卡片之外。
-        const lane = Math.min(base.width - 10, Math.max(fromRight, toRight) + 18 + index * 10);
-        d = 'M ' + sx + ' ' + sy + ' C ' + lane + ' ' + sy + ', ' + lane + ' ' + ty + ', ' + toRight + ' ' + ty;
-        tx = toRight;
-        labelX = (lane + toRight) / 2;
-        labelY = ty - 7 - (index % 3) * 13;
+        // 垂直堆叠时每条引用使用独立的右侧通道，形成可逐条追踪的独立竖线。
+        const lane = fromRight + laneBase + index * laneGap;
+        const rise = Math.abs(ty - sy), radius = Math.min(8, rise / 2);
+        const direction = ty >= sy ? 1 : -1;
+        if (radius >= 2) {
+          d = 'M ' + fromRight + ' ' + sy
+            + ' L ' + (lane - radius) + ' ' + sy
+            + ' Q ' + lane + ' ' + sy + ' ' + lane + ' ' + (sy + direction * radius)
+            + ' L ' + lane + ' ' + (ty - direction * radius)
+            + ' Q ' + lane + ' ' + ty + ' ' + (lane - radius) + ' ' + ty
+            + ' L ' + toRight + ' ' + ty;
+        } else {
+          d = 'M ' + fromRight + ' ' + sy + ' C ' + lane + ' ' + sy + ', ' + lane + ' ' + ty + ', ' + toRight + ' ' + ty;
+        }
+        // 标签紧贴各自的竖线，并按行位避让；文字左对齐可读性高于居中小字。
+        labelX = lane + 5;
+        labelY = (sy + ty) / 2 + 4;
+        anchor = 'start';
       }
       const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       group.setAttribute('class', 'relations-link');
       group.dataset.refId = ref.id;
       group.dataset.owner = ref.ownerDraftId;
       group.dataset.target = ref.targetDraftId;
-      group.dataset.related = String(Boolean(ui.activeDraftId) && (ref.ownerDraftId === ui.activeDraftId || ref.targetDraftId === ui.activeDraftId));
+      // 没有选中组件时不存在“相关/无关”，所有线保持正常可读，而不是被整体弱化。
+      if (ui.activeDraftId) {
+        group.dataset.related = String(ref.ownerDraftId === ui.activeDraftId || ref.targetDraftId === ui.activeDraftId);
+      }
       group.setAttribute('role', 'img');
       group.setAttribute('aria-label', '引用：' + draftName(project, ref.ownerDraftId) + ' → ' + draftName(project, ref.targetDraftId));
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', d);
       path.setAttribute('marker-end', 'url(#relations-arrow)');
       path.setAttribute('fill', 'none');
+      const textY = placeLabel(labelX, labelY, anchor);
       const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       label.setAttribute('x', labelX);
-      label.setAttribute('y', labelY);
-      label.setAttribute('text-anchor', 'middle');
+      label.setAttribute('y', textY === null ? labelY : textY);
+      label.setAttribute('text-anchor', anchor);
       label.textContent = '引用';
       group.append(path, label);
       svg.append(group);

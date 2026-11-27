@@ -66,6 +66,7 @@ AI / MCP 客户端 → Figwright MCP → 本地桥接 → Figma 插件 → Figma
 | [ui-alignment.md](.agents/skills/ui-design/references/ui-alignment.md) | 界面追问、图标文字决策、方案确认与精简交付 |
 | [layout-preview.md](.agents/skills/ui-design/references/layout-preview.md) | 可交互 HTML 制作、检查及 Figma 确认关卡 |
 | [GLOSSARY.md](.agents/skills/ui-design/references/GLOSSARY.md) | 设计术语 |
+| [html-component-workbench/README.md](tools/html-component-workbench/README.md) | HTML 原型组件拆分工作台：启动、接入契约、操作流程与单 HTML 项目文件语义 |
 | README.md | 面向使用者的操作说明与文档导航 |
 
 规则在对应文件单独维护；策划需求放在具体功能文档中，不混入技能规范。
