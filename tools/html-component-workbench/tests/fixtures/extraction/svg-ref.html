@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>SVG 引用样例</title>
+<script type="application/json" id="workbench-manifest">{"format":"workbench-prototype","version":1,"id":"svg-ref-kit","contentVersion":"1","name":"SVG 引用样例","viewport":{"width":600,"height":400},"capabilities":["navigate","freeze","stable-nodes"],"pages":[{"id":"home","name":"主页","states":[{"id":"default","name":"默认"}]}]}</script>
+<style>*{box-sizing:border-box}body{margin:0;width:600px;height:400px;overflow:hidden;font:16px Arial;background:#f4f4f2}.card{margin:24px;width:520px;padding:16px;background:#fff;border:1px solid #ccc}svg{display:block;margin-top:12px;background:#eef}</style></head><body>
+<article class="card" data-wb-node="card">
+<h1 data-wb-node="title">SVG 引用</h1>
+<svg width="420" height="120" data-wb-node="art">
+<defs><rect id="shape" width="40" height="40" fill="#4a7" data-wb-node="shape-def"></rect></defs>
+<use data-wb-node="icon-use" href="#shape" x="12" y="12"></use>
+<image data-wb-node="icon-image" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Ccircle cx='20' cy='20' r='18' fill='%23c84'/%3E%3C/svg%3E" x="80" y="12" width="40" height="40"></image>
+</svg>
+</article>
+<script>window.WorkbenchPrototype={navigate(){},setMode(){}};</script>
+</body></html>

@@ -1,0 +1,133 @@
+<!doctype html><html><head><meta charset="utf-8"><title>引用样式作用域样例</title></head><body>
+<script id="workbench-project" type="application/json">
+{
+ "format": "html-component-workbench",
+ "formatVersion": 1,
+ "id": "scoped-project",
+ "name": "引用样式作用域样例",
+ "prototype": {
+  "fileName": "scoped-prototype.html",
+  "manifest": {
+   "format": "workbench-prototype",
+   "version": 1,
+   "id": "scoped-kit",
+   "contentVersion": "1",
+   "name": "引用作用域样例",
+   "viewport": {
+    "width": 600,
+    "height": 400
+   },
+   "capabilities": [
+    "navigate",
+    "freeze",
+    "stable-nodes"
+   ],
+   "pages": [
+    {
+     "id": "home",
+     "name": "主页",
+     "states": [
+      {
+       "id": "default",
+       "name": "默认"
+      }
+     ]
+    }
+   ]
+  },
+  "html": "\u003c!doctype html>\u003chtml>\u003chead>\u003cmeta charset=\"utf-8\">\u003cscript type=\"application/json\" id=\"workbench-manifest\">{\"format\":\"workbench-prototype\",\"version\":1,\"id\":\"scoped-kit\",\"contentVersion\":\"1\",\"name\":\"引用作用域样例\",\"viewport\":{\"width\":600,\"height\":400},\"capabilities\":[\"navigate\",\"freeze\",\"stable-nodes\"],\"pages\":[{\"id\":\"home\",\"name\":\"主页\",\"states\":[{\"id\":\"default\",\"name\":\"默认\"}]}]}\u003c/script>\u003cstyle>body{font-family:Arial;background:#eee}div{padding:8px;background:#fff}\u003c/style>\u003c/head>\u003cbody>\u003cdiv data-wb-node=\"owner\">原型内容\u003c/div>\u003cscript>window.WorkbenchPrototype={navigate(){},setMode(){}};\u003c/script>\u003c/body>\u003c/html>"
+ },
+ "drafts": [
+  {
+   "id": "draft-owner",
+   "name": "使用方",
+   "source": {
+    "prototypeId": "scoped-kit",
+    "contentVersion": "1",
+    "pageId": "home",
+    "stateId": "default",
+    "nodeIds": [
+     "owner"
+    ],
+    "bounds": {
+     "x": 0,
+     "y": 0,
+     "width": 200,
+     "height": 60
+    }
+   },
+   "content": {
+    "html": "\u003cdiv data-wb-node=\"owner\">\u003cspan data-wb-node=\"slot\" style=\"display:block;min-height:20px\">位置\u003c/span>\u003cspan data-wb-node=\"slot2\" style=\"display:block;min-height:20px\">位置二\u003c/span>\u003cspan data-wb-node=\"own\">自有文字\u003c/span>\u003c/div>",
+    "css": "span{color:rgb(0, 0, 255)}",
+    "width": 200,
+    "height": 60,
+    "assets": []
+   },
+   "revision": 1
+  },
+  {
+   "id": "draft-target",
+   "name": "共享文字",
+   "source": {
+    "prototypeId": "scoped-kit",
+    "contentVersion": "1",
+    "pageId": "home",
+    "stateId": "default",
+    "nodeIds": [
+     "owner"
+    ],
+    "bounds": {
+     "x": 0,
+     "y": 0,
+     "width": 200,
+     "height": 60
+    }
+   },
+   "content": {
+    "html": "\u003cspan data-wb-node=\"value\">目标文字\u003c/span>",
+    "css": "span{color:rgb(200, 0, 0)}",
+    "width": 120,
+    "height": 30,
+    "assets": []
+   },
+   "revision": 1
+  },
+  {
+   "id": "draft-animated",
+   "name": "动画目标",
+   "source": {
+    "prototypeId": "scoped-kit",
+    "contentVersion": "1",
+    "pageId": "home",
+    "stateId": "default",
+    "nodeIds": [
+     "owner"
+    ],
+    "bounds": {
+     "x": 0,
+     "y": 0,
+     "width": 200,
+     "height": 60
+    }
+   },
+   "content": {
+    "html": "\u003cspan data-wb-node=\"spin\">动画文字\u003c/span>",
+    "css": "@keyframes pulse{from{opacity:1}to{opacity:.4}} span{animation:pulse 1s infinite}",
+    "width": 100,
+    "height": 30,
+    "assets": []
+   },
+   "revision": 1
+  }
+ ],
+ "groups": [],
+ "references": [],
+ "mappings": [],
+ "reviews": [],
+ "workspace": {
+  "mode": "preview",
+  "pageId": "home",
+  "stateId": "default"
+ }
+}
+</script><p>本文件用于验证引用目标 CSS 的作用域隔离。</p></body></html>

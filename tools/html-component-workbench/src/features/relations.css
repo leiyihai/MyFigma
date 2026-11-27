@@ -65,6 +65,7 @@
 .relations-mappings .relations-actions button{flex:1 1 100%}
 .relations-preview{padding:18px 26px 36px;overflow:auto;min-height:100%}
 .relations-preview-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}
+.relations-preview-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .relations-preview-head h2{font-size:18px}
 .relations-preview-grid{display:flex;align-items:flex-start;gap:26px;flex-wrap:wrap}
 .relations-preview-card{margin:0;flex:none;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:12px 12px 14px;box-shadow:0 5px 20px #26344010}

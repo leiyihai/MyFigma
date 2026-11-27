@@ -1,0 +1,8 @@
+.preview-zoom{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.preview-zoom button{padding:5px 9px;font-size:12px}
+.preview-zoom button[aria-pressed=true]{background:var(--accent-wash);border-color:var(--accent);color:var(--accent)}
+.preview-zoom-label{font-size:11px;color:var(--quiet);white-space:nowrap}
+.draft-preview-viewport{flex:none;overflow:hidden}
+.draft-preview-viewport iframe{display:block;border:0;background:white;transform-origin:top left}
+.review-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.review-actions button{padding:5px 8px;font-size:11px}

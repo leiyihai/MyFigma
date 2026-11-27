@@ -10,20 +10,16 @@
   let ctx;
   let groupName = '';
   let preview = null;
-  let pendingImpact = null;
-  let impactResolve = null;
-  let formOwnerId = null, formTargetId = null, formSlotId = null, formKey = null;
+  let previewScale = 1;
+  let pendingImpactPlan = null;
+  let impactConfirmationResolve = null;
+  let referenceFormOwnerId = null, referenceFormTargetId = null, referenceFormSlotId = null, referenceFormSignature = null;
   let overrideValues = new Map();
   let candidateDraftId = null;
   let mappingSelection = new Set();
   let mappingProjectId = null;
 
-  const el = (tag, text, className) => {
-    const node = document.createElement(tag);
-    if (text !== undefined) node.textContent = text;
-    if (className) node.className = className;
-    return node;
-  };
+  const el = WorkbenchCommon.element;
   function button(text, action, options = {}) {
     const node = el('button', text, options.className);
     node.type = 'button';
@@ -53,30 +49,12 @@
     const groups = project.groups.filter(group => selected.some(id => group.memberIds.includes(id)));
     return groups.length === 1 && selected.every(id => groups[0].memberIds.includes(id)) ? groups[0] : null;
   }
-  function unresolvedReview(project, reviewId) {
-    if (!reviewId) return false;
-    const review = project.reviews.find(item => item.id === reviewId);
-    return !review || !review.resolved;
-  }
-  function effectiveMapping(project, mapping) {
-    return mapping.status === 'confirmed' && !unresolvedReview(project, mapping.reviewId);
-  }
-
-  function previewDocument(content) {
-    return '<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; font-src data:; style-src \'unsafe-inline\'; form-action \'none\'; base-uri \'none\'"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:white}' + content.css.replace(/<\/style/gi, '<\\/style') + '</style></head><body>' + content.html + '</body></html>';
-  }
+  const unresolvedReview = WorkbenchCommon.hasUnresolvedReview;
+  const effectiveMapping = WorkbenchCommon.isEffectiveMapping;
+  const fragment = WorkbenchCommon.fragment;
+  const serialize = WorkbenchCommon.serialize;
 
   // ---------- 组件内容工具（只解析惰性组件稿 HTML，不执行内容） ----------
-  function fragment(html) {
-    const template = document.createElement('template');
-    template.innerHTML = html;
-    return template.content;
-  }
-  function serialize(nodes) {
-    const container = document.createElement('div');
-    container.append(nodes);
-    return container.innerHTML;
-  }
   function contentNodes(html) {
     return [...fragment(html).querySelectorAll('[data-wb-node]')].map(node => ({
       id: node.getAttribute('data-wb-node'),
@@ -107,6 +85,50 @@
   }
   function snapshotPrefix(refId) {
     return 'wb-ref-' + refId.replace(/[^a-zA-Z0-9_-]/g, '') + '-';
+  }
+  // 目标组件稿的样式只能作用于本次引用根内部；宽泛选择器不得改写使用方其他内容。
+  function splitSelectors(selectorText) {
+    const parts = [];
+    let start = 0, depth = 0, quote = null;
+    for (let index = 0; index < selectorText.length; index++) {
+      const character = selectorText[index];
+      if (quote) {
+        if (character === '\\') index++;
+        else if (character === quote) quote = null;
+        continue;
+      }
+      if (character === '"' || character === "'") { quote = character; continue; }
+      if (character === '(' || character === '[') { depth++; continue; }
+      if (character === ')' || character === ']') { depth = Math.max(0, depth - 1); continue; }
+      if (character === ',' && depth === 0) { parts.push(selectorText.slice(start, index).trim()); start = index + 1; }
+    }
+    parts.push(selectorText.slice(start).trim());
+    return parts.filter(Boolean);
+  }
+  function scopedSelector(selector, scope) {
+    const trimmed = selector.trim();
+    return [':root', 'html', 'body'].includes(trimmed.toLowerCase()) ? scope : scope + ' ' + trimmed;
+  }
+  function scopeCssRule(rule, scope) {
+    if (typeof rule.selectorText === 'string') {
+      if (rule.cssRules?.length) throw Error('引用目标包含嵌套 CSS 规则，无法安全隔离样式作用域');
+      return splitSelectors(rule.selectorText).map(selector => scopedSelector(selector, scope) + ' {' + rule.style.cssText + '}').join('\n');
+    }
+    if (rule instanceof CSSFontFaceRule) return rule.cssText;
+    if (rule instanceof CSSMediaRule) return '@media ' + rule.conditionText + ' {\n' + [...rule.cssRules].map(child => scopeCssRule(child, scope)).join('\n') + '\n}';
+    if (rule instanceof CSSSupportsRule) return '@supports ' + rule.conditionText + ' {\n' + [...rule.cssRules].map(child => scopeCssRule(child, scope)).join('\n') + '\n}';
+    if (typeof CSSContainerRule !== 'undefined' && rule instanceof CSSContainerRule) return '@container ' + rule.conditionText + ' {\n' + [...rule.cssRules].map(child => scopeCssRule(child, scope)).join('\n') + '\n}';
+    if (rule instanceof CSSKeyframesRule) throw Error('引用目标的 @keyframes 动画无法隔离到引用作用域');
+    throw Error('引用目标包含无法隔离的样式规则：' + (rule.cssText || rule.constructor.name).slice(0, 80));
+  }
+  function scopeCss(css, refId) {
+    if (!css.trim()) return '';
+    let sheet;
+    try { sheet = new CSSStyleSheet(); sheet.replaceSync(css); }
+    catch (error) { throw Error('无法解析被引用组件样式：' + error.message); }
+    const escaped = refId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const scope = '[data-wb-ref-root="' + escaped + '"]';
+    return [...sheet.cssRules].map(rule => scopeCssRule(rule, scope)).join('\n');
   }
 
   // 把 target 的共享结构真实写入 owner 的 slot，并只重放该位置的 typed 覆盖。
@@ -147,7 +169,9 @@
       }
     }
     slot.replaceChildren(container);
-    const css = target.content.css.replace(/\[data-wb-snapshot="([^"]*)"\]/g, (match, token) => '[data-wb-ref-snapshot="' + prefix + token + '"]');
+    const renamedCss = target.content.css.replace(/\[data-wb-snapshot="([^"]*)"\]/g, (match, token) => '[data-wb-ref-snapshot="' + prefix + token + '"]');
+    if (/data-wb-snapshot/.test(renamedCss)) throw Error('被引用组件包含无法隔离的快照选择器，请重新提取组件稿');
+    const css = scopeCss(renamedCss, ref.id);
     let nextCss = stripRefCss(content.css, ref.id);
     if (css.trim()) nextCss = nextCss.replace(/\s+$/, '') + '\n/*wb-ref:' + ref.id + ':start*/\n' + css + '\n/*wb-ref:' + ref.id + ':end*/';
     return {...content, html: serialize(root), css: nextCss};
@@ -162,18 +186,7 @@
   }
 
   // ---------- 引用图 ----------
-  function wouldCreateCycle(project, ownerId, targetId) {
-    const visited = new Set();
-    const stack = [targetId];
-    while (stack.length) {
-      const id = stack.pop();
-      if (id === ownerId) return true;
-      if (visited.has(id)) continue;
-      visited.add(id);
-      for (const ref of project.references) if (ref.ownerDraftId === id) stack.push(ref.targetDraftId);
-    }
-    return false;
-  }
+  const wouldCreateCycle = (project, ownerId, targetId) => WorkbenchCommon.wouldCreateCycle(project.references, ownerId, targetId);
   // 把已经改变内容的使用方（含传递使用方）按依赖顺序重新展开共享结构并重放覆盖。
   function reflowUpstreamOwners(project, changedIds, previousContents = new Map()) {
     const ownersOf = new Map();
@@ -219,6 +232,30 @@
   function contentSignature(draft) {
     return JSON.stringify([draft?.content?.html, draft?.content?.css, draft?.content?.width, draft?.content?.height]);
   }
+  // 汇总一次内容变更向上游传播时会影响的使用方及其引用位置，供影响面板与 guard 共用。
+  function upstreamImpact(project, rootId, simulated, targetName, newRevision) {
+    const changedTargets = new Set(simulated.drafts.filter((draft, position) => contentSignature(draft) !== contentSignature(project.drafts[position]) || draft.revision !== project.drafts[position].revision).map(draft => draft.id));
+    const ownersOf = new Map();
+    for (const ref of simulated.references) {
+      if (!ownersOf.has(ref.targetDraftId)) ownersOf.set(ref.targetDraftId, []);
+      ownersOf.get(ref.targetDraftId).push(ref.ownerDraftId);
+    }
+    const owners = [], seen = new Set([rootId]), queue = [rootId];
+    while (queue.length) {
+      const id = queue.shift();
+      for (const ownerId of ownersOf.get(id) || []) {
+        if (seen.has(ownerId)) continue;
+        seen.add(ownerId);
+        queue.push(ownerId);
+        const owner = draftById(simulated, ownerId);
+        if (!owner) continue;
+        const refs = simulated.references.filter(ref => ref.ownerDraftId === ownerId && (ref.targetDraftId === rootId || changedTargets.has(ref.targetDraftId)))
+          .map(ref => ({slotNodeId: ref.slotNodeId, targetName: draftName(simulated, ref.targetDraftId), overrides: ref.overrides.map(override => ({nodeId: override.nodeId, value: override.value}))}));
+        owners.push({id: ownerId, name: owner.name, refs});
+      }
+    }
+    return {targetName, newRevision, owners};
+  }
   // 计算一次 draft:update 的完整影响，但先不写回项目；guard 确认后才返回同步 apply。
   function planDraftUpdate(project, draftId, nextDraft) {
     const old = draftById(project, draftId);
@@ -242,30 +279,9 @@
     reflowUpstreamOwners(simulated, [draftId], previousContents);
     const draftPatches = simulated.drafts.filter((draft, position) => JSON.stringify(draft) !== JSON.stringify(project.drafts[position])).map(draft => structuredClone(draft));
     const refPatches = simulated.references.map((ref, position) => ref.targetRevision !== project.references[position].targetRevision ? {id: ref.id, targetRevision: ref.targetRevision} : null).filter(Boolean);
-    const changedTargets = new Set(simulated.drafts.filter((draft, position) => contentSignature(draft) !== contentSignature(project.drafts[position]) || draft.revision !== project.drafts[position].revision).map(draft => draft.id));
-    const ownersOf = new Map();
-    for (const ref of simulated.references) {
-      if (!ownersOf.has(ref.targetDraftId)) ownersOf.set(ref.targetDraftId, []);
-      ownersOf.get(ref.targetDraftId).push(ref.ownerDraftId);
-    }
-    const owners = [], seen = new Set([draftId]), queue = [draftId];
-    while (queue.length) {
-      const id = queue.shift();
-      for (const ownerId of ownersOf.get(id) || []) {
-        if (seen.has(ownerId)) continue;
-        seen.add(ownerId);
-        queue.push(ownerId);
-        const owner = draftById(simulated, ownerId);
-        if (!owner) continue;
-        const refs = simulated.references.filter(ref => ref.ownerDraftId === ownerId && (ref.targetDraftId === draftId || changedTargets.has(ref.targetDraftId)))
-          .map(ref => ({slotNodeId: ref.slotNodeId, targetName: draftName(simulated, ref.targetDraftId), overrides: ref.overrides.map(override => ({nodeId: override.nodeId, value: override.value}))}));
-        owners.push({id: ownerId, name: owner.name, refs});
-      }
-    }
+    const impact = upstreamImpact(project, draftId, simulated, old.name, simulated.drafts[index].revision);
     return {
-      targetName: old.name,
-      newRevision: simulated.drafts[index].revision,
-      owners,
+      ...impact,
       apply(nextProject) {
         for (const draft of draftPatches) {
           const position = nextProject.drafts.findIndex(item => item.id === draft.id);
@@ -281,14 +297,14 @@
     };
   }
   function confirmImpact(plan) {
-    pendingImpact = plan;
+    pendingImpactPlan = plan;
     render();
-    return new Promise(resolve => { impactResolve = resolve; });
+    return new Promise(resolve => { impactConfirmationResolve = resolve; });
   }
   function resolveImpact(confirmed) {
-    const resolve = impactResolve;
-    impactResolve = null;
-    pendingImpact = null;
+    const resolve = impactConfirmationResolve;
+    impactConfirmationResolve = null;
+    pendingImpactPlan = null;
     render();
     if (resolve) resolve(confirmed);
   }
@@ -339,34 +355,74 @@
 
   // ---------- 引用操作 ----------
   function ensureForm(project, active) {
-    if (formOwnerId !== active.id) {
-      formOwnerId = active.id;
-      formTargetId = project.drafts.find(draft => draft.id !== active.id)?.id || null;
-      formSlotId = null;
-      formKey = null;
+    if (referenceFormOwnerId !== active.id) {
+      referenceFormOwnerId = active.id;
+      referenceFormTargetId = project.drafts.find(draft => draft.id !== active.id)?.id || null;
+      referenceFormSlotId = null;
+      referenceFormSignature = null;
       overrideValues = new Map();
     }
-    if (!draftById(project, formTargetId)) formTargetId = project.drafts.find(draft => draft.id !== active.id)?.id || null;
-    const key = formOwnerId + '|' + formTargetId;
-    if (key !== formKey) {
-      formKey = key;
+    if (!draftById(project, referenceFormTargetId)) referenceFormTargetId = project.drafts.find(draft => draft.id !== active.id)?.id || null;
+    const key = referenceFormOwnerId + '|' + referenceFormTargetId;
+    if (key !== referenceFormSignature) {
+      referenceFormSignature = key;
       overrideValues = new Map();
-      const target = draftById(project, formTargetId);
+      const target = draftById(project, referenceFormTargetId);
       if (target) for (const node of textOnlyNodes(target.content.html)) overrideValues.set(node.id, node.text);
     }
     const slots = slotCandidates(project, active);
-    if (!slots.some(slot => slot.id === formSlotId)) formSlotId = slots[0]?.id || null;
+    if (!slots.some(slot => slot.id === referenceFormSlotId)) referenceFormSlotId = slots[0]?.id || null;
   }
-  function createReference() {
+  function applyReferenceCreation(next, ref) {
+    const owner = draftById(next, ref.ownerDraftId), target = draftById(next, ref.targetDraftId);
+    if (!owner || !target) throw Error('引用组件已变化，引用建立已取消');
+    const previousContents = new Map(next.drafts.map(draft => [draft.id, structuredClone(draft.content)]));
+    const index = next.drafts.findIndex(draft => draft.id === owner.id);
+    let content;
+    try { content = embedReference(owner.content, ref, target, null); }
+    catch (error) { throw Error('无法建立引用：' + error.message + '，未提交'); }
+    next.drafts[index] = {...next.drafts[index], content, revision: owner.revision + 1};
+    next.references.push(structuredClone(ref));
+    reflowUpstreamOwners(next, [owner.id], previousContents);
+  }
+  async function createReferenceGuard(payload) {
+    const project = ctx.getProject(), ref = payload.ref;
+    const owner = draftById(project, ref?.ownerDraftId), target = draftById(project, ref?.targetDraftId);
+    if (!owner || !target) throw Error('引用组件已变化，请重新选择');
+    if (owner.id === target.id) throw Error('不能引用自身：请选择另一个组件稿');
+    const ownerNodes = fragment(owner.content.html);
+    if (!contentNodes(owner.content.html).some(node => node.id === ref.slotNodeId)) throw Error('引用位置“' + ref.slotNodeId + '”在组件稿中不存在');
+    const existingSlots = project.references.filter(item => item.ownerDraftId === owner.id).map(item => item.slotNodeId);
+    const overlapping = WorkbenchCommon.overlappingSlot(WorkbenchCommon.slotParentMap(ownerNodes), ref.slotNodeId, existingSlots);
+    if (overlapping) throw Error('引用位置“' + ref.slotNodeId + '”与既有引用位置“' + overlapping + '”重叠（互为祖先或后代），无法同时保留');
+    if (wouldCreateCycle(project, owner.id, target.id)) throw Error('该引用会形成循环（' + owner.name + ' ↔ ' + target.name + '），已拒绝');
+    const simulated = structuredClone(project);
+    applyReferenceCreation(simulated, ref);
+    const index = simulated.drafts.findIndex(draft => draft.id === owner.id);
+    const impact = upstreamImpact(project, owner.id, simulated, owner.name, simulated.drafts[index].revision);
+    const apply = next => applyReferenceCreation(next, ref);
+    if (!impact.owners.length) return apply;
+    Object.assign(impact, {
+      heading: '建立引用影响',
+      intro: '建立引用会更新使用方“' + owner.name + '”；' + impact.owners.length + ' 个使用方的共享结构将同步，以下覆盖会保留：',
+      confirmLabel: '确认建立并同步',
+      cancelLabel: '取消建立'
+    });
+    return (await confirmImpact(impact)) ? apply : false;
+  }
+  async function createReference() {
     const project = ctx.getProject(), ui = ctx.getUI();
     const owner = draftById(project, ui.activeDraftId);
     if (!owner) throw Error('请先在概览中选择使用方组件');
-    const target = draftById(project, formTargetId);
+    const target = draftById(project, referenceFormTargetId);
     if (!target) throw Error('请选择被引用组件');
     if (owner.id === target.id) throw Error('不能引用自身：请选择另一个组件稿');
-    if (!formSlotId) throw Error('请选择引用位置');
-    if (!contentNodes(owner.content.html).some(node => node.id === formSlotId)) throw Error('引用位置“' + formSlotId + '”在组件稿中不存在');
-    if (project.references.some(ref => ref.ownerDraftId === owner.id && ref.slotNodeId === formSlotId)) throw Error('引用位置“' + formSlotId + '”已被现有引用占用');
+    if (!referenceFormSlotId) throw Error('请选择引用位置');
+    const ownerNodes = fragment(owner.content.html);
+    if (!contentNodes(owner.content.html).some(node => node.id === referenceFormSlotId)) throw Error('引用位置“' + referenceFormSlotId + '”在组件稿中不存在');
+    const existingSlots = project.references.filter(ref => ref.ownerDraftId === owner.id).map(ref => ref.slotNodeId);
+    const overlapping = WorkbenchCommon.overlappingSlot(WorkbenchCommon.slotParentMap(ownerNodes), referenceFormSlotId, existingSlots);
+    if (overlapping) throw Error('引用位置“' + referenceFormSlotId + '”与既有引用位置“' + overlapping + '”重叠（互为祖先或后代），无法同时保留；请选择不包含既有引用的位置');
     if (wouldCreateCycle(project, owner.id, target.id)) throw Error('该引用会形成循环（' + owner.name + ' ↔ ' + target.name + '），已拒绝；请先移除冲突的引用');
     const defaults = new Map(textOnlyNodes(target.content.html).map(node => [node.id, node.text]));
     const overrides = [];
@@ -374,21 +430,13 @@
       const value = overrideValues.get(nodeId);
       if (value !== undefined && value !== text) overrides.push({nodeId, kind: 'text', value});
     }
-    const ref = {id: 'ref-' + crypto.randomUUID(), ownerDraftId: owner.id, targetDraftId: target.id, slotNodeId: formSlotId, overrides, targetRevision: target.revision};
-    const previousContents = new Map(project.drafts.map(draft => [draft.id, structuredClone(draft.content)]));
-    const next = structuredClone(project);
-    let content;
-    try { content = embedReference(owner.content, ref, target, null); }
-    catch (error) { throw Error('无法建立引用：' + error.message); }
-    const index = next.drafts.findIndex(draft => draft.id === owner.id);
-    next.drafts[index] = {...next.drafts[index], content, revision: owner.revision + 1};
-    next.references.push(ref);
-    reflowUpstreamOwners(next, [owner.id], previousContents);
-    commitProject(next);
+    const ref = {id: 'ref-' + crypto.randomUUID(), ownerDraftId: owner.id, targetDraftId: target.id, slotNodeId: referenceFormSlotId, overrides, targetRevision: target.revision};
+    const committed = await ctx.runCommand('reference:create', {ref}, () => {});
+    if (!committed) { ctx.notify('已取消建立引用，项目未改动'); return; }
     ctx.notify('已建立嵌套引用：' + owner.name + ' → ' + target.name + '；共享结构已嵌入位置 ' + ref.slotNodeId + (overrides.length ? '，保留 ' + overrides.length + ' 处覆盖' : ''));
-    formTargetId = null;
-    formSlotId = null;
-    formKey = null;
+    referenceFormTargetId = null;
+    referenceFormSlotId = null;
+    referenceFormSignature = null;
     overrideValues = new Map();
     render();
   }
@@ -596,7 +644,13 @@
     svg.setAttribute('height', base.height);
     svg.replaceChildren();
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    defs.innerHTML = '<marker id="relations-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"></path></marker>';
+    const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+    for (const [name, value] of [['id', 'relations-arrow'], ['viewBox', '0 0 10 10'], ['refX', '9'], ['refY', '5'], ['markerWidth', '7'], ['markerHeight', '7'], ['orient', 'auto-start-reverse']]) marker.setAttribute(name, value);
+    const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    arrow.setAttribute('d', 'M0 0L10 5L0 10z');
+    arrow.setAttribute('fill', 'currentColor');
+    marker.append(arrow);
+    defs.append(marker);
     svg.append(defs);
     const laneBase = 26, laneGap = 18;
     const placedLabels = [];
@@ -689,8 +743,9 @@
     if (!ids.length) { preview = null; return renderOverview(project, ctx.getUI()); }
     const wrapper = el('div', undefined, 'relations-preview');
     const head = el('header', undefined, 'relations-preview-head');
-    head.append(el('h2', preview.kind === 'group' ? '同组并排预览' : '独立预览'),
-      button('返回关系概览', () => { preview = null; render(); }));
+    const actions = el('div', undefined, 'relations-preview-actions');
+    actions.append(WorkbenchCommon.createZoomToolbar(previewScale, scale => { previewScale = scale; render(); }), button('返回关系概览', () => { preview = null; render(); }));
+    head.append(el('h2', preview.kind === 'group' ? '同组并排预览' : '独立预览'), actions);
     const grid = el('div', undefined, 'relations-preview-grid');
     for (const id of ids) {
       const draft = draftById(project, id);
@@ -698,13 +753,8 @@
       const caption = document.createElement('figcaption');
       caption.append(el('strong', roleOf(project, id) + ' · ' + draft.name));
       caption.append(el('span', '修订 ' + draft.revision + ' · ' + draft.content.width + ' × ' + draft.content.height, 'relations-preview-meta'));
-      const frame = document.createElement('iframe');
-      frame.title = '组件稿：' + draft.name;
-      frame.setAttribute('sandbox', '');
-      frame.width = draft.content.width;
-      frame.height = draft.content.height;
-      frame.srcdoc = previewDocument(draft.content);
-      figure.append(caption, frame);
+      figure.append(caption);
+      figure.append(WorkbenchCommon.createScaledDraftFrame(draft, previewScale).viewport);
       grid.append(figure);
     }
     wrapper.append(head, grid);
@@ -715,10 +765,10 @@
   function impactPanel() {
     const impact = el('section', undefined, 'relations-impact');
     impact.setAttribute('aria-label', '引用更新影响');
-    impact.append(el('h2', '引用更新影响'));
-    impact.append(el('p', '共享组件“' + pendingImpact.targetName + '”更新为修订 ' + pendingImpact.newRevision + '；' + pendingImpact.owners.length + ' 个使用方的共享结构将同步，以下覆盖会保留：', 'relations-help'));
+    impact.append(el('h2', pendingImpactPlan.heading || '引用更新影响'));
+    impact.append(el('p', pendingImpactPlan.intro || ('共享组件“' + pendingImpactPlan.targetName + '”更新为修订 ' + pendingImpactPlan.newRevision + '；' + pendingImpactPlan.owners.length + ' 个使用方的共享结构将同步，以下覆盖会保留：'), 'relations-help'));
     const list = el('ul', undefined, 'relations-impact-list');
-    for (const owner of pendingImpact.owners) {
+    for (const owner of pendingImpactPlan.owners) {
       if (!owner.refs.length) {
         list.append(el('li', owner.name + ' · 间接使用方'));
         continue;
@@ -730,7 +780,7 @@
     }
     impact.append(list);
     const actions = el('div', undefined, 'relations-actions');
-    actions.append(button('确认更新并同步', () => resolveImpact(true)), button('取消更新', () => resolveImpact(false)));
+    actions.append(button(pendingImpactPlan.confirmLabel || '确认更新并同步', () => resolveImpact(true)), button(pendingImpactPlan.cancelLabel || '取消更新', () => resolveImpact(false)));
     impact.append(actions);
     impact.append(el('p', '取消、确认期间项目变化或覆盖无法安全保留时，不会提交任何修改。', 'relations-note'));
     return impact;
@@ -739,10 +789,10 @@
     const left = ctx.slots.left;
     const grouping = project.drafts.length > 0 && ui.tab === 'components';
     const mappings = project.prototype && project.drafts.length > 0 && (ui.tab === 'components' || ui.mode === 'edit');
-    left.hidden = !(pendingImpact || grouping || mappings);
+    left.hidden = !(pendingImpactPlan || grouping || mappings);
     left.replaceChildren();
     if (left.hidden) return;
-    if (pendingImpact) left.append(impactPanel());
+    if (pendingImpactPlan) left.append(impactPanel());
     if (grouping) left.append(groupingPanel(project, ui));
     if (mappings) left.append(mappingPanel(project, ui));
   }
@@ -799,10 +849,10 @@
       const option = document.createElement('option');
       option.value = draft.id;
       option.textContent = draft.name;
-      option.selected = draft.id === formTargetId;
+      option.selected = draft.id === referenceFormTargetId;
       select.append(option);
     }
-    select.onchange = () => { formTargetId = select.value; formKey = null; render(); };
+    select.onchange = () => { referenceFormTargetId = select.value; referenceFormSignature = null; render(); };
     const targetLabel = el('label', '被引用组件', 'relations-field');
     targetLabel.append(select);
     panel.append(targetLabel);
@@ -817,14 +867,14 @@
       const option = document.createElement('option');
       option.value = slot.id;
       option.textContent = slot.id + '（' + slot.tag + '）';
-      option.selected = slot.id === formSlotId;
+      option.selected = slot.id === referenceFormSlotId;
       slotSelect.append(option);
     }
-    slotSelect.onchange = () => { formSlotId = slotSelect.value; render(); };
+    slotSelect.onchange = () => { referenceFormSlotId = slotSelect.value; render(); };
     const slotLabel = el('label', '引用位置', 'relations-field');
     slotLabel.append(slotSelect);
     panel.append(slotLabel);
-    const target = draftById(project, formTargetId);
+    const target = draftById(project, referenceFormTargetId);
     if (target) {
       const nodes = textOnlyNodes(target.content.html).slice(0, 24);
       if (nodes.length) {
@@ -840,7 +890,7 @@
         }
       }
     }
-    panel.append(button('建立嵌套引用', createReference, {disabled: !formSlotId || !formTargetId}));
+    panel.append(button('建立嵌套引用', createReference, {disabled: !referenceFormSlotId || !referenceFormTargetId}));
     panel.append(el('p', '重叠选区不会自动建立引用；引用必须显式建立，且不能指向自身或形成循环。', 'relations-note'));
   }
   function renderRight(project, ui) {
@@ -898,6 +948,7 @@
         const confirmed = await confirmImpact(plan);
         return confirmed ? plan.apply : false;
       });
+      ctx.registerGuard('reference:create', createReferenceGuard);
       window.addEventListener('resize', () => { if (ctx && !ctx.slots.center.hidden) drawLinks(); });
     },
     render
