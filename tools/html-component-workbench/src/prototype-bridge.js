@@ -54,7 +54,7 @@
     if(mode!=='edit')return;
     if(type==='click'){
       const node=event.target.closest?.('[data-wb-node]');
-      if(node){const id=node.dataset.wbNode;selection=event.shiftKey?(selection.includes(id)?selection.filter(value=>value!==id):[...selection,id]):[id];markSelection();emit('selection',{nodeIds:selection,pageId,stateId});}
+      if(node){const id=node.dataset.wbNode;selection=event.shiftKey?(selection.includes(id)?selection.filter(value=>value!==id):[...selection,id]):[id];markSelection();emit('selection',{nodeIds:selection,pageId,stateId,clickedId:id});}
     }
     event.preventDefault();event.stopImmediatePropagation();
   },{capture:true,passive:false});
