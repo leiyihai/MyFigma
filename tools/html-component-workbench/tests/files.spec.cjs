@@ -24,6 +24,8 @@ test('人工合法项目保留结构关系与恶意闭合文本，坏文件拒�
     [p=>p.references[0].targetDraftId='missing',/引用.*不存在/],
     [p=>p.groups[0].primaryId='draft-shared',/主体/],
     [p=>p.mappings[0].reviewId='missing',/复核/],
+    [p=>{p.reviews.push({id:'review-unlinked',kind:'mapping-stale',draftId:'draft-card',mappingId:'mapping-confirmed',message:'未双向关联',resolved:false});},/双向关联/],
+    [p=>{p.drafts[0].content.html=p.drafts[0].content.html.replace(/<div data-wb-ref-root[^>]*>[\s\S]*?<\/div>/,'');},/未嵌入/],
     [p=>p.prototype.html=p.prototype.html.replace('</head>','<style>div{background:url(https://invalid.local/a.png)}</style></head>'),/资源/],
     [p=>p.drafts[0].content.html+='<img src="blob:old-session">',/资源/],
     [p=>p.drafts[0].content.html+='<img src="data:image/svg+xml,%3Csvg%3E%3Cimage%20href=%22https://invalid.local/x%22/%3E%3C/svg%3E">',/资源/],
@@ -82,6 +84,51 @@ test('原型改版按稳定ID保留人工关系，变化与删除标记复核，
   assert.ok(updated.mappings.every(m=>m.reviewId&&updated.reviews.some(r=>r.id===m.reviewId&&r.kind==='mapping-stale'&&!r.resolved)));
   assert.deepEqual(updated.mappings[2].source.nodeIds,['amount'],'不按外观/序号把被删ID绑定到amount-new');
   await page.screenshot({path:path.join(evidence,'revision-reviews.png')});
+});
+
+test('原型改版新增页面、状态和稳定节点产生复核，不重写已有组件稿',async t=>{
+  const {page}=await openWorkbench(t);const original=await record(fixture);
+  await page.getByLabel('载入项目 HTML').setInputFiles(fixture);await status(page,'已载入项目');
+  const revised=original.prototype.html
+    .replace('"contentVersion":"1"','"contentVersion":"2"')
+    .replace('"pages":[{"id":"home","name":"主页","states":[{"id":"default","name":"默认"}]}]','"pages":[{"id":"home","name":"主页","states":[{"id":"default","name":"默认"},{"id":"added-state","name":"新增状态"}]},{"id":"added-page","name":"新增页面","states":[{"id":"first","name":"默认"}]}]')
+    .replace('<span data-wb-node="amount">12</span>','<span data-wb-node="amount">12</span><span data-wb-node="added-node">新增节点</span>');
+  assert.notEqual(revised,original.prototype.html,'改版样例确实新增了页面、状态与节点');
+  await page.getByLabel('更新原型 HTML').setInputFiles({name:'added.html',mimeType:'text/html',buffer:Buffer.from(revised)});
+  await status(page,'原型已更新');
+  await page.getByRole('heading',{name:'改版待复核'}).waitFor();
+  await page.getByText(/原型新增.*页面/).waitFor();
+  await page.getByText(/稳定节点 added-node/).waitFor();
+  const updated=await record(await save(page,'revision-added-project.html'));
+  assert.deepEqual(updated.drafts,original.drafts,'新增项不改写已有组件稿');
+  assert.deepEqual(updated.groups,original.groups);
+  assert.deepEqual(updated.references,original.references);
+  const added=updated.reviews.filter(review=>review.kind==='source-added');
+  assert.equal(added.length,1,'新增页面/状态/节点应产生一条聚合复核');
+  assert.equal(added[0].draftId,null);
+  assert.equal(added[0].mappingId,null);
+  assert.match(added[0].message,/新增页面/);
+  assert.match(added[0].message,/added-node/);
+  assert.match(added[0].message,/added-page/);
+  assert.equal(added[0].resolved,false);
+});
+
+test('改版删除当前 workspace 页面时回退到首个可用页面，不拒绝整次改版',async t=>{
+  const {page}=await openWorkbench(t);const original=await record(fixture);
+  assert.equal(original.workspace.pageId,'home');
+  await page.getByLabel('载入项目 HTML').setInputFiles(fixture);await status(page,'已载入项目');
+  const revised=original.prototype.html
+    .replace('"contentVersion":"1"','"contentVersion":"2"')
+    .replace('"id":"home"','"id":"home-v2"')
+    .replace('"name":"主页"','"name":"新主页"');
+  await page.getByLabel('更新原型 HTML').setInputFiles({name:'renamed-page.html',mimeType:'text/html',buffer:Buffer.from(revised)});
+  await status(page,'原型已更新');
+  const current=await page.getByRole('button',{name:'新主页 / 默认',exact:true}).getAttribute('aria-current');
+  assert.equal(current,'true','被删除的 workspace 页面应回退到新版首个页面');
+  const updated=await record(await save(page,'workspace-fallback-project.html'));
+  assert.equal(updated.workspace.pageId,'home-v2');
+  assert.equal(updated.workspace.stateId,'default');
+  assert.ok(updated.reviews.some(review=>review.kind==='source-missing'&&review.draftId==='draft-card'),'来源页面改名仍标记旧组件稿待复核');
 });
 
 test('仅原型内容版本或脚本变化也按稳定来源标记复核，不猜测重绑',async t=>{

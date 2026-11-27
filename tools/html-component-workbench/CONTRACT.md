@@ -9,6 +9,7 @@
 - 关系任务独占新增 `src/features/relations.js`、可选 `relations.css`、`tests/relations.spec.cjs`。
 - 文件任务独占新增 `src/features/files.js`、可选 `files.css`、`tests/files.spec.cjs`。
 - 不并发修改 app/shell/build/本文。需要扩展 Interface 时先通知集成方；测试样例各自放 `tests/fixtures/<任务>/`，不改基础受控样例。
+- 共用模块为 `src/features/common.js` 与 `common.css`（按文件名排序先于 `extraction/files/relations` 加载）：只定义 `window.WorkbenchCommon` 的惰性解析、沙箱预览文档、缩放控件、引用图/槽位重叠/有效映射判定，不注册 feature；特性模块不得各自复制这些实现。
 - 构建按文件名排序自动收集 features 的 JS/CSS 和 bridge-features JS，内联为 `dist/workbench.html`（可直接 file:// 打开）。features 都是普通 JS IIFE，不用 import、依赖和运行服务。
 
 ## 唯一测试 seam 与命令
@@ -32,7 +33,8 @@ $env:WORKBENCH_PLAYWRIGHT_ROOT = 'E:\MyFigma\tools\figma-project-assets\nine-sli
   format: 'html-component-workbench', formatVersion: 1,
   id: 'project-…', name: '未命名项目',
   prototype: null /* 或 {manifest, html, fileName}；html 为完整原始 HTML，不含宿主注入 */,
-  drafts: [], groups: [], references: [], mappings: [], reviews: []
+  drafts: [], groups: [], references: [], mappings: [], reviews: [],
+  workspace: null /* 或 {mode:'preview'|'edit', pageId, stateId}，仅查看位置/模式 */
 }
 // manifest 原型格式版本与内容版本分离，详见下节
 // Draft
@@ -40,14 +42,20 @@ $env:WORKBENCH_PLAYWRIGHT_ROOT = 'E:\MyFigma\tools\figma-project-assets\nine-sli
  content: {html, css, width, height, assets: []}, revision: 1}
 // Group：顺序保存，不按列表排序猜主体；不代表继承
 {id, name, primaryId, memberIds: []}
-// Reference：使用方指向来源；slotNodeId 是使用方 content 中稳定节点
+// Reference（嵌套复用/引用）：使用方指向来源；slotNodeId 是使用方 content 中稳定节点
 {id, ownerDraftId, targetDraftId, slotNodeId, overrides: [{nodeId, kind:'text', value}], targetRevision: 1}
 // Mapping：候选不成为强制复用依据
 {id, draftId, source: {prototypeId, pageId, stateId, nodeIds: []}, status:'candidate' /* confirmed | excluded */, reviewId: null}
 // Review：改版后保留人工决定但明确待复核
-{id, kind:'source-changed' /* source-missing | mapping-stale | unsupported */, draftId, mappingId:null, message, resolved:false}
+{id, kind:'source-changed' /* source-missing | source-added | mapping-stale | unsupported */, draftId, mappingId:null, message, resolved:false}
 ```
-数据是 JSON 可序列化值；不可放 DOM、函数、blob URL。资源最终须 data URL 或内联（由文件任务验证）。原型改版不得直接清空这些数组。新字段应向前兼容；关系和文件任务负责其领域完整性检查。组件稿 HTML 不能直接插入宿主可执行 DOM，必须沙箱预览。
+`workspace` 只记录重新打开时的查看位置和工作模式，用于恢复界面，不是原型业务状态，也不参与组件身份或来源判断。原型改版导致该页面/状态失效时，载入或改版流程回退到新版首个可用页面/状态，不因此拒绝整份项目。
+
+`references` 的 `slotNodeId` 必须位于 owner 的 `content.html`，且同一 owner 内不得与任何既有引用位置互为祖先/后代（重叠会删除旧位置并造成悬空引用，载入与新建都必须拒绝）。引用建立/更新后，owner 的 `content.html` 必须在 `slotNodeId` 内包含且仅包含一个 `<div data-wb-ref-root="<reference id>" data-wb-ref-target="<target draft id>">`；缺失、重复、目标不符或存在未登记 `data-wb-ref-root` 的项目文件视为关系损坏。被引用组件的 CSS 在嵌入时必须限定在对应 `data-wb-ref-root` 之下；`@keyframes` 等无法安全隔离的规则必须明确拒绝，不能把宽泛选择器直接并入使用方。
+
+`mappings[].reviewId` 与 `reviews[].mappingId` 必须双向一致：映射指向的复核必须回指该映射，复核指向的映射也必须回指该复核。`source-added` 复核聚合原型改版新增的页面、状态或稳定节点，`draftId` 与 `mappingId` 均为 `null`；其他复核必须绑定存在的组件稿。设计者可通过界面“解除复核”保留原绑定，或在编辑模式明确选区后“重新绑定到当前选区”；解除复核不自动改写人工决定，也不按外观/序号猜测重绑。
+
+数据是 JSON 可序列化值；不可放 DOM、函数、blob URL。资源最终须 data URL 或内联（由文件任务验证）。原型改版不得直接清空这些数组。新字段应向前兼容；关系和文件任务负责其领域完整性检查。组件稿 HTML 不能直接插入宿主可执行 DOM，必须沙箱预览；关系模块解析组件稿必须使用 DOMParser 等惰性解析，不得用 `template.innerHTML` 把草稿 HTML 写入宿主 DOM。
 
 ## 原型稳定节点协议
 
@@ -96,7 +104,7 @@ ctx 为同一个小 Interface：
 - `updateProject(mutator)`：先在深副本应用同步 mutator，成功才整体提交、触发统一 render；抛错不提交。`replaceProject(project)` 用于文件载入，文件模块先自行完整验证。
 - `selectedDraftIds` 必须保存真实多选顺序，由提取模块的左侧列表维护；关系模块读取该顺序，首项为主体。`activeDraftId` 只负责当前独立预览。
 - 组件稿 `content.html` 必须保留 `data-wb-node`，供引用 slot 和文字 overrides 稳定定位。
-- `registerGuard(command, async payload => true|false|apply)` 注册提交前检查，返回解除函数。`await runCommand(command,payload,(nextProject,payload)=>{/* 同步原子提交 */})` 按注册顺序等待 guards，false 取消且不提交；guard 抛错或期间项目改变也不提交。guard 可返回同步 `apply(nextProject,payload)` 函数，与主提交在同一副本按顺序执行，任一抛错整体不提交，用于引用展开/覆盖传播的原子更新。统一命令 `draft:update`，payload `{draftId, nextDraft}`；提取模块在覆盖更新前必须走此命令，关系模块注册 guard 预览影响、阻止冲突或返回 apply，不改提取内部实现。新建组件稿仍用 updateProject。
+- `registerGuard(command, async payload => true|false|apply)` 注册提交前检查，返回解除函数。`await runCommand(command,payload,(nextProject,payload)=>{/* 同步原子提交 */})` 按注册顺序等待 guards，false 取消且不提交；guard 抛错或期间项目改变也不提交。guard 可返回同步 `apply(nextProject,payload)` 函数，与主提交在同一副本按顺序执行，任一抛错整体不提交，用于引用展开/覆盖传播的原子更新。统一命令 `draft:update`，payload `{draftId, nextDraft}`；`reference:create`，payload `{ref}`。提取模块在覆盖更新前必须走 `draft:update`，关系模块注册 guard 预览影响、阻止冲突或返回 apply，不改提取内部实现。新建组件稿仍用 updateProject；新建嵌套引用必须走 `reference:create`，其 guard 在会同步既有使用方时先展示影响并等待确认。
 - `updateUI(patch)` 更新 UI 并统一重渲染。不能用它偷偷替代 `navigate`/`mode`；这两项使用 `await navigate(pageId,stateId)` / `await setMode(mode)`，桥接成功才更新 UI。
 - `host` 即以上 Interface；`notify(message, isError=false)` 可见结果/失败提示。
 - `slots` 提供该模块独占的 `{toolbar,left,center,right}` DOM 容器。shell 为每个 feature 在四个位置各创建一块，其他模块不修改、不清空。render 必须仅更新自己的容器；需要显示条件自行用 hidden。`center` 位于原型画布旁，shell 当 view=prototype 显示原型，否则隐藏原型但不销毁 iframe。

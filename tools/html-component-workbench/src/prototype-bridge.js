@@ -28,6 +28,8 @@
   const animate=Element.prototype.animate;
   Element.prototype.animate=function(...args){const animation=animate.apply(this,args);if(mode==='edit'){pausedAnimations.add(animation);animation.pause();}return animation;};
   new MutationObserver(()=>{if(mode==='edit')pauseAnimations();}).observe(document,{subtree:true,childList:true,attributes:true});
+  // 页面/状态/模式变化时通知桥接特性清理仅属于当前画面的检查状态（如临时隐藏）。
+  function announceScreenChange(){document.dispatchEvent(new CustomEvent('workbench:screen-change',{detail:{mode,pageId,stateId}}));}
   async function changeMode(payload){
     const next=payload.mode;if(!['preview','edit'].includes(next))throw Error('未知工作模式');
     if(next===mode){await window.WorkbenchPrototype.setMode(next);return {mode};}
@@ -45,6 +47,7 @@
       for(const animation of pausedAnimations)if(animation.playState==='paused')animation.play();pausedAnimations.clear();
       clearMarks();
     }
+    announceScreenChange();
     return {mode};
   }
   function clearMarks(){document.querySelectorAll('[data-wb-selected],[data-wb-hover]').forEach(node=>{node.removeAttribute('data-wb-selected');node.removeAttribute('data-wb-hover');});}
@@ -77,6 +80,7 @@
     await originalNavigate.call(window.WorkbenchPrototype,location);
     pageId=location.pageId;stateId=location.stateId;selection=[];clearMarks();
     if(mode==='edit')pauseAnimations();
+    announceScreenChange();
     emit('location',{pageId,stateId});
     return {pageId,stateId};
   }

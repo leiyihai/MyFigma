@@ -134,6 +134,29 @@ test('真实勾选顺序定义并修正组件组，主体变体标注与并排�
   await page.getByRole('heading', {name: '组件关系概览'}).waitFor();
 });
 
+test('引用位置与既有引用互为祖先或后代时明确拒绝，不留下悬空引用', async t => {
+  const {page, prototype} = await load(t);
+  await extract(page, prototype, 'card-b', '卡片乙');
+  await locate(page);
+  await extract(page, prototype, 'card-a', '卡片甲');
+  await locate(page);
+  await extract(page, prototype, 'stats', '统计条');
+  await components(page);
+  await createReference(page, '卡片甲', '统计条', 'slot-a', {'wood-value': '128'});
+  // card-a 是 slot-a 的祖先：替换 card-a 子层会删除既有引用位置。
+  await page.getByRole('button', {name: '组件：卡片甲（独立）', exact: true}).click();
+  await page.getByLabel('被引用组件', {exact: true}).selectOption({label: '统计条'});
+  await page.getByLabel('引用位置', {exact: true}).selectOption('card-a');
+  await page.getByRole('button', {name: '建立嵌套引用', exact: true}).click();
+  await page.getByRole('status').filter({hasText: /引用位置.*重叠/}).waitFor();
+  assert.equal(await page.getByRole('img', {name: /^引用：/}).count(), 1, '拒绝后不得新增引用');
+  await page.getByRole('button', {name: '组件：卡片甲（独立）', exact: true}).click();
+  await page.getByText(/共享结构修订 1/).waitFor();
+  const saved = await saveProject(page, 'overlap-rejected.html');
+  assert.equal(saved.project.references.length, 1);
+  assert.match(saved.project.drafts.find(draft => draft.name === '卡片甲').content.html, /data-wb-ref-root="ref-/);
+});
+
 test('显式引用按项目数据标注方向，选中后高亮使用方，自引用与循环被拒绝', async t => {
   const {page, prototype} = await load(t);
   await extract(page, prototype, 'card-b', '卡片乙');
@@ -389,6 +412,91 @@ test('来源映射候选可批量确认与排除，候选不是约束且导出�
   assert.ok(mappings.some(mapping => mapping.source.nodeIds.includes('heading') && mapping.status === 'candidate'), '候选来源保持候选状态');
 });
 
+test('关系概览的独立预览同样支持缩放检查，返回概览仍可读关系', async t => {
+  const {page} = await openWorkbench(t);
+  await page.getByLabel('载入项目 HTML').setInputFiles(path.join(root, 'tests/fixtures/relations/reviewed-project.html'));
+  await page.getByRole('status').filter({hasText: '已载入项目'}).waitFor();
+  await components(page);
+  const frame = await openPreview(page, '卡片');
+  const nativeWidth = Number(await page.locator('iframe[title="组件稿：卡片"]').getAttribute('width'));
+  await page.getByRole('button', {name: '放大组件稿', exact: true}).click();
+  await page.getByRole('button', {name: '放大组件稿', exact: true}).click();
+  await page.getByText('预览比例 150%', {exact: true}).waitFor();
+  const box = await page.locator('iframe[title="组件稿：卡片"]').boundingBox();
+  assert.ok(Math.abs(box.width - nativeWidth * 1.5) < 1.5, '关系预览缩放必须只改变显示尺寸');
+  await frame.getByText('位置覆盖 42', {exact: true}).waitFor();
+  await backOverview(page);
+  await page.getByText('当前有效复用约束：0 条（仅已确认且无未解决复核）', {exact: true}).waitFor();
+});
+
+test('引用目标 CSS 按引用根作用域隔离，无法隔离的动画规则明确拒绝', async t => {
+  const {page} = await openWorkbench(t);
+  await page.getByLabel('载入项目 HTML').setInputFiles(path.join(root, 'tests/fixtures/relations/scoped-project.html'));
+  await page.getByRole('status').filter({hasText: '已载入项目'}).waitFor();
+  await components(page);
+  await page.getByRole('button', {name: '组件：使用方（独立）', exact: true}).click();
+  await page.getByLabel('被引用组件', {exact: true}).selectOption({label: '共享文字'});
+  await page.getByLabel('引用位置', {exact: true}).selectOption('slot');
+  await page.getByRole('button', {name: '建立嵌套引用', exact: true}).click();
+  await page.getByRole('status').filter({hasText: '已建立嵌套引用：使用方 → 共享文字'}).waitFor();
+  await page.getByRole('button', {name: '独立预览：使用方', exact: true}).click();
+  const frame = page.frameLocator('iframe[title="组件稿：使用方"]');
+  await frame.getByText('目标文字', {exact: true}).waitFor();
+  const own = await frame.locator('[data-wb-node="own"]').evaluate(node => getComputedStyle(node).color);
+  const shared = await frame.locator('[data-wb-ref-node="value"]').evaluate(node => getComputedStyle(node).color);
+  assert.equal(own, 'rgb(0, 0, 255)', '被引用组件的宽泛样式不能污染使用方自有内容');
+  assert.equal(shared, 'rgb(200, 0, 0)', '作用域规则仍须命中引用位置内部的目标内容');
+  await page.getByRole('button', {name: '返回关系概览', exact: true}).click();
+  await page.getByRole('heading', {name: '组件关系概览'}).waitFor();
+  // 无法可靠隔离的 @keyframes 规则必须明确拒绝，不能静默丢样式或污染使用方。
+  await page.getByRole('button', {name: /^组件：使用方（/}).click();
+  await page.getByLabel('被引用组件', {exact: true}).selectOption({label: '动画目标'});
+  await page.getByLabel('引用位置', {exact: true}).selectOption('slot2');
+  await page.getByRole('button', {name: '建立嵌套引用', exact: true}).click();
+  await page.getByRole('status').filter({hasText: /@keyframes|隔离/}).waitFor();
+  assert.equal(await page.getByRole('img', {name: /^引用：/}).count(), 1, '无法隔离样式时不得新增引用');
+  const saved = await saveProject(page, 'scoped-project.html');
+  const owner = saved.project.drafts.find(draft => draft.name === '使用方');
+  assert.match(owner.content.css, /\[data-wb-ref-root="ref-[^"]+"\]\s*span\s*\{[^}]*color:\s*rgb\(200,\s*0,\s*0\)/, '目标样式必须限定在引用根之下');
+  assert.equal(saved.project.drafts.find(draft => draft.name === '共享文字').content.css, 'span{color:rgb(200, 0, 0)}', '组件稿自身样式保持可独立预览');
+});
+
+test('待复核映射可显式解除复核，解除后重新成为有效约束', async t => {
+  const {page} = await openWorkbench(t);
+  await page.getByLabel('载入项目 HTML').setInputFiles(path.join(root, 'tests/fixtures/relations/reviewed-project.html'));
+  await page.getByRole('status').filter({hasText: '已载入项目'}).waitFor();
+  await components(page);
+  await page.getByText('当前有效复用约束：0 条（仅已确认且无未解决复核）', {exact: true}).waitFor();
+  await page.getByRole('button', {name: '解除复核', exact: true}).click();
+  await page.getByRole('status').filter({hasText: '已解除复核'}).waitFor();
+  await page.getByText('已确认（有效）', {exact: true}).waitFor();
+  await page.getByText('当前有效复用约束：1 条（仅已确认且无未解决复核）', {exact: true}).waitFor();
+  const saved = await saveProject(page, 'review-resolved-project.html');
+  const review = saved.project.reviews.find(item => item.id === 'review-mapping-stale');
+  assert.equal(review.resolved, true, '解除复核必须记录为已解决');
+  assert.equal(saved.project.mappings.find(item => item.id === 'mapping-confirmed').status, 'confirmed', '解除复核不改变人工确认状态');
+  assert.equal(saved.project.mappings.find(item => item.id === 'mapping-confirmed').reviewId, review.id, '保留复核审计关联');
+});
+
+test('待复核映射可在编辑选区后重新绑定来源，明确改变原绑定', async t => {
+  const {page, prototype} = await openWorkbench(t);
+  await page.getByLabel('载入项目 HTML').setInputFiles(path.join(root, 'tests/fixtures/relations/reviewed-project.html'));
+  await page.getByRole('status').filter({hasText: '已载入项目'}).waitFor();
+  await page.getByRole('tab', {name: '界面', exact: true}).click();
+  await page.getByRole('button', {name: '编辑', exact: true}).click();
+  await page.getByRole('status').filter({hasText: '业务输入与自动变化已冻结'}).waitFor();
+  await prototype.locator('[data-wb-node="title"]').click();
+  await page.getByText('title', {exact: true}).waitFor();
+  await components(page);
+  await page.getByRole('button', {name: '重新绑定到当前选区', exact: true}).click();
+  await page.getByRole('status').filter({hasText: '已重新绑定'}).waitFor();
+  await page.getByText('已确认（有效）', {exact: true}).waitFor();
+  const saved = await saveProject(page, 'review-rebound-project.html');
+  const mapping = saved.project.mappings.find(item => item.id === 'mapping-confirmed');
+  assert.deepEqual(mapping.source.nodeIds, ['title'], '重新绑定必须使用明确选区而不是外观猜测');
+  assert.equal(saved.project.reviews.find(item => item.id === 'review-mapping-stale').resolved, true);
+});
+
 test('未解决复核的已确认映射不冒充当前有效约束', async t => {
   const {page} = await openWorkbench(t);
   await page.getByLabel('载入项目 HTML').setInputFiles(path.join(root, 'tests/fixtures/relations/reviewed-project.html'));
@@ -397,6 +505,84 @@ test('未解决复核的已确认映射不冒充当前有效约束', async t => 
   await page.getByText('已确认（待复核，非当前有效约束）', {exact: true}).waitFor();
   await page.getByText('当前有效复用约束：0 条（仅已确认且无未解决复核）', {exact: true}).waitFor();
   await page.getByText('候选', {exact: true}).waitFor();
+});
+
+test('建立引用会同步既有使用方时先展示影响，取消不改动、确认后才提交', async t => {
+  const {page, prototype} = await load(t);
+  for (const [nodeId, name] of [['card-b', '内层'], ['card-a', '外壳'], ['stats', '统计条'], ['stats', '统计条副本']]) {
+    await extract(page, prototype, nodeId, name);
+    await locate(page);
+  }
+  await components(page);
+  await createReference(page, '内层', '统计条', 'slot-b', {'wood-value': '96'});
+  await createReference(page, '外壳', '内层', 'slot-a', {'title-b': '内层标题覆盖'});
+  const before = await saveProject(page, 'reference-impact-before.html');
+  const shellBefore = before.project.drafts.find(draft => draft.name === '外壳');
+  assert.equal(shellBefore.revision, 2);
+  // 再次引用另一组件会更新“内层”，而“外壳”正在引用“内层”，必须先确认影响。
+  await selectChip(page, '内层');
+  await page.getByLabel('被引用组件', {exact: true}).selectOption({label: '统计条副本'});
+  await page.getByLabel('引用位置', {exact: true}).selectOption('slot-b-extra');
+  await page.getByRole('button', {name: '建立嵌套引用', exact: true}).click();
+  await page.getByRole('heading', {name: '建立引用影响'}).waitFor();
+  await page.getByText(/1 个使用方的共享结构将同步/).waitFor();
+  await page.getByText('外壳 · 位置 slot-a · 覆盖：title-b=内层标题覆盖', {exact: true}).waitFor();
+  await page.getByRole('button', {name: '取消建立', exact: true}).click();
+  await page.getByRole('status').filter({hasText: '已取消建立引用'}).waitFor();
+  assert.equal(await page.getByRole('img', {name: /^引用：/}).count(), 2, '取消不得新增引用');
+  const cancelled = await saveProject(page, 'reference-impact-cancelled.html');
+  assert.equal(cancelled.project.references.length, 2);
+  assert.deepEqual(cancelled.project.drafts.find(draft => draft.name === '外壳'), shellBefore, '取消不得静默重写既有使用方');
+  // 再次建立并确认：上游使用方同步，引用与修订都提交。
+  await page.getByRole('button', {name: '建立嵌套引用', exact: true}).click();
+  await page.getByRole('heading', {name: '建立引用影响'}).waitFor();
+  await page.getByRole('button', {name: '确认建立并同步', exact: true}).click();
+  await page.getByRole('status').filter({hasText: '已建立嵌套引用：内层 → 统计条副本'}).waitFor();
+  assert.equal(await page.getByRole('img', {name: /^引用：/}).count(), 3);
+  const committed = await saveProject(page, 'reference-impact-committed.html');
+  assert.equal(committed.project.references.length, 3);
+  const names = Object.fromEntries(committed.project.drafts.map(draft => [draft.id, draft.name]));
+  const shellRef = committed.project.references.find(ref => names[ref.ownerDraftId] === '外壳');
+  const inner = committed.project.drafts.find(draft => draft.name === '内层');
+  assert.equal(shellRef.targetRevision, inner.revision, '既有使用方同步后引用修订必须更新');
+  const shell = committed.project.drafts.find(draft => draft.name === '外壳');
+  assert.equal((shell.content.html.match(/data-wb-ref-root/g) || []).length, 3, '使用方共享结构应包含间接引用的新结构');
+});
+
+test('更新组件组主体不会自动继承到变体，主体与变体保持独立内容', async t => {
+  const {page, prototype} = await load(t);
+  await extract(page, prototype, 'card-a', '主体卡');
+  await locate(page);
+  await extract(page, prototype, 'card-b', '变体卡');
+  await locate(page);
+  await components(page);
+  await page.getByLabel('选择组件稿：变体卡', {exact: true}).uncheck();
+  await page.getByLabel('选择组件稿：主体卡', {exact: true}).check();
+  await page.getByLabel('选择组件稿：变体卡', {exact: true}).check();
+  await page.getByText('选择顺序：主体卡 → 变体卡', {exact: true}).waitFor();
+  await page.getByLabel('组件组名称', {exact: true}).fill('主体不变体组');
+  await page.getByRole('button', {name: '定义组件组', exact: true}).click();
+  await page.getByRole('group', {name: '组件组：主体不变体组', exact: true}).waitFor();
+  const before = await saveProject(page, 'primary-no-inheritance-before.html');
+  const variantBefore = before.project.drafts.find(draft => draft.name === '变体卡');
+  // 主体更新为只包含标题的来源范围。
+  await selectChip(page, '主体卡');
+  await page.getByRole('button', {name: '定位来源', exact: true}).click();
+  await page.getByRole('status').filter({hasText: '已定位来源'}).waitFor();
+  await prototype.locator('[data-wb-node="title-a"]').click();
+  await page.getByText('title-a', {exact: true}).waitFor();
+  await page.getByRole('button', {name: '更新提取范围', exact: true}).click();
+  await page.getByRole('status').filter({hasText: '组件稿提取范围已更新'}).waitFor();
+  await components(page);
+  await selectChip(page, '变体卡');
+  const frame = await openPreview(page, '变体卡');
+  await frame.getByRole('heading', {name: '木工作坊'}).waitFor();
+  await backOverview(page);
+  const after = await saveProject(page, 'primary-no-inheritance-after.html');
+  assert.equal(after.project.drafts.find(draft => draft.name === '主体卡').revision, 2);
+  assert.deepEqual(after.project.drafts.find(draft => draft.name === '变体卡'), variantBefore, '主体更新不得改写变体内容、来源或修订');
+  assert.deepEqual(after.project.groups, before.project.groups, '主体更新不改变组件组成员');
+  assert.deepEqual(after.project.references, [], '同组关系不是继承，也不自动建立引用');
 });
 
 test('共享组件更新按依赖顺序传递到间接使用方，各自覆盖保留', async t => {

@@ -39,7 +39,11 @@ async function createReference(page, ownerName, targetName, slotId, overrides = 
   await page.getByLabel('引用位置', {exact: true}).selectOption(slotId);
   for (const [nodeId, value] of Object.entries(overrides)) await page.getByLabel('覆盖文字：' + nodeId, {exact: true}).fill(value);
   await page.getByRole('button', {name: '建立嵌套引用', exact: true}).click();
-  await status(page, '已建立嵌套引用');
+  // 使用方本身已被引用时，建立引用会先展示上游影响；测试按公开 UI 确认后继续。
+  await page.waitForFunction(({heading, status}) => [...document.querySelectorAll('h2')].some(node => node.textContent === heading)
+    || document.querySelector('[role="status"]')?.textContent.includes(status), {heading: '建立引用影响', status: '已建立嵌套引用：' + ownerName});
+  if (await page.getByRole('heading', {name: '建立引用影响'}).count()) await page.getByRole('button', {name: '确认建立并同步', exact: true}).click();
+  await status(page, '已建立嵌套引用：' + ownerName + ' → ' + targetName);
 }
 async function loadRelations(t, viewport) {
   const result = await openWorkbench(t, {viewport});
@@ -522,6 +526,9 @@ test('验收失败保护：不支持提取、循环/悬空引用、损坏与未�
   await rejected(withProject(project => { project.formatVersion = 99; }), 'future.html', '不支持的项目格式或版本');
   await rejected(withProject(project => { project.references[0].targetDraftId = 'draft-missing'; }), 'dangling.html', /引用.*不存在/);
   await rejected(withProject(project => { project.references[0].slotNodeId = 'slot-missing'; }), 'slot.html', /引用位置不存在/);
+  await rejected(withProject(project => {
+    project.references.push({...project.references[0], id: 'ref-overlapping-slot', slotNodeId: 'card-a', overrides: []});
+  }), 'overlap.html', /重叠/);
   await rejected(withProject(project => { project.references[0].ownerDraftId = project.references[0].targetDraftId; }), 'self.html', /引用不能指向自身/);
   // 丢资源：组件稿图片字节损坏、原型引用外部地址、未来原型格式都明确拒绝。
   await rejected(withProject(project => {

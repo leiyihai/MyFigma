@@ -4,8 +4,9 @@
   let hiddenIds=[];
   const hiddenStyle=document.createElement('style');
   function restoreHidden(){hiddenIds=[];hiddenStyle.textContent='';}
-  const observer=new MutationObserver(()=>{if(bridge.getContext().mode!=='edit')restoreHidden();});
-  window.addEventListener('DOMContentLoaded',()=>{document.head.append(hiddenStyle);observer.observe(document.documentElement,{subtree:true,attributes:true,attributeFilter:['data-wb-selected','data-wb-hover']});});
+  // 临时显隐只属于当前画面：切换页面/状态/模式时由桥接统一通知恢复。
+  document.addEventListener('workbench:screen-change',restoreHidden);
+  window.addEventListener('DOMContentLoaded',()=>{document.head.append(hiddenStyle);});
   const required=()=>{if(bridge.getContext().mode!=='edit')throw Error('请先进入编辑模式');};
   bridge.register('extraction:visibility',payload=>{
     required();
@@ -48,6 +49,7 @@
         if(active){
           const label=node.dataset.wbNode||node.tagName.toLowerCase();
           if(blocked.has(node.tagName)||node.shadowRoot)throw Error('无法保真提取节点 '+label+'：不支持 '+node.tagName.toLowerCase()+' / Shadow DOM');
+          if(node.namespaceURI==='http://www.w3.org/2000/svg'&&['use','image'].includes(node.localName)&&(node.hasAttribute('href')||node.hasAttribute('xlink:href')))throw Error('无法保真提取节点 '+label+'：不支持 SVG use / image 引用');
           if(computed.perspective!=='none'||computed.transform.startsWith('matrix3d')||computed.backdropFilter!=='none'||computed.filter!=='none'||computed.mixBlendMode!=='normal')throw Error('无法保真提取节点 '+label+'：不支持 3D、滤镜或混合模式');
           if(computed.position==='fixed'||computed.position==='sticky')throw Error('无法保真提取节点 '+label+'：不支持 fixed / sticky 定位');
         }
