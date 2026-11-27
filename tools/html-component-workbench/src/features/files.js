@@ -253,10 +253,12 @@
     const embedded=document.querySelector('script#workbench-project[type="application/json"]');
     if(embedded)queueMicrotask(()=>run(()=>load(readProject(document.documentElement.outerHTML))));
   },render(ctx){
-    const pending=ctx.getProject().reviews.filter(review=>!review.resolved),slot=ctx.slots.right;slot.replaceChildren();slot.hidden=!pending.length;
+    const project=ctx.getProject(),pending=project.reviews.filter(review=>!review.resolved),slot=ctx.slots.right;slot.replaceChildren();slot.hidden=!pending.length;
     if(!pending.length)return;
+    const draftNames=new Map(project.drafts.map(draft=>[draft.id,draft.name]));
+    const kindLabels={'source-changed':'来源已变化','source-missing':'来源已删除或失效','mapping-stale':'映射来源失效','unsupported':'提取条件不支持'};
     const heading=document.createElement('h2');heading.textContent='改版待复核';slot.append(heading);
     const note=document.createElement('p');note.className='helper';note.textContent='旧组件稿与人工决定已保留。带未解决复核记录的确认映射不是当前版本有效复用约束。';slot.append(note);
-    const list=document.createElement('ul');for(const review of pending){const item=document.createElement('li');item.textContent=review.draftId+' · '+review.kind+'：'+review.message;list.append(item);}slot.append(list);
+    const list=document.createElement('ul');for(const review of pending){const item=document.createElement('li');item.textContent=(draftNames.get(review.draftId)||review.draftId)+' · '+(kindLabels[review.kind]||review.kind)+'：'+review.message;list.append(item);}slot.append(list);
   }});
 })();
