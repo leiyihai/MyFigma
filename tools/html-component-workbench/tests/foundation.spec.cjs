@@ -134,6 +134,30 @@ test('不兼容、能力缺失、重复节点和不可用资源明确拒绝，�
   }
 });
 
+test('候选原型初始导航或模式拒绝时保留旧画布与业务计数', async t => {
+  const {page,prototype}=await openWorkbench(t);
+  await page.getByRole('button',{name:'打开受控示例'}).click();
+  await page.getByRole('status').filter({hasText:'已载入：受控组件样例'}).waitFor();
+  await prototype.getByRole('button',{name:'收取木材'}).click();
+  const source=await readFile(path.join(root,'examples/controlled.html'),'utf8');
+  const cases=[
+    [source.replace('function navigate({pageId,stateId}) {',"function navigate({pageId,stateId}) {document.querySelector('h1').textContent='候选半提交';throw Error('候选导航拒绝');"),/候选导航拒绝/],
+    [source.replace('setMode(next){mode=next;}',"setMode(next){document.querySelector('h1').textContent='候选半提交';throw Error('候选模式拒绝');}"),/候选模式拒绝/]
+  ];
+  let count=128;
+  for(const [html,error] of cases){
+    await page.getByLabel('载入原型 HTML').setInputFiles({name:'rejected-candidate.html',mimeType:'text/html',buffer:Buffer.from(html)});
+    await page.waitForFunction(pattern=>new RegExp(pattern).test(document.querySelector('[role="status"]').textContent),error.source);
+    assert.equal(await prototype.getByLabel('木材数量').textContent(),String(count));
+    assert.equal(await prototype.getByRole('heading',{name:'林间营地',exact:true}).isVisible(),true);
+    assert.equal(await page.getByRole('heading',{name:'原型控制失败，画布已停止'}).isVisible(),false);
+    assert.equal(await page.locator('iframe[title="原型载入校验"]').count(),0);
+    assert.equal(await page.getByRole('button',{name:'卡片 / 默认',exact:true}).getAttribute('aria-current'),'true');
+    await prototype.getByRole('button',{name:'收取木材'}).click();count+=8;
+    assert.equal(await prototype.getByLabel('木材数量').textContent(),String(count));
+  }
+});
+
 test('真实 RAF、WAAPI 和一次计时器在编辑中停止，原本暂停动画不被误恢复', async t => {
   const {page,prototype}=await openWorkbench(t);
   const html=(await readFile(path.join(root,'examples/controlled.html'),'utf8')).replace('</body>',`<div style="position:absolute;bottom:0;left:0"><output aria-label="帧计数">0</output><output aria-label="一次任务">等待</output><span aria-label="脚本动画" style="display:inline-block">◆</span><span aria-label="原本暂停动画" style="display:inline-block">◇</span></div><script>(()=>{let frames=0;function step(){document.querySelector('[aria-label="帧计数"]').textContent=++frames;requestAnimationFrame(step);}requestAnimationFrame(step);setTimeout(()=>document.querySelector('[aria-label="一次任务"]').textContent='完成',1200);document.querySelector('[aria-label="脚本动画"]').animate([{transform:'translateX(0)'},{transform:'translateX(100px)'}],{duration:900,iterations:Infinity});const paused=document.querySelector('[aria-label="原本暂停动画"]').animate([{transform:'translateX(0)'},{transform:'translateX(100px)'}],{duration:900,iterations:Infinity});paused.pause();})();</script></body>`);

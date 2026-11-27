@@ -16,14 +16,30 @@
     return manifest;
   }
   function createHost(container) {
-    let active=null;
+    let active=null,loading=false;
     const listeners=new Set();
-    const dispose=entry=>{if(!entry)return;entry.port.close();entry.frame.remove();for(const pending of entry.pending.values()){clearTimeout(pending.timer);pending.reject(Error('原型已替换'));}};
-    async function load(html,fileName='prototype.html') {
+    const dispose=entry=>{if(!entry)return;entry.port.close();entry.frame.remove();for(const pending of entry.pending.values()){clearTimeout(pending.timer);pending.reject(Error('原型已替换'));}entry.pending.clear();};
+    function requestEntry(entry,type,payload={}){
+      const requestId=crypto.randomUUID();
+      return new Promise((resolve,reject)=>{
+        const timer=setTimeout(()=>{entry.pending.delete(requestId);reject(Error('原型操作超时：'+type));},4000);
+        entry.pending.set(requestId,{resolve,reject,timer});entry.port.postMessage({protocol,type,requestId,payload});
+      });
+    }
+    async function load(html,fileName='prototype.html',options={}){
+      if(loading)throw Error('正在载入原型，请稍候');loading=true;
+      try{return await prepareLoad(html,fileName,options);}finally{loading=false;}
+    }
+    async function prepareLoad(html,fileName,options) {
       const doc=new DOMParser().parseFromString(html,'text/html');
       const raw=doc.querySelector('script#workbench-manifest[type="application/json"]');
       if(!raw)throw Error('原型未适配：缺少 workbench-manifest 接入清单');
       let manifest;try{manifest=validateManifest(JSON.parse(raw.textContent));}catch(error){throw Error('无法载入：'+error.message);}
+      const mode=options.mode??'preview',pageId=options.pageId??manifest.pages[0].id;
+      const page=manifest.pages.find(item=>item.id===pageId),stateId=options.stateId??page?.states[0].id;
+      if(!['preview','edit'].includes(mode))throw Error('候选原型工作模式无效');
+      if(!page?.states.some(state=>state.id===stateId))throw Error('候选原型页面或状态无效');
+      if(options.beforeCommit!==undefined&&typeof options.beforeCommit!=='function')throw Error('beforeCommit 必须是同步校验函数');
       if(doc.querySelector('script[src],link[rel="stylesheet"],base,iframe,object,embed'))throw Error('原型仅支持内联资源，不支持外部脚本、样式、base 或嵌入窗口');
       for(const image of doc.images)if(!image.getAttribute('src')?.startsWith('data:')||image.hasAttribute('srcset'))throw Error('图片资源不可用：仅支持内联 data: 图片，不支持外部 URL / srcset');
       const css=[...doc.querySelectorAll('style')].map(style=>style.textContent).concat([...doc.querySelectorAll('[style]')].map(node=>node.getAttribute('style'))).join('\n');
@@ -40,6 +56,7 @@
       frame.srcdoc=html.replace(head[0],head[0]+injection);
       const channel=new MessageChannel();
       const entry={frame,port:channel.port1,manifest,pending:new Map(),ready:false};
+      const prototype={manifest:structuredClone(manifest),html,fileName};
       try {
         await new Promise((resolve,reject)=>{
           const timer=setTimeout(()=>reject(Error('原型载入超时：桥接或适配器未就绪')),4000);
@@ -53,12 +70,14 @@
               }
               return;
             }
-            if(entry!==active)return;
             if(data.type==='response'){
               const pending=entry.pending.get(data.requestId);if(!pending)return;
               clearTimeout(pending.timer);entry.pending.delete(data.requestId);
               data.error?pending.reject(Error(data.error)):pending.resolve(data.payload);
-            }else if(data.type==='location'&&manifest.pages.some(page=>page.id===data.payload?.pageId&&page.states.some(state=>state.id===data.payload?.stateId))){
+              return;
+            }
+            if(entry!==active)return;
+            if(data.type==='location'&&manifest.pages.some(page=>page.id===data.payload?.pageId&&page.states.some(state=>state.id===data.payload?.stateId))){
               listeners.forEach(fn=>fn({type:'location',payload:{pageId:data.payload.pageId,stateId:data.payload.stateId}}));
             }else if(data.type==='selection'&&Array.isArray(data.payload?.nodeIds)&&data.payload.nodeIds.every(id=>typeof id==='string')&&data.payload.nodeIds.length<10000){
               listeners.forEach(fn=>fn({type:'selection',payload:data.payload}));
@@ -67,23 +86,29 @@
           frame.addEventListener('load',()=>frame.contentWindow.postMessage({protocol,type:'connect'},'*',[channel.port2]),{once:true});
           container.append(frame);
         });
+        await requestEntry(entry,'navigate',{pageId,stateId});
+        await requestEntry(entry,'mode',{mode});
+        if(options.beforeCommit){
+          const result=options.beforeCommit(structuredClone(prototype));
+          if(result&&typeof result.then==='function'){
+            Promise.resolve(result).catch(()=>{});
+            throw Error('beforeCommit 必须同步完成，不能返回 Promise');
+          }
+          if(result===false)throw Error('候选原型提交前校验未通过');
+        }
       } catch(error){dispose(entry);throw error;}
       dispose(active);active=entry;frame.title='原型画布';frame.classList.remove('candidate');
-      // Candidate frames are initially offscreen. Commit only after a visible paint so native
-      // hit-testing and animation timelines are ready before the UI reports a usable import.
+      // Candidate frames are initially offscreen. Only report readiness after a visible paint
+      // so native hit-testing and animation timelines are ready; this wait cannot reject.
       await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-      return {manifest:structuredClone(manifest),html,fileName};
+      return prototype;
     }
     return {
       load,
       stop(){dispose(active);active=null;},
       request(type,payload={}){
         if(!active)return Promise.reject(Error('请先载入原型'));
-        const entry=active,requestId=crypto.randomUUID();
-        return new Promise((resolve,reject)=>{
-          const timer=setTimeout(()=>{entry.pending.delete(requestId);reject(Error('原型操作超时：'+type));},4000);
-          entry.pending.set(requestId,{resolve,reject,timer});entry.port.postMessage({protocol,type,requestId,payload});
-        });
+        return requestEntry(active,type,payload);
       },
       subscribe(listener){listeners.add(listener);return()=>listeners.delete(listener);},
       get element(){return active?.frame||null;},get manifest(){return active?structuredClone(active.manifest):null;}

@@ -70,7 +70,9 @@ $env:WORKBENCH_PLAYWRIGHT_ROOT = 'E:\MyFigma\tools\figma-project-assets\nine-sli
 ## Host / Bridge Interface
 
 宿主 `Workbench.host`：
-- `await load(html, fileName)`：验证并暂存候选 iframe，握手成功才替换当前原型；返回 `{manifest, html, fileName}`，失败抛出可展示错误。
+- `await load(html, fileName, options={})`：验证并暂存候选 iframe；options 可含 `{mode:'preview'|'edit',pageId,stateId,beforeCommit}`，默认预览及第一页第一个状态。候选完成握手、目标 navigate 和 mode 后才替换当前原型；即使同模式也会调用 adapter.setMode（须幂等）。返回 `{manifest,html,fileName}`。任何校验、导航、模式或超时失败均丢弃候选，旧画布与业务状态不变。
+- `beforeCommit(candidatePrototype)` 是可选**同步**校验钩子，接收候选资料副本；在所有可失败异步初始化完成后、替换旧画布前执行。可检查项目快照仍未改变；抛错或返回 false 拒绝提交。不得 await 该钩子；返回 Promise 会被明确拒绝。钩子不要修改项目或产生其他副作用。最终替换后不再导航/切模式/执行可失败异步操作，仅等待不拒绝的可见绘制帧后返回。并发 load 明确拒绝。
+- 候选专用 port 的 pending response 可在尚未 active 时响应初始化命令；selection/location 事件始终只接受 active 原型，不向宿主泄漏候选状态。调用方在 await load 成功后同步 replaceProject/updateUI，不再发可失败的初始化命令。
 - `await request(type, payload={})`：向当前原型发送有超时的命令，返回 JSON 结果。基础命令 `navigate`、`mode`、`selection`（设置 IDs），`inspect`（返回当前稳定节点的标签、父 ID、bounds）；后续提取扩展注册新命令。
 - 原型业务导航也必须调用公开 `window.WorkbenchPrototype.navigate(location)`，不可绕过它调用私有渲染函数；桥接包装此方法并发送 `location`，让宿主当前页面保持一致。
 - `subscribe(listener)`：事件 `{type:'location',payload:{pageId,stateId}}` 或 `{type:'selection', payload:{nodeIds, pageId,stateId}}`；订阅函数返回 unsubscribe。宿主只接受当前 iframe、专用 MessagePort、正确协议和 requestId 的预期消息，任何原型消息都不能直接 patch 项目。
@@ -103,7 +105,8 @@ ctx 为同一个小 Interface：
 ## 单 HTML 导出安全（文件任务）
 
 - 惰性 JSON 建议使用唯一 `script#workbench-project[type="application/json"]`，至少包含以上完整 Project。序列化必须转义 `<` 为 JSON 文本 `\u003c`（JS replacement 字符串写作 `'\\u003c'`）（包括任何大小写的 `</script>`），不能把用户 HTML 当顶层脚本或属性直接拼接。
-- 单文件可以封装当前完整工作台（壳层初始化会重建 root）；文件特性 mount 时发现惰性项目记录，先完整校验、`await ctx.host.load(project.prototype.html, fileName)`，成功后 replaceProject + updateUI；无须改 app/start。空白会话载入也走同一校验流程。不得执行被载入 HTML 顶层脚本来读数据。
+- 单文件可以封装当前完整工作台（壳层初始化会重建 root）；文件特性 mount 时发现惰性项目记录，先完整校验、`await ctx.host.load(project.prototype.html, fileName, {mode,pageId,stateId,beforeCommit})`，候选初始化全部成功后同步 replaceProject + updateUI；无须改 app/start。空白会话载入也走同一校验流程。不得执行被载入 HTML 顶层脚本来读数据。
+- 基础“载入原型／打开受控示例”入口仅用于未整理项目；drafts/groups/references/mappings/reviews 任一非空即阻止直接覆盖，并提示使用文件特性的“更新原型”。文件特性负责预先完整验证、计算 reviews、保存项目快照，并以 beforeCommit 同步确认快照仍未改变。基础故障恢复的“重新载入当前原型”只允许完全相同 HTML，保留既有资料；候选载入期间项目发生变化也拒绝提交。
 - 项目载入先验证、暂存再提交；拒绝未知版本、损坏关系、不可携带资源。draft 内容始终在无脚本沙箱中预览，禁止 innerHTML 进入宿主、事件属性/导航/脚本/任意 URL 执行。原型始终由 host 的不透明来源沙箱承载，不能为导出 viewer 取消隔离。
 - CSP 只是防护，不是资源完整性证据。文件模块全面审计 CSS/SVG/字体/媒体等必要资源，拒绝缓存、外链、blob URL、开发机路径；新 BrowserContext 离线 file:// 打开下载文件及空工作台重新载入是唯一保存闭环验收。
 
