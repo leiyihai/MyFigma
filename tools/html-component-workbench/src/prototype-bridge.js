@@ -30,7 +30,7 @@
   new MutationObserver(()=>{if(mode==='edit')pauseAnimations();}).observe(document,{subtree:true,childList:true,attributes:true});
   async function changeMode(payload){
     const next=payload.mode;if(!['preview','edit'].includes(next))throw Error('未知工作模式');
-    if(next===mode)return {mode};
+    if(next===mode){await window.WorkbenchPrototype.setMode(next);return {mode};}
     if(next==='edit'){
       mode='edit';
       for(const timer of timers.values()){nativeClear(timer.native);timer.remaining=Math.max(0,timer.due-performance.now());}

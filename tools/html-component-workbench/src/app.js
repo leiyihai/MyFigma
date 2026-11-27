@@ -28,17 +28,20 @@
       updateProject(next=>{commit(next,structuredClone(payload));for(const apply of appliers)apply(next,structuredClone(payload));});return true;
     }
   };
-  async function importPrototype(html,fileName){
-    if(busy)throw Error('正在载入原型，请稍候');busy=true;
+  async function importPrototype(html,fileName,reloadCurrent=false){
+    if(busy)throw Error('正在载入原型，请稍候');
+    const hasDecisions=['drafts','groups','references','mappings','reviews'].some(key=>project[key]?.length);
+    if(hasDecisions&&!(reloadCurrent&&html===project.prototype?.html))throw Error('项目已有整理成果，请使用文件工具的“更新原型”入口，保留来源复核与人工决定。');
+    busy=true;const revision=projectRevision;
     try {
-      const prototype=await host.load(html,fileName);
+      const prototype=await host.load(html,fileName,{beforeCommit(){if(projectRevision!==revision)throw Error('项目已变化，候选原型未提交，请重试或使用“更新原型”入口。');}});
       updateProject(next=>{next.prototype=prototype;if(next.name==='未命名项目')next.name=prototype.manifest.name;});
       const first=prototype.manifest.pages[0];updateUI({mode:'preview',blockedReason:null,pageId:first.id,stateId:first.states[0].id,selection:[],tab:'screens',view:'prototype'});
       notify('已载入：'+prototype.manifest.name);
     }finally{busy=false;}
   }
   shell.root.querySelector('input[type=file]').onchange=async event=>{const file=event.target.files[0];if(!file)return;try{await importPrototype(await file.text(),file.name);}catch(error){notify(error.message,true);}finally{event.target.value='';}};
-  shell.byId('reload-prototype').onclick=()=>{const prototype=project.prototype;if(prototype)importPrototype(prototype.html,prototype.fileName).catch(error=>notify(error.message,true));};
+  shell.byId('reload-prototype').onclick=()=>{const prototype=project.prototype;if(prototype)importPrototype(prototype.html,prototype.fileName,true).catch(error=>notify(error.message,true));};
   shell.byId('open-example').onclick=()=>importPrototype(window.WORKBENCH_BUILD.example,'controlled.html').catch(error=>notify(error.message,true));
   shell.byId('screens-tab').onclick=()=>updateUI({tab:'screens',view:'prototype'});
   shell.byId('components-tab').onclick=()=>updateUI({tab:'components',view:'relations'});
