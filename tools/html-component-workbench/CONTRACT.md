@@ -2,6 +2,10 @@
 
 独立本地工具，无运行服务器、不连接 Figma。父规格 #29，基础任务 #30。只支持显式适配的原型，不读取用户既有家园文件。
 
+定位与范围：工作台用于承载“AI 按规范主拆，人检查验收/反馈重拆，必要时手工选区纠偏”；当前项目流程与拆分判断以[组件拆分判断规范](../../.agents/skills/ui-design/references/component-decomposition.md)及其所属技能为准，当前能力说明见 [README](README.md)。目标流程不表示 AI 自动拆分已实现。现有载入入口校验合法 v1 项目 HTML（包括组件稿、组、引用、映射）后整项目替换，不是 AI 生成服务、JSON API 或增量合并；AI 批量预拆生产入口、反馈重拆增量接入与确认来源审计尚缺。导入接受 `confirmed` 不等于审计过人工确认来源，字段本身不能证明有人确认。本文以下 v1 数据结构、关系语义与接口保持不变；Issue #29 是历史背景，不覆盖新的流程定位。本轮不新增实现或真实 AI/Figma 验收声明。
+
+**建议接入（见文末「AI 拆分建议文件」）是已确认、待实现的下一层**：该节定义 AI 建议文件的独立格式与「预览→接受才落地」语义，v1 项目结构、既有字段与接口均不改变；本节以下正文仍是 v1 现状，未实现建议接入。
+
 ## 文件与并行归属
 
 - 基础：`src/{app,shell,host,project}.js`、`src/shell.css`、`src/prototype-bridge.js`、`build.mjs`、`examples/controlled.html`、`tests/foundation.spec.cjs`。
@@ -119,3 +123,47 @@ ctx 为同一个小 Interface：
 - CSP 只是防护，不是资源完整性证据。文件模块全面审计 CSS/SVG/字体/媒体等必要资源，拒绝缓存、外链、blob URL、开发机路径；新 BrowserContext 离线 file:// 打开下载文件及空工作台重新载入是唯一保存闭环验收。
 
 特性模块只通过此 Interface 更新和重渲染；不编辑 app/shell，不访问私有状态。组件 TAB 默认 `view=relations`；提取模块负责组件列表/独立预览，关系模块负责关系中心/右操作，文件模块负责工具栏载入/保存/改版入口。任何错误显示原因、保留旧成果，不降级为假成功。
+
+## AI 拆分建议文件（已确认目标，尚未实现）
+
+本节是**下一层接入的设计契约**，不是 v1 已实现能力。它只新增一份 AI 可产出的建议文件格式和「预览→接受才落地」语义；不改 v1 项目 `format/formatVersion`、字段、关系规则或接口。实现前须先把本节完整核对，再按 /to-spec 进入实现。
+
+### 目标与边界
+
+- **单向**：AI 在聊天里产出建议文件，人导入工作台。建议不携带原型、不改现有项目。
+- **AI 主拆、人验收**：建议叠加在当前项目上**预览**，只有人接受的才落地为正式 `drafts/groups/references/mappings`。
+- **AI 只声明意图**：AI 不能产出 `confirmed`；建议落地时由工作台按现有规则写入状态，人的接受才是确认。
+- **稳定身份**：边界用 `data-wb-node` 稳定节点 ID 表达，不写坐标、选择器序号或 DOM 路径。
+
+### 载体与校验
+
+- 建议文件是普通 HTML，含唯一 `<script id="workbench-proposal" type="application/json">…</script>`；惰性 JSON 转义规则与项目文件一致（`<` 写为 `\u003c`）。文件不含原型或项目资料，大小上限 4 MB。
+- 载入只解析该区块并逐条校验；原型/项目当前版本与建议 `source` 不匹配时，整批拒绝或把失配项单独标「不可用」，不静默套用。任何情况下不改已有项目。
+
+### 建议内容
+
+每条建议（`proposals[]`）承载**边界 + 关系 + 理由**，最小字段：
+
+```js
+{
+  kind: 'component' /* 新增组件稿 */ | 'group' /* 归组 */ | 'reference' /* 嵌套引用 */ | 'reuse' /* 来源复用映射 */,
+  name: '组件稿名',          // kind=component 必填，其余忽略
+  source: {prototypeId, pageId, stateId, nodeIds: []},
+  group: {id?, name?, primaryId?, memberIds?},   // kind=group
+  reference: {ownerDraftId, targetDraftId, slotNodeId}, // kind=reference
+  reuse: {draftId, source},                        // kind=reuse
+  reason: '一句为什么这样拆（独立换皮 / 共享结构）'
+}
+```
+
+`draftId/primaryId/memberIds/ownerDraftId/targetDraftId` 指既有 `drafts` 的稳定 ID；新组件稿由工作台在接受时生成 ID，AI 不填。AI 只产出 `candidate` 意图；`confirmed/excluded` 由工作台写。
+
+### 预览与落地
+
+- **预览**：载入建议后，原画布高亮每条建议的边界（新增稿的节点集合高亮），组件稿可独立预览核对文字/图片/层叠/裁切，关系概览显示建议的同组与引用，来源复用按候选呈现。
+- **落地**：人逐条勾选或整批接受；接受的才写正式记录。写入走现有 `runCommand` / `registerGuard`（组件稿 `draft:update` 与新建、`reference:create` 的循环/重叠/覆盖保护），确认前展示引用影响，任一失败整批不落地。AI 建议只作为候选，不越过人的接受写 `confirmed`。
+- **拒绝/纠偏**：不接受或拆错的建议保持候选或标记排除，人定位后可导出反馈给 AI 重拆；手工选区仍是兜底。已有 `confirmed` 且无未解决复核的有效约束不被建议静默覆盖。
+
+### 验证 seam
+
+最高层沿用真实浏览器 + 真实 UI + 真实单 HTML 文件闭环：导入建议文件 → 预览边界/组件稿/关系 → 勾选或整批接受 → 保存项目 → 离线重开核对落地结果。不暴露私有算法 API 制造结果。建议文件格式与项目文件格式分离，AI 输出一份、工作台校验同一份，避免各自猜。

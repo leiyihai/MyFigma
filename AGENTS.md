@@ -14,7 +14,7 @@
 
 ## UI 任务入口
 
-对齐界面方案、制作 HTML 原型、新建或修改 Figma UI、检查设计稿或搭建 HTML 交互原型时，使用 `ui-design` 技能；入口为 [.agents/skills/ui-design/SKILL.md](.agents/skills/ui-design/SKILL.md)。
+游戏 UI 方案讨论用 `ui-design-align`，HTML 制作／修改用 `ui-design-prototype`，只读检查界面或组件拆分结果用 `ui-design-review`，Figma 搭建／修改用 `ui-design-figma`。用户主动选择 `ui-design` 时串联全流程；技能与工具导航见 [README](README.md)。
 
 ## 工程任务入口
 

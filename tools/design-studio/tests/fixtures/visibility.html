@@ -1,0 +1,12 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Controlled clipping and compositing fixture</title>
+<style>
+body{margin:0;background:#fff;color:#000;font:16px Arial}
+.clip-parent{width:100px;height:24px;overflow:hidden}.clip-child{width:1200px;height:20px;background:#ddd}
+.invisible{opacity:0}.tiny{width:10px;height:10px;font-size:8px}
+.translucent{opacity:.5}.filtered{filter:blur(1px)}.low{background:#fff;color:#eee}
+</style><body>
+<div class="clip-parent"><div id="clipped-child" class="clip-child">Content deliberately clipped by ancestor</div></div>
+<div class="invisible"><button id="invisible-child" class="tiny low">x</button></div>
+<div class="translucent"><span id="translucent-child" class="low">Composited text needs manual review</span></div>
+<div class="filtered"><span id="filtered-child" class="low">Filtered text needs manual review</span></div>
+</body></html>

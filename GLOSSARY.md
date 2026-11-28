@@ -109,15 +109,15 @@ _Avoid_: 画布边距（用于编辑值时）
 
 # HTML 组件拆分工作台
 
-将 AI 生成的 HTML 原型整理为组件稿与人工组件关系的本地工具；行为规格见[工作台规格 #29](https://github.com/leiyihai/MyFigma/issues/29)，文件与接口定义见[工作台契约](tools/html-component-workbench/CONTRACT.md)。
+呈现原型组件、来源及维护关系，供检查、验收和纠偏的本地工具，不是自动拆分算法。设计领域术语见[技能术语表](.agents/skills/ui-design/references/GLOSSARY.md)，拆分判断见[当前规范](.agents/skills/ui-design/references/component-decomposition.md)，现有文件与接口见[工作台契约](tools/html-component-workbench/CONTRACT.md)；[规格 #29](https://github.com/leiyihai/MyFigma/issues/29)保留为历史背景。
 
 **原型**：按工作台接入契约提供页面、状态、稳定节点标识与预览/编辑适配的完整 HTML。
 
 **组件稿**：从原型稳定节点提取、可独立预览并保留可读 HTML/CSS/文字/图片的组件单元；不是截图，也不等同于 Figma 主组件。
 
-**组件组**：设计者显式定义的一组组件稿，包含一个主体和其余变体，用于表达“同一组件的不同变体”。
+**组件组**：被明确归为同一组件的一组组件稿，包含一个主体和其余变体，用于表达“同一组件的不同变体”。
 
-**主体**：组件组内按实际多选顺序第一项确定的默认外观与结构参考；不是其他变体的继承父组件。
+**主体**：组件组内被指定为默认外观与结构参考的组件稿；不是其他变体的继承父组件。
 
 **变体**：组件组内除主体外的成员；不因主体更新而自动同步。
 

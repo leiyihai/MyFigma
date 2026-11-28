@@ -4,45 +4,42 @@
 
 ## 从这里开始
 
-在本项目目录启动 Pi。已有会话在更新技能后先输入：
+这是服务游戏 UI 的**技能包 + 工具包**。技能按任务决定产出和停止点，工具负责预览、测量或编辑；没有某个客户端的专用面板，也可以交付原型，并如实说明验证缺口。
 
-```text
-/reload
-```
+### 五个统一前缀入口
 
-然后直接调用：
+| 技能 | 做什么 | 交付与停止点 |
+| --- | --- | --- |
+| [ui-design](.agents/skills/ui-design/SKILL.md) | 用户主动选择的全流程入口 | 串联任务，保留方案与设计版本两道确认 |
+| [ui-design-align](.agents/skills/ui-design-align/SKILL.md) | 对齐需求、布局、控件与交互 | 方案摘要及确认状态，不制作界面 |
+| [ui-design-prototype](.agents/skills/ui-design-prototype/SKILL.md) | 制作／修改可交互灰阶 HTML，并自查 | 当前原型与必要验证缺口，等待体验 |
+| [ui-design-review](.agents/skills/ui-design-review/SKILL.md) | 只读检查 HTML、Figma 或组件拆分结果 | 按影响排序的问题、位置和证据，不修稿 |
+| [ui-design-figma](.agents/skills/ui-design-figma/SKILL.md) | 首批搭建或基于换皮成果增量补齐 | 按本批交付；有换皮工作时暂停，不重建整套稿 |
 
-```text
-/skill:ui-design
-```
+单项任务可以直接接手已有成果。制作时自查不必再跑独立检查任务；明确局部修改归对应产物技能，只重新确认受影响的重要决策。
 
-AI 会询问你要做什么，以及需求或目标位置；无需先读完所有规范。也可以把需求直接写在命令后面：
+### DSH
 
-```text
-/skill:ui-design 仅做 HTML 原型，需求见 需求/活动主界面功能整理与归纳.md，先和我对齐界面方案
-/skill:ui-design 新建活动任务界面，先追问界面设计，确认方案后做 HTML，等我确认再搭建 Figma
-/skill:ui-design 修改指定 Figma 文件中的奖励列表，保留其他布局和原型连接
-/skill:ui-design 只读检查指定 Frame 的布局、自适应、美术槽位和组件复用
-```
+在本项目工作区使用标准模式，从斜杠菜单选择技能，或在消息中输入 `/ui-design-align`、`/ui-design-prototype`、`/ui-design-review`、`/ui-design-figma`；`/ui-design` 为主动调用的总入口。可附 `@` 需求文件与辅助说明。单项技能也可按自然语言意图加载，加载不等于修改授权。
 
-示例中的目标名称和需求路径按实际情况替换。技能支持自然语言，不要求固定参数；同一任务反馈时直接继续对话即可。
+例：`/ui-design-review 只检查这份 HTML 的布局与交互，先别改`。具体菜单发现和工具可用性以当前会话为准；项目文档不保证本机 profile 状态，不自动安装插件或关闭同名入口。
 
-### 技能没有出现？
+### Pi 与其他客户端
 
-本项目将技能放在 Pi 支持发现的 `.agents/skills/ui-design/` 中。确认从本仓库启动或已信任本项目，再执行 `/reload`，检查加载诊断及是否存在同名技能冲突。
+Pi 使用 `/skill:ui-design` 等 `/skill:<技能名>`，已有会话更新技能后执行 `/reload`。其他客户端使用各自的技能调用方式；不支持发现时，明确要求 AI 阅读相应技能入口及其参考后执行。不要把 Pi 命令当作 DSH 语法。
 
-`/skill:ui-design` 是 Pi 的显式调用命令；其他客户端使用各自的技能调用方式。不支持自动发现时，可直接要求 AI 阅读 [.agents/skills/ui-design/SKILL.md](.agents/skills/ui-design/SKILL.md) 并执行。
+技能未出现时先核对当前工作目录、客户端技能目录、信任设置和同名冲突，再按客户端机制重载。总入口仅供用户主动调用，不出现在模型自动发现列表中是预期行为。
 
-## 一次任务如何推进
+## 工具包与任务链路
 
-1. 提供需求，AI 先围绕界面歧义和设计风险分轮追问，给出建议和取舍；功能基本明确时不重新审问业务规则。
-2. 你确认界面方案摘要，AI 才生成可交互的单文件灰阶 HTML；这两个阶段都不需要连接 Figwright。
-3. HTML 默认只显示产品界面，通过真实控件体验需求交互；没有附加的评审栏、场景菜单或说明区，必要假设和未验证项仅在对话中简短提示。
-4. 当你表达想转入 Figma 制作阶段时，AI 根据上下文理解意图，无需固定口令，并先询问当前 HTML 版本是否满足需求；你明确肯定后才搭建，不把切换阶段的指令直接当作满意确认。仅 HTML 任务停留在反馈阶段。Figma 只搭界面与必要视觉状态，不制作点击连接或 Flow。
-5. 首批保留主界面的主要布局与控件搭配，复用 `待替换` 区够用的组件，让你换皮后能直接看大体效果。同类面板先做一个代表，其他状态、TAB、次级界面和多比例预览暂缓；必要独立样式仍保留，不为了少而少。
-6. AI 检查本批替换入口与同步、建立冻结参考后停下。你确认本批已换好并指定继续范围，AI 才读取实际组件、保留你的美术和关联继续搭建；需要新的独立美术时，先确认增量，再按新批次交给你换皮。
+- **DSH 专用设计台**：使用宿主提供的预览、真实渲染和尺寸检查工具，明确传入设计尺寸。调用与能力缺口见[设计台能力适配](.agents/skills/ui-design/references/studio-tools.md)。
+- **通用设计台**：已提供独立[浏览器预览与命令行工具](tools/design-studio/README.md)，无需安装 npm 包或修改普通自包含 HTML，即可预览、截图和按尺寸检查。需本机 Node 与 Chrome/Edge；外链／网络依赖和部分同源能力受限制，覆盖范围与未覆盖项随报告明确列出，不等同于 DSH 的完整体检。
+- **组件工作台**：保留为[拆分检查、验收与纠偏工具](tools/html-component-workbench/README.md)。目标是 AI 按[拆分规范](.agents/skills/ui-design/references/component-decomposition.md)先准备，人检查、反馈重拆或手动纠偏；不是要求人从零逐个圈选。现有文件与操作能力仍可用，但 AI 批量预拆／反馈增量接入闭环尚待实现和验证，不把新定位写成已有自动功能。纯预览不强制适配其协议。
+- **占位资源工具**：现有脚本生成、合成和内联 PNG；使用方法见[占位资源脚本](.agents/skills/ui-design/references/layout-preview.md#占位资源脚本)。
 
-重要界面决策改变时重新确认受影响部分；明确的局部调整和只读检查不必重走无关关卡。HTML 阶段默认只交付原型文件，不自动补充说明文档、交互清单或验收报告；确认依据保留在对话中。详细标准见技能参考文件。
+全流程是：对齐并确认方案 → 制作原型、自查并等待体验 → 用户请求进入 Figma，确认具体版本及本批范围 → 分批搭建、检查并暂停等换皮。独立任务不强制重跑之前阶段；已有认可的静态稿也能直接交给 Figma 技能。只读检查不写入任何产物。
+
+渲染、尺寸测量、实际操作分别记验证状态。静态代码、截图或无报错不能证明点击路径通过；工具缺失时仍可交付 HTML，但不将未做的检查说成通过。
 
 ## Figma 搭建前的环境准备
 
@@ -58,48 +55,35 @@ AI / MCP 客户端 → Figwright MCP → 本地桥接 → Figma 插件 → Figma
 
 ## 文档以哪个为准？
 
-| 文件 | 职责 |
-| --- | --- |
-| [AGENTS.md](AGENTS.md) | 项目通用协作规则及技能入口 |
-| [SKILL.md](.agents/skills/ui-design/SKILL.md) | 启动行为、跨阶段默认尺寸、执行顺序和阶段完成标准 |
-| [figma-ui.md](.agents/skills/ui-design/references/figma-ui.md) | Figma 修改边界、桥接、布局、状态展示、美术槽位、换皮、冻结参考与验收 |
-| [ui-alignment.md](.agents/skills/ui-design/references/ui-alignment.md) | 界面追问、图标文字决策、方案确认与精简交付 |
-| [layout-preview.md](.agents/skills/ui-design/references/layout-preview.md) | 可交互 HTML 制作、检查及 Figma 确认关卡 |
-| [GLOSSARY.md](.agents/skills/ui-design/references/GLOSSARY.md) | 设计术语 |
-| [html-component-workbench/README.md](tools/html-component-workbench/README.md) | HTML 原型组件拆分工作台：启动、接入契约、操作流程与单 HTML 项目文件语义 |
-| README.md | 面向使用者的操作说明与文档导航 |
+- [共同约定](.agents/skills/ui-design/references/common.md)：基准尺寸、接手现有成果、版本确认与交付边界。
+- [界面对齐](.agents/skills/ui-design/references/ui-alignment.md)：需求分层、追问、方案确认。
+- [HTML 制作](.agents/skills/ui-design/references/layout-preview.md)与[原型工艺](.agents/skills/ui-design/references/prototype-craft.md)：制作、状态模拟和自查。
+- [Figma 换皮维护](.agents/skills/ui-design/references/figma-ui.md)：必要复用、替换和成果保护约束，不另起视觉布局教程；[首批](.agents/skills/ui-design/references/figma-initial.md)与[增量](.agents/skills/ui-design/references/figma-expand.md)按任务二选一。
+- [组件拆分与验收](.agents/skills/ui-design/references/component-decomposition.md)：AI 主拆、人验收／纠偏的判断标准及工具缺口。
+- [公开技能研究](docs/research/figma-building-skills.md)：一手来源、借鉴点与不适用范围，按需查阅。
+- [讨论记录与 Skill 选择](docs/ui-design-discussion-summary.md)：最终决定、已完成／未验证项及后续技能路线；是状态快照，不替代执行规范。
+- [设计台能力适配](.agents/skills/ui-design/references/studio-tools.md)：工具选择、尺寸传递和能力缺口。
+- [术语表](.agents/skills/ui-design/references/GLOSSARY.md)：产物与设计概念。
 
-规则在对应文件单独维护；策划需求放在具体功能文档中，不混入技能规范。
+四个单项入口按分支读取参考，参考暂集中存放在总入口目录，便于共享并保留现有脚本路径；这不意味着每个任务要读完整套规范。策划需求仍放在具体功能文档中。
+
+## Figma：一个入口，两种任务
+
+- **首批搭建**：代表主界面 + 够用的换皮源，检查并保留原貌参考后，停下来等你换皮。
+- **增量补齐**：换皮就绪后读取实际成果，保留你的美术与组件关联，补齐指定页面／状态。没有新增独立源就不要求再换一遍皮；新增源先说明并确认。
+- **换皮维护优先**：布局沿用确认稿，不强制根 Frame 或每层组件使用 Auto Layout；列表等流式区域按收益使用，叠放美术可以用普通 Frame 和必要定位约束。操作标准集中在[Figma 换皮维护](.agents/skills/ui-design/references/figma-ui.md)。
+
+自然语言即可分流，无需新增技能名或固定参数：
 
 ```text
-AGENTS.md
-README.md
-.agents/skills/ui-design/
-├─ SKILL.md
-├─ references/
-│  ├─ figma-ui.md
-│  ├─ ui-alignment.md
-│  ├─ layout-preview.md
-│  └─ GLOSSARY.md
-└─ scripts/
-   ├─ render_assets.py
-   └─ test_render_assets.py
+/ui-design-figma 先做首批代表界面和换皮源，别铺开其他页面
+/ui-design-figma 本批已换好，复用现有成果补齐我指定的其他状态
 ```
 
-## 换皮与状态展示
-
-- 换皮从 Figma 的 `待替换` 区开始；共享主组件和美术资源驱动区外状态展示稿，无需逐屏贴图。界面、图层、组件和属性默认中文命名。
-- 背景、底板和图标独立于结构内容。背景／场景用固定脚本生成极简 PNG，HTML 与 Figma 共用，不逐层复刻临时场景；纯色背景直接填充。脚本也支持本地图片合成和 HTML 图片内联，只返回简短结果，使用方法见 [占位资源脚本](.agents/skills/ui-design/references/layout-preview.md#占位资源脚本)。
-- Figma 占位图标使用透明 PNG，每处是一个无子层实例；共享图标主组件直接使用图片填充，保留同步与交换能力。其他美术可粘入对应主组件再移除占位层，九宫格效果按实际插件输出验证。
-- 通常只换内部美术、保留文字和布局；也可以只选择部分按钮实例，交换成自己新建的整套组件。结构不同的组件交换后须检查文字、尺寸和覆盖值。
-- 首批换皮前，将待替换区制作成图片快照，放进同尺寸并锁定的 `待替换_原始参考` Frame；后续只追加新增组件的原貌快照，集中放在该区。旧图不覆盖，不重拍已完成组件；修改维护源不会改变参考图。
-- Figma 只按当前获准批次搭建，不一次铺满需求中的所有界面和状态；完整交互仍由 HTML 表达。已有任务范围外的内容和原型连接保留，阶段性交付不等于全功能完成。
-- 默认只做基准尺寸；明确需要后再追加多比例预览，并检查主组件同步、各自尺寸保持与布局结果。不自动创建 21:9、4:3 版本，也不删除已有预览。
-
-HTML 保留需求交互，编辑保存等结果在当前会话可见，仅用内存模拟，不接真实扣费、发奖、存档或后端。代码实现不等于运行验证，无法运行时简短提示“运行未验证”。
+组件拆分验收需要时再用工作台；它提供可视证据而不是额外设计流程，文件能打开不代表拆分或 Figma 同步正确。
 
 ## 在其他项目使用
 
-将完整 `ui-design` 技能目录放入目标客户端支持的技能位置，保留 `SKILL.md` 与 `references/` 的相对结构。Pi 项目级位置为 `.agents/skills/ui-design/`，用户级也可使用 `~/.agents/skills/ui-design/`；避免同名重复安装。通用协作规则仍遵循目标项目的 `AGENTS.md`。
+复制全部五个 `ui-design*` 技能目录到目标客户端支持的同一技能父目录，保留它们之间的相对结构及共享参考／脚本；不要仅复制单个入口。工具包按各工具说明单独使用，组件拆分不是技能包运行前提。避免同名重复安装，通用协作规则遵循目标项目。
 
 移动或修改技能后需重载客户端资源。文档与路径检查不代表技能已成功加载，也不代表 Figma 桥接、换皮和实例交换已经实测。

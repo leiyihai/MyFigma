@@ -1,9 +1,14 @@
 # HTML 组件拆分工作台
 
-把 AI 生成的 HTML 原型整理成“组件稿 + 人工组件关系”，保存为单个 HTML 项目文件，供设计者携带、复核，也供后续 AI 读取后搭建 Figma。工具完全在本地浏览器运行，不需要服务器、不连接 Figma、不上传原型。
+组件工作台保留，定位为 **AI 按规范主拆，人检查验收、反馈重拆，必要时手工选区纠偏**。目标流程是：AI 按[组件拆分判断规范](../../.agents/skills/ui-design/references/component-decomposition.md)提出组件边界与维护关系 → 人检查并可批量验收，或反馈给 AI 重拆 → 必要时用工作台选区、提取和关系操作纠偏 → 保存单 HTML 项目 → 后续 AI 按已确认决定搭建 Figma。人不必默认从零逐项选择或重新拆一遍；保留下面的手动操作说明是为了检查与纠偏，不代表目标流程要求全手工。
 
-- 权威规格：[docs/html-component-workbench.md](../../docs/html-component-workbench.md)（Issue #29）
-- 实现与接入契约：[CONTRACT.md](CONTRACT.md)
+**这是职责与目标流程，不是自动拆分已实现的声明。** 当前工作台提供显式适配原型的载入、选择与提取、组件组、嵌套引用、来源映射候选确认/排除、项目导入导出及改版复核；仍缺 AI 批量预拆生产入口、重拆反馈的增量接入、确认来源审计，以及真实 AI 产物和真实 Figma 的端到端验收。工具完全在本地浏览器运行，不需要服务器、不连接 Figma、不上传原型。
+
+**AI 建议接入是已确认的下一层设计契约，尚未实现**：格式与「预览→接受才落地」语义见 [CONTRACT.md](CONTRACT.md) 末尾「AI 拆分建议文件」。它是下一层的目标，不是当前可点入口。
+
+- 当前项目流程与拆分判断以[组件拆分判断规范](../../.agents/skills/ui-design/references/component-decomposition.md)及其所属技能为准；本文件说明工作台如何承载检查、纠偏与交接，不另立拆分判断规则。
+- 当前工具能力、数据结构和接口以[CONTRACT.md](CONTRACT.md)与实现代码为准；流程目标不代表对应工具入口已实现。
+- [Issue #29 历史发布规格快照](../../docs/html-component-workbench.md)仅作历史背景，不凌驾于新的流程决定；本轮不修改或发布 Issue。
 - 本文件面向使用者与后续 AI：启动、构建测试、原型接入、两种模式操作、关系语义、单文件数据语义、已验证范围。
 
 ## 1. 启动与打开方式
@@ -22,7 +27,9 @@ tools/html-component-workbench/dist/workbench.html
 | --- | --- |
 | **载入原型** | 导入一份满足接入契约、尚未整理的 HTML 原型。项目已有组件稿或人工关系时会拒绝直接覆盖，改用“更新原型”。 |
 | **打开受控示例** | 打开 `examples/controlled.html`，不依赖任何本地文件，用于快速体验。 |
-| **载入项目** | 打开工作台保存出的单 HTML 项目文件；先完整校验，再替换当前项目。 |
+| **载入项目** | 载入合法的 v1 项目 HTML（含 `drafts/groups/references/mappings` 等完整项目资料）；先完整校验，再整项目替换，不是增量合并。 |
+
+“载入项目”是现有的文件接入能力：解析项目 HTML 中的结构化记录、验证完整项目及原型后整体替换（见 [files.js:103–173](src/features/files.js#L103-L173)、[files.js:283–294](src/features/files.js#L283-L294)）。文件来源不必限于工作台自身保存，但必须满足真实 v1 契约；仅有几条 AI 建议或裸 JSON 不能直接载入。该能力不是 AI 自动生成、JSON API 或重拆结果的增量合并入口，也不会把任意普通 HTML 自动适配成项目。
 
 顶部还有 **保存项目**（下载单 HTML）与 **更新原型**（原型改版入口）。“更新原型”会保留组件稿、组、引用、映射，并把受影响的来源、失效映射及原型新增内容标记为待复核；右侧可逐条“解除复核”，映射也可在编辑模式明确选区后“重新绑定到当前选区”。
 
@@ -92,13 +99,19 @@ $env:WORKBENCH_PLAYWRIGHT_ROOT = 'E:\MyFigma\tools\figma-project-assets\nine-sli
 
 ## 5. 组件稿、组、引用与映射的语义
 
-- **组件稿（draft）**：从原型稳定节点提取的独立内容，保留可读 HTML/CSS/文字/图片和来源。相同外观不会自动去重或归组；是否复用完全由设计者决定。
+- **组件稿（draft）**：从原型稳定节点提取的独立内容，保留可读 HTML/CSS/文字/图片和来源。相同外观不会自动去重或归组；AI 按规范建议是否复用，最终决定由设计者验收。
 - **组件组（group）**：一个主体（`primaryId`）与其余变体（`memberIds`，顺序保存）。主体只是默认外观/结构基准，**不是继承关系**；修改主体不会自动同步变体。只有显式嵌套复用（引用）才同步共享结构。
 - **嵌套复用（reference，界面称“嵌套引用”/“引用”）**：使用方 → 被引用组件，绑定使用方组件稿中的稳定 `slotNodeId`；被引用组件的共享结构真实写入该位置，目标 CSS 限定在该引用根之下。同一使用方的引用位置不能互为祖先/后代（避免替换祖先时删除旧位置）；建立引用若会同步既有使用方，先展示影响范围再确认。引用位置各自的文字/数值差异记录为 `overrides`（首版仅支持 text）。取消、覆盖无法安全保留、确认期间项目变化、悬空/自引用/循环都会整笔拒绝，不部分提交。
 - **来源映射（mapping）**：记录“某组件稿对应原型哪个稳定来源”的复用判断，状态为 `candidate` / `confirmed` / `excluded`。候选可由外部 AI 提出、由设计者在编辑选区人工标记；候选不会自动改写组件组或强制复用。
 - **有效复用约束**：只有 `status === 'confirmed'` 且没有未解决复核（`reviewId === null`，或对应 review 已解决）的映射才是当前版本的有效约束。`candidate`、`excluded`、带未解决复核的 confirmed 都不能当作搭建依据。
 - **复核（review）**：原型改版后按稳定 ID 比较内容/样式/脚本/版本，变化或删除时保留旧组件稿和人工决定，并写入 `source-changed` / `source-missing` / `mapping-stale` / `unsupported` 复核记录；原型新增页面、状态或稳定节点会写入一条聚合的 `source-added` 复核，提醒设计者检查是否需要补充组件稿或映射，但不改写已有组件稿。映射仍保留 confirmed，但在复核解决前不计为有效约束，也不会按外观或序号猜测重绑。
 - **解除复核与重新绑定**：右侧待复核列表对每条记录提供“解除复核”，保留原映射绑定与人工决定；对映射类复核，在编辑模式选定新来源后可“重新绑定到当前选区”，用明确选区更新 `mapping.source`。两者都不会自动改写其他组件稿或引用。
+
+### 确认责任与当前审计边界
+
+用户可以对明确范围的一批拆分建议统一验收，不必逐项重新拆分；不满意时反馈 AI 重拆，手工选区是可选纠偏。AI 新提出的来源映射应初始为 `candidate`，不得自行伪造人工 `confirmed`。已有可信、适用于同一内容版本和范围的人工确认依据时，应沿用，不必重复询问；依据缺失、范围不明或版本失效时不能仅凭状态字段推定已确认。
+
+当前工具支持候选建立及勾选后批量确认/排除（见 [relations.js:465–485](src/features/relations.js#L465-L485)）。导入也接受合法的 `confirmed` 映射，但只检查状态及结构完整性，不审计是谁、何时、依据什么作了人工确认（见 [files.js:164–173](src/features/files.js#L164-L173)）。因此，`confirmed` 字段本身不能证明有人确认；上面的有效映射判定是当前文件/代码语义，不是人工确认来源的证明。后续 AI 仍需结合可信的同版本确认依据使用，不能宣称当前工具已强制确认来源审计。现有 v1 字段与关系语义保持不变，不将组件组或引用当作另有 proposal 字段的建议模型。
 
 ## 6. 单 HTML 项目文件语义（给后续 AI）
 
@@ -122,7 +135,7 @@ $env:WORKBENCH_PLAYWRIGHT_ROOT = 'E:\MyFigma\tools\figma-project-assets\nine-sli
 | `formatVersion` | 项目文件格式版本；与原型版本解耦。 |
 | `prototype` | `{html, fileName, manifest}`。`html` 是完整原始原型（不含宿主注入）；`manifest.version` 是原型格式版本，`manifest.contentVersion` 是原型内容版本。无原型时为 `null`。 |
 | `drafts[]` | `{id,name,source,content,revision}`。`content` 含可读 `html`/`css`/`width`/`height`/`assets`；`source` 记录原型 ID、页面、状态、稳定节点、版本与 bounds。 |
-| `groups[]` | `{id,name,primaryId,memberIds[]}`，按人工决定顺序保存；不是继承。 |
+| `groups[]` | `{id,name,primaryId,memberIds[]}`，按明确的成员顺序保存；不是继承，也不以记录存在代替用户验收。 |
 | `references[]` | `{id,ownerDraftId,targetDraftId,slotNodeId,targetRevision,overrides[]}`，方向为使用方指向被引用组件；`overrides` 为该位置保留的 typed 内容差异。owner 内容必须在 slot 内包含对应的 `data-wb-ref-root` 嵌入结构。 |
 | `mappings[]` | `{id,draftId,source,status,reviewId}`；`status ∈ candidate/confirmed/excluded`；`reviewId` 与对应复核的 `mappingId` 必须双向一致。 |
 | `reviews[]` | `{id,kind,draftId,mappingId,message,resolved}`；`resolved:false` 表示待处理。`kind` 为 `source-changed / source-missing / source-added / mapping-stale / unsupported`；`source-added` 的 `draftId`、`mappingId` 均为 `null`，聚合新增页面/状态/节点。 |
@@ -152,6 +165,8 @@ $env:WORKBENCH_PLAYWRIGHT_ROOT = 'E:\MyFigma\tools\figma-project-assets\nine-sli
 | 原型改版后的待复核项 | 显式“解除复核”或“重新绑定到当前选区”后才恢复为有效约束。 |
 
 ## 8. 已验证与未验证范围
+
+以下沿用既有实现的验收记录，不是本轮新增的实现或验收声明；本轮仅更新文档，未重跑测试。
 
 **已在真实浏览器与真实文件中验证**（系统 Chrome，headless；控制台证据见测试）：
 

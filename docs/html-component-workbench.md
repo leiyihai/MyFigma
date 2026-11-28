@@ -1,6 +1,10 @@
 # 规格：HTML 原型组件拆分工作台与单文件 AI 交接
 
-发布记录：[GitHub Issue #29](https://github.com/leiyihai/MyFigma/issues/29)，标签为 `ready-for-agent`。下文保留发布时规格快照；后续更新以 Issue 最新正文为准。工具尚未实现，真实 Figma 试搭不在本规格验收范围内。
+历史发布记录：[GitHub Issue #29](https://github.com/leiyihai/MyFigma/issues/29)，发布时标签为 `ready-for-agent`。
+
+**本文是 Issue #29 发布时的历史规格快照。以下自“问题陈述”起的全部正文及编号原样保留，仅作历史背景；其中“目前”“当前尚无实现”、流程与验收要求均属于当时语境，不是当前实现状态或本轮验收声明。** 本次仅补充此说明，未修改或发布 Issue，也不将新决定冒充已更新的 Issue 或新发布规格。
+
+当前工作台定位、能力和限制见[工作台 README](../tools/html-component-workbench/README.md)；当前项目流程与拆分判断见[组件拆分判断规范](../.agents/skills/ui-design/references/component-decomposition.md)及其所属技能。历史正文不凌驾于新的流程决定；实现接口与 v1 数据结构见 README 所链接的契约及代码。
 
 ## 问题陈述（Problem Statement）
 
