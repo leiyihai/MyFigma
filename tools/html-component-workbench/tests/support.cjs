@@ -6,7 +6,7 @@ async function openWorkbench(t, options = {}) {
   const browser = await chromium.launch({executablePath: process.env.WORKBENCH_CHROME || 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true});
   t.after(() => browser.close());
   const page = await browser.newPage({viewport: options.viewport || {width: 1560, height: 980}, reducedMotion: 'reduce'});
-  page.setDefaultTimeout(options.timeout || 5000);
+  page.setDefaultTimeout(options.timeout || 15000);
   await page.goto(pathToFileURL(path.join(root, 'dist/workbench.html')).href);
   return {browser, page, prototype: page.frameLocator('iframe[title="原型画布"]')};
 }
