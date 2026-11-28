@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>受控组件样例</title>
+<script type="application/json" id="workbench-manifest">{"format":"workbench-prototype","version":1,"id":"controlled-kit","contentVersion":"1","name":"受控组件样例","viewport":{"width":960,"height":600},"capabilities":["navigate","freeze","stable-nodes"],"pages":[{"id":"cards","name":"卡片","states":[{"id":"default","name":"默认"},{"id":"detail","name":"详情"}]},{"id":"dashboard","name":"统计","states":[{"id":"default","name":"默认"},{"id":"busy","name":"生产中"}]}]}</script>
+<style>
+:root{--ink:#293541;--muted:#657582;--edge:#c8d1d8;--paper:#f2f4f5;--panel:#fff;--accent:#486776}*{box-sizing:border-box}body{margin:0;width:960px;height:600px;overflow:hidden;font:16px 'Microsoft YaHei UI','Microsoft YaHei',sans-serif;color:var(--ink);background:var(--paper)}button{font:inherit;cursor:pointer;border:1px solid var(--edge);background:white;color:var(--ink);border-radius:5px;padding:10px 18px}button:focus-visible{outline:3px solid var(--accent)}h1{font-size:26px;margin:0}h2{font-size:22px;margin:0 0 12px}p{line-height:1.6}header{height:84px;padding:24px 36px;border-bottom:1px solid var(--edge);display:flex;justify-content:space-between;align-items:center}.page{padding:28px 36px}.cards{display:flex;gap:24px}.card{position:relative;width:340px;background:var(--panel);border:1px solid var(--edge);border-radius:10px;overflow:hidden;box-shadow:0 3px 0 #dde3e7}.art{height:140px;background:#dbe3e7;position:relative;overflow:hidden}.art img{height:130px;width:180px;position:absolute;left:80px;top:16px;transform:rotate(-3deg)}.card-body{padding:22px}.card p{color:var(--muted);margin:0 0 18px}.stats{margin-top:26px;padding:18px 22px;background:#e2e9ed;display:flex;gap:36px;border:1px solid #c5d0d7;align-items:center}.stat{display:flex;gap:12px;align-items:baseline}.stat strong{font-size:24px}.counter{color:var(--muted);font-size:14px}.modal{position:absolute;inset:0;display:flex;justify-content:center;align-items:center;background:#29354155}.dialog{background:white;width:400px;padding:30px;border:1px solid var(--edge);border-radius:10px}.dashboard{background:white;border:1px solid var(--edge);padding:28px}.track{height:12px;background:#e2e9ed;border-radius:6px;overflow:hidden;margin:24px 0}.progress{width:40%;height:100%;background:var(--accent)}.rotor{display:inline-block;width:18px;height:18px;border:3px solid #c0cdd4;border-top-color:var(--accent);border-radius:50%;animation:spin 2s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}[hidden]{display:none!important}
+</style></head><body>
+<header data-wb-node="header"><h1 data-wb-node="title">林间营地</h1><span class="counter" data-wb-node="clock">自动变化 <output aria-label="自动计数">0</output></span></header>
+<main id="cards-page" class="page" data-wb-node="cards-page">
+<div class="cards" data-wb-node="cards-row"><article class="card" data-wb-node="card-a"><div class="art" data-wb-node="art-a"><img data-wb-node="image-a" alt="林间小屋示意图" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='130'%3E%3Cpath fill='%23899da8' d='M12 62L90 8l78 54z'/%3E%3Cpath fill='%23b4c3cb' d='M30 60h120v62H30z'/%3E%3Cpath fill='%23697f8c' d='M74 80h32v42H74z'/%3E%3C/svg%3E"></div><div class="card-body" data-wb-node="body-a"><h2 data-wb-node="name-a">林间小屋</h2><p data-wb-node="description-a">安静的营地住所，可容纳 4 位伙伴。</p><button data-wb-node="button-a" id="detail">查看小屋</button></div></article>
+<article class="card" data-wb-node="card-b"><div class="art" data-wb-node="art-b"><img data-wb-node="image-b" alt="工坊示意图" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='130'%3E%3Cpath fill='%23899da8' d='M14 62L90 8l76 54z'/%3E%3Cpath fill='%23c0ccd2' d='M26 60h128v62H26z'/%3E%3Cpath fill='%23697f8c' d='M60 80h60v42H60z'/%3E%3C/svg%3E"></div><div class="card-body" data-wb-node="body-b"><h2 data-wb-node="name-b">木工作坊</h2><p data-wb-node="description-b">将收集的木材加工成营地设施。</p><button data-wb-node="button-b" id="collect">收取木材</button></div></article></div>
+<section class="stats" aria-label="营地统计" data-wb-node="stats"><div class="stat" data-wb-node="wood-stat"><span data-wb-node="wood-label">木材</span><strong data-wb-node="wood-value" aria-label="木材数量">120</strong></div><div class="stat" data-wb-node="people-stat"><span data-wb-node="people-label">伙伴</span><strong data-wb-node="people-value">4 / 8</strong></div><button data-wb-node="dashboard-button" id="dashboard">查看统计</button></section>
+</main>
+<main id="dashboard-page" class="page" data-wb-node="dashboard-page" hidden><section class="dashboard" data-wb-node="dashboard-panel"><h2 data-wb-node="dashboard-title">营地生产</h2><p data-wb-node="production-description">木工作坊每小时生产 8 份木材。</p><div class="track" data-wb-node="track"><div class="progress" data-wb-node="progress"></div></div><p data-wb-node="production-state" id="production-state">等待安排生产</p><span class="rotor" data-wb-node="spinner" aria-label="生产动画"></span><button data-wb-node="start-button" id="start">开始生产</button><button data-wb-node="back-button" id="back">返回营地</button></section></main>
+<div id="modal" class="modal" data-wb-node="detail-modal" hidden><section class="dialog" role="dialog" aria-label="小屋详情" data-wb-node="dialog"><h2 data-wb-node="dialog-title">小屋详情</h2><p data-wb-node="dialog-description">等级 2 · 舒适度 80。升级后增加两个床位。</p><button data-wb-node="close-button" id="close">关闭详情</button></section></div>
+<script>
+(() => {
+let wood=120,ticks=0,mode='preview';
+const $=id=>document.getElementById(id);
+function navigate({pageId,stateId}) {
+ $('cards-page').hidden=pageId!=='cards';$('dashboard-page').hidden=pageId!=='dashboard';$('modal').hidden=!(pageId==='cards'&&stateId==='detail');
+ $('production-state').textContent=stateId==='busy'?'正在生产木材':'等待安排生产';
+}
+window.WorkbenchPrototype={navigate,setMode(next){mode=next;}};
+$('collect').onclick=()=>{wood+=8;document.querySelector('[aria-label="木材数量"]').textContent=wood;};
+$('detail').onclick=()=>window.WorkbenchPrototype.navigate({pageId:'cards',stateId:'detail'});
+$('close').onclick=()=>window.WorkbenchPrototype.navigate({pageId:'cards',stateId:'default'});
+$('dashboard').onclick=()=>window.WorkbenchPrototype.navigate({pageId:'dashboard',stateId:'default'});
+$('back').onclick=()=>window.WorkbenchPrototype.navigate({pageId:'cards',stateId:'default'});
+$('start').onclick=()=>window.WorkbenchPrototype.navigate({pageId:'dashboard',stateId:'busy'});
+document.addEventListener('keydown',event=>{if(event.key==='w'&&mode==='preview')$('collect').click();});
+setInterval(()=>{document.querySelector('[aria-label="自动计数"]').textContent=++ticks;},180);
+})();
+</script></body></html>

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>营地关系样例</title>
+<script type="application/json" id="workbench-manifest">{"format":"workbench-prototype","version":1,"id":"relations-kit","contentVersion":"1","name":"营地关系样例","viewport":{"width":900,"height":620},"capabilities":["navigate","freeze","stable-nodes"],"pages":[{"id":"camp","name":"营地","states":[{"id":"default","name":"默认"}]}]}</script>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:900px;height:620px;overflow:hidden;font:16px 'Microsoft YaHei UI','Microsoft YaHei',sans-serif;color:#25323c;background:#f2f0ea}
+header{height:72px;padding:0 32px;display:flex;align-items:center;gap:18px;border-bottom:1px solid #d3cdc2}
+h1{font-size:22px;margin:0;flex:1}
+button{font:inherit;padding:9px 16px;border:1px solid #b9c2c9;background:#fff;border-radius:6px;color:#25323c}
+output{font-size:14px;color:#5d6b76}
+main{display:flex;gap:24px;padding:26px 32px 0}
+.card{width:360px;background:#fff;border:1px solid #d0cabd;border-radius:10px;padding:18px}
+.card h2{font-size:20px;margin:0 0 6px}
+.card p{color:#6c675d;line-height:1.5;margin:0 0 14px;font-size:14px}
+.metrics{min-height:92px;background:#f8f5ef;border:1px dashed #c3bbae;border-radius:8px;padding:6px;display:flex;align-items:center;justify-content:center;color:#948b7d;font-size:13px;overflow:hidden}
+.metrics.secondary{min-height:64px;margin-top:10px}
+.stats-panel{margin:24px 32px 0;padding:16px 18px;background:#fff;border:1px solid #d0cabd;border-radius:10px;width:520px}
+.stats-panel h2{font-size:16px;margin:0 0 10px}
+.stats{display:flex;gap:26px;align-items:baseline;background:#e8eef0;border-radius:8px;padding:12px 18px}
+.stat{display:flex;gap:8px;align-items:baseline}
+.stat span{font-size:13px;color:#56646e}
+.stat strong{font-size:22px;color:#1f4f5c}
+</style></head><body>
+<header data-wb-node="header"><h1 data-wb-node="heading">营地组件样例</h1><button data-wb-node="collect">收取木材</button><output data-wb-node="collected" aria-label="已收取">0</output></header>
+<main data-wb-node="page">
+<article class="card" data-wb-node="card-a">
+<h2 data-wb-node="title-a">林间小屋</h2>
+<p data-wb-node="desc-a">安静的营地住所，可容纳 4 位伙伴。</p>
+<div class="metrics" data-wb-node="slot-a"><span data-wb-node="slot-a-note">统计待接入</span></div>
+<div class="metrics secondary" data-wb-node="slot-a-extra"><span data-wb-node="slot-a-extra-note">备用位置</span></div>
+</article>
+<article class="card" data-wb-node="card-b">
+<h2 data-wb-node="title-b">木工作坊</h2>
+<p data-wb-node="desc-b">将收集的木材加工成营地设施。</p>
+<div class="metrics" data-wb-node="slot-b"><span data-wb-node="slot-b-note">统计待接入</span></div>
+<div class="metrics secondary" data-wb-node="slot-b-extra"><span data-wb-node="slot-b-extra-note">备用位置</span></div>
+</article>
+</main>
+<aside class="stats-panel" data-wb-node="stats-panel">
+<h2 data-wb-node="stats-title">营地统计</h2>
+<div class="stats" data-wb-node="stats">
+<div class="stat" data-wb-node="wood-stat"><span data-wb-node="wood-label">木材</span><strong data-wb-node="wood-value">120</strong></div>
+<div class="stat" data-wb-node="people-stat"><span data-wb-node="people-label">伙伴</span><strong data-wb-node="people-value">4 / 8</strong></div>
+</div>
+</aside>
+<script>
+let collected=0;
+window.WorkbenchPrototype={navigate(){},setMode(){}};
+document.querySelector('[data-wb-node="collect"]').onclick=()=>{document.querySelector('[data-wb-node="collected"]').textContent=String(++collected);};
+</script></body></html>

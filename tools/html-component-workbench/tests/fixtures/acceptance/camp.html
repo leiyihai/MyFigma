@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>验收营地样例</title>
+<script type="application/json" id="workbench-manifest">{"format":"workbench-prototype","version":1,"id":"acceptance-camp","contentVersion":"1","name":"验收营地样例","viewport":{"width":900,"height":620},"capabilities":["navigate","freeze","stable-nodes"],"pages":[{"id":"camp","name":"营地","states":[{"id":"default","name":"默认"},{"id":"detail","name":"详情"}]}]}</script>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:900px;height:620px;overflow:hidden;font:16px 'Microsoft YaHei UI','Microsoft YaHei',sans-serif;color:#25323c;background:#f2f0ea}
+header{height:72px;padding:0 32px;display:flex;align-items:center;gap:18px;border-bottom:1px solid #d3cdc2}
+h1{font-size:22px;margin:0;flex:1}
+button{font:inherit;padding:9px 16px;border:1px solid #b9c2c9;background:#fff;border-radius:6px;color:#25323c;cursor:pointer}
+output{font-size:14px;color:#5d6b76}
+main{display:flex;gap:24px;padding:26px 32px 0}
+.card{width:380px;background:#fff;border:1px solid #d0cabd;border-radius:10px;padding:18px}
+.card h2{font-size:20px;margin:0 0 6px}
+.card p{color:#6c675d;line-height:1.5;margin:0 0 14px;font-size:14px}
+.art{height:36px;margin-bottom:12px;border-radius:6px;overflow:hidden;background:#e7ecef}
+.art img{display:block;width:100%;height:36px;object-fit:cover}
+.card-actions{display:flex;align-items:center;gap:10px;margin-top:14px}
+.card-actions .hint{font-size:12px;color:#8b8478}
+.metrics{min-height:92px;background:#f8f5ef;border:1px dashed #c3bbae;border-radius:8px;padding:0;display:flex;align-items:center;justify-content:center;color:#948b7d;font-size:13px;overflow:hidden}
+.stats{margin:24px 32px 0;width:344px;padding:12px 16px;background:#fff;border:1px solid #d0cabd;border-radius:10px}
+.stats h2{font-size:15px;margin:0 0 8px;color:#4b5a63}
+.stat-row{display:flex;gap:26px;align-items:baseline;background:#e8eef0;border-radius:8px;padding:10px 14px}
+.stat{display:flex;gap:8px;align-items:baseline}
+.stat span{font-size:13px;color:#56646e}
+.stat strong{font-size:20px;color:#1f4f5c}
+.fx{display:inline-block;padding:2px 8px;border-radius:999px;background:#efe7da;color:#7d6c55;font-size:11px;filter:blur(.2px)}
+.modal{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#25323c55}
+.modal[hidden]{display:none}
+.dialog{width:360px;background:#fff;border:1px solid #d0cabd;border-radius:10px;padding:24px}
+.dialog h2{font-size:18px;margin:0 0 8px}
+.dialog p{color:#6c675d;line-height:1.5;font-size:14px;margin:0 0 16px}
+</style></head><body>
+<header data-wb-node="header"><h1 data-wb-node="heading">林间营地</h1><span class="fx" data-wb-node="unsupported-fx">特效标记</span><output data-wb-node="collected" aria-label="已收取">0</output><button data-wb-node="collect">收取木材</button></header>
+<main data-wb-node="camp-page">
+<article class="card" data-wb-node="card-a">
+<div class="art"><img data-wb-node="art-a" alt="林间小屋插画" src="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27344%27 height=%2736%27%3E%3Crect width=%27344%27 height=%2736%27 fill=%27%23dbe3e7%27/%3E%3Cpath d=%27M0 30l60-18 40 10 52-16 70 20 122-10v20H0z%27 fill=%27%23b9c8cf%27/%3E%3C/svg%3E"></div>
+<h2 data-wb-node="title-a">林间小屋</h2>
+<p data-wb-node="desc-a">安静的营地住所，可容纳 4 位伙伴。</p>
+<div class="metrics" data-wb-node="slot-a"><span data-wb-node="slot-a-note">统计待接入</span></div>
+<div class="card-actions" data-wb-node="actions-a"><button class="primary" data-wb-node="view-a">查看小屋</button><span class="hint" data-wb-node="hint-a">今日可住</span></div>
+</article>
+<article class="card" data-wb-node="card-b">
+<div class="art"><img data-wb-node="art-b" alt="木工作坊插画" src="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27344%27 height=%2736%27%3E%3Crect width=%27344%27 height=%2736%27 fill=%27%23dbe3e7%27/%3E%3Cpath d=%27M0 30l60-18 40 10 52-16 70 20 122-10v20H0z%27 fill=%27%23b9c8cf%27/%3E%3C/svg%3E"></div>
+<h2 data-wb-node="title-b">木工作坊</h2>
+<p data-wb-node="desc-b">将收集的木材加工成营地设施。</p>
+<div class="metrics" data-wb-node="slot-b"><span data-wb-node="slot-b-note">统计待接入</span></div>
+<div class="card-actions" data-wb-node="actions-b"><button class="primary" data-wb-node="collect-b">收取木材</button><span class="hint" data-wb-node="hint-b">每批 +1</span></div>
+</article>
+</main>
+<section class="stats" data-wb-node="stats">
+<h2 data-wb-node="stats-title">营地统计</h2>
+<div class="stat-row" data-wb-node="stats-row">
+<div class="stat" data-wb-node="wood-stat"><span data-wb-node="wood-label">木材</span><strong data-wb-node="wood-value">120</strong></div>
+<div class="stat" data-wb-node="people-stat"><span data-wb-node="people-label">伙伴</span><strong data-wb-node="people-value">4 / 8</strong></div>
+</div>
+</section>
+<div class="modal" data-wb-node="detail-modal" role="dialog" aria-label="小屋详情" hidden>
+<section class="dialog" data-wb-node="dialog">
+<h2 data-wb-node="dialog-title">小屋详情</h2>
+<p data-wb-node="dialog-description">等级 2 · 舒适度 80。升级后增加两个床位。</p>
+<button data-wb-node="close-a">关闭详情</button>
+</section>
+</div>
+<script>
+(() => {
+let collected = 0, mode = 'preview';
+const $ = id => document.getElementById(id);
+const byNode = id => document.querySelector('[data-wb-node="' + id + '"]');
+function navigate({pageId, stateId}) {
+  byNode('detail-modal').hidden = !(pageId === 'camp' && stateId === 'detail');
+  return Promise.resolve();
+}
+window.WorkbenchPrototype = {navigate, setMode(next) { mode = next; return Promise.resolve(); }};
+function collect() { collected += 1; byNode('collected').textContent = String(collected); }
+byNode('collect').addEventListener('click', collect);
+byNode('collect-b').addEventListener('click', collect);
+byNode('view-a').addEventListener('click', () => window.WorkbenchPrototype.navigate({pageId: 'camp', stateId: 'detail'}));
+byNode('close-a').addEventListener('click', () => window.WorkbenchPrototype.navigate({pageId: 'camp', stateId: 'default'}));
+})();
+</script></body></html>
+
+
