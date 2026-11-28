@@ -1,0 +1,18 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>AI 拆分建议 · 失配样例</title></head><body>
+<script id="workbench-proposal" type="application/json">
+{
+  "proposals":[
+    {"kind":"component","name":"有效卡片","source":{"prototypeId":"manual-kit","pageId":"home","stateId":"default","nodeIds":["action"]},"reason":"匹配当前原型"},
+    {"kind":"component","name":"错误原型","source":{"prototypeId":"other-kit","pageId":"home","stateId":"default","nodeIds":["card"]},"reason":"原型 ID 不匹配"},
+    {"kind":"component","name":"错误页面","source":{"prototypeId":"manual-kit","pageId":"missing-page","stateId":"default","nodeIds":["card"]},"reason":"页面不存在"},
+    {"kind":"component","name":"错误状态","source":{"prototypeId":"manual-kit","pageId":"home","stateId":"missing-state","nodeIds":["card"]},"reason":"状态不存在"},
+    {"kind":"component","name":"缺失节点","source":{"prototypeId":"manual-kit","pageId":"home","stateId":"default","nodeIds":["card","ghost-node"]},"reason":"节点缺失"},
+    {"kind":"reuse","reuse":{"draftId":"draft-ghost","source":{"prototypeId":"manual-kit","pageId":"home","stateId":"default","nodeIds":["card"]}},"reason":"组件稿不存在"},
+    {"kind":"reuse","reuse":{"draftId":"draft-card","source":{"prototypeId":"manual-kit","pageId":"missing-page","stateId":"default","nodeIds":["card"]}},"reason":"复用来源页面不存在"},
+    {"kind":"reference","reference":{"ownerDraftId":"draft-ghost","targetDraftId":"draft-shared","slotNodeId":"own"},"reason":"使用方组件稿不存在"},
+    {"kind":"reference","reference":{"ownerDraftId":"draft-card","targetDraftId":"draft-shared","slotNodeId":"ghost-slot"},"reason":"引用位置不存在"},
+    {"kind":"group","group":{"name":"缺成员组","memberIds":["draft-card","draft-ghost"]},"reason":"成员组件稿不存在"}
+  ]
+}
+</script>
+<p>本文件仅供导入校验。</p></body></html>

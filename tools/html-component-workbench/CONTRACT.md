@@ -12,6 +12,7 @@
 - 提取任务独占新增 `src/features/extraction.js`、可选 `extraction.css`、`src/bridge-features/extraction.js`、`tests/extraction.spec.cjs`。
 - 关系任务独占新增 `src/features/relations.js`、可选 `relations.css`、`tests/relations.spec.cjs`。
 - 文件任务独占新增 `src/features/files.js`、可选 `files.css`、`tests/files.spec.cjs`。
+- 建议导入任务独占新增 `src/features/proposal.js`、可选 `proposal.css`、`tests/proposal.spec.cjs`；其校验只读当前项目副本，不使用 runCommand/registerGuard/host.request，测试样例放 `tests/fixtures/proposal/`。
 - 不并发修改 app/shell/build/本文。需要扩展 Interface 时先通知集成方；测试样例各自放 `tests/fixtures/<任务>/`，不改基础受控样例。
 - 共用模块为 `src/features/common.js` 与 `common.css`（按文件名排序先于 `extraction/files/relations` 加载）：只定义 `window.WorkbenchCommon` 的惰性解析、沙箱预览文档、缩放控件、引用图/槽位重叠/有效映射判定，不注册 feature；特性模块不得各自复制这些实现。
 - 构建按文件名排序自动收集 features 的 JS/CSS 和 bridge-features JS，内联为 `dist/workbench.html`（可直接 file:// 打开）。features 都是普通 JS IIFE，不用 import、依赖和运行服务。
@@ -124,9 +125,16 @@ ctx 为同一个小 Interface：
 
 特性模块只通过此 Interface 更新和重渲染；不编辑 app/shell，不访问私有状态。组件 TAB 默认 `view=relations`；提取模块负责组件列表/独立预览，关系模块负责关系中心/右操作，文件模块负责工具栏载入/保存/改版入口。任何错误显示原因、保留旧成果，不降级为假成功。
 
-## AI 拆分建议文件（已确认目标，尚未实现）
+## AI 拆分建议文件（#36 导入已实现，预览与落地待后续任务）
 
-本节是**下一层接入的设计契约**，不是 v1 已实现能力。它只新增一份 AI 可产出的建议文件格式和「预览→接受才落地」语义；不改 v1 项目 `format/formatVersion`、字段、关系规则或接口。实现前须先把本节完整核对，再按 /to-spec 进入实现。
+本节是**下一层接入的设计契约**：其中建议文件的解析、逐条校验与候选载入（#36）已实现，见「导入实现与 Interface」；「预览→接受才落地」的预览与落地仍待后续任务。它只新增一份 AI 可产出的建议文件格式和「预览→接受才落地」语义；不改 v1 项目 `format/formatVersion`、字段、关系规则或接口。实现前须先把本节完整核对，再按 /to-spec 进入实现。
+
+### 导入实现与 Interface（#36 已实现）
+
+- proposal 特性只读使用 Interface 的 `getProject()` 副本、`notify()` 与自身独占 `slots`（toolbar 提供「载入建议/清除建议」入口，right 呈现候选列表）；不调用 `updateProject/replaceProject/runCommand/registerGuard`，不发 `host.request`、不订阅宿主事件、不注册桥接命令。
+- 候选状态只存在于该特性自身的会话内存（建议层），不写入 v1 项目结构；导入不产生 `confirmed`、不生成任何新 draft/group/reference/mapping ID，也不改变画布与当前页面/状态。
+- 逐条校验分三态：`有效`（结构合法且 `source`/组件稿引用与当前原型/项目匹配）、`不可用`（结构合法但原型 ID、页面/状态、稳定节点或既有组件稿引用与当前项目不匹配）、`非法`（结构本身无效并附原因）；失配项单独标记，不整批连坐。顶层 `name` 仅对 component 生效，其余 kind 忽略；`group.id` 由工作台在落地时生成。
+- 文件级校验：唯一 `script#workbench-proposal[type="application/json"]`、惰性 JSON 转义与项目文件一致、文件大小上限 4 MB、顶层必须是非空 `proposals` 数组；任何失败明确报错并保留当前项目、画布与已载入候选列表。
 
 ### 目标与边界
 
