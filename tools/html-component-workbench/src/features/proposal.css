@@ -1,0 +1,16 @@
+.proposal-panel{padding:12px 0 0}
+.proposal-panel h2{font-size:15px;margin:0 0 10px}
+.proposal-help{font-size:12px;color:var(--quiet);line-height:1.7;margin:6px 0}
+.proposal-list{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.proposal-list li{border:1px solid var(--line);border-radius:7px;padding:8px 9px;background:#f9fafb;font-size:12px;line-height:1.65}
+.proposal-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.proposal-kind{font-size:10px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--quiet);background:var(--panel);white-space:nowrap}
+.proposal-status{font-size:10px;padding:2px 7px;border-radius:999px;font-weight:600;white-space:nowrap}
+.proposal-status[data-status="valid"]{background:#e7f4ea;border:1px solid #b7ddc1;color:#1c6b38}
+.proposal-status[data-status="unavailable"]{background:#fdf1dc;border:1px solid #e7c98c;color:#8a5a12}
+.proposal-status[data-status="invalid"]{background:#fdf1ef;border:1px solid #e0b7b1;color:#9c2f24}
+.proposal-summary{display:block;margin:6px 0 2px;font-weight:600;overflow-wrap:anywhere}
+.proposal-reason{margin:2px 0;color:var(--quiet);overflow-wrap:anywhere}
+.proposal-issue{margin:4px 0 0;color:#9c2f24;overflow-wrap:anywhere}
+.proposal-list li[data-status="invalid"]{border-color:#e0b7b1;background:#fdf8f7}
+.proposal-list li[data-status="unavailable"]{border-color:#e7c98c;background:#fefbf4}

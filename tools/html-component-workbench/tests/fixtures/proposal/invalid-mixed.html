@@ -1,0 +1,22 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>AI 拆分建议 · 非法条目样例</title></head><body>
+<script id="workbench-proposal" type="application/json">
+{
+  "proposals":[
+    {"kind":"component","name":"有效卡片","source":{"prototypeId":"manual-kit","pageId":"home","stateId":"default","nodeIds":["action"]},"reason":"结构合法的有效样例"},
+    {"kind":"section","name":"未知类型","source":{"prototypeId":"manual-kit","pageId":"home","stateId":"default","nodeIds":["action"]},"reason":"未知类型应被单独标出"},
+    {"kind":"component","source":{"prototypeId":"manual-kit","pageId":"home","stateId":"default","nodeIds":["action"]},"reason":"缺少名称"},
+    {"kind":"component","name":"空节点","source":{"prototypeId":"manual-kit","pageId":"home","stateId":"default","nodeIds":[]},"reason":"节点列表为空"},
+    {"kind":"component","name":"重复节点","source":{"prototypeId":"manual-kit","pageId":"home","stateId":"default","nodeIds":["card","card"]},"reason":"节点重复"},
+    {"kind":"component","name":"无理由"},
+    {"kind":"reference","reason":"缺少引用信息"},
+    {"kind":"reference","reference":{"ownerDraftId":"draft-card","targetDraftId":"draft-card","slotNodeId":"own"},"reason":"引用指向自身"},
+    {"kind":"group","reason":"缺少归组信息"},
+    {"kind":"group","group":{"memberIds":[]},"reason":"成员为空"},
+    {"kind":"group","group":{"primaryId":"draft-card","memberIds":["draft-variant"]},"reason":"主体不在成员中"},
+    {"kind":"reuse","reuse":{"draftId":"draft-card"},"reason":"缺少复用来源"},
+    {"__proto__":{},"kind":"component","name":"危险键","source":{"prototypeId":"manual-kit","pageId":"home","stateId":"default","nodeIds":["action"]},"reason":"含不安全资料键"},
+    "不是对象"
+  ]
+}
+</script>
+<p>本文件仅供导入校验。</p></body></html>

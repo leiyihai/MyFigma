@@ -1,0 +1,13 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>AI 拆分建议 · 合法样例</title></head><body>
+<script id="workbench-project" type="application/json">{proposal 载入只解析 workbench-proposal 区块，本损坏区块必须被忽略</script>
+<script id="workbench-proposal" type="application/json">
+{
+  "proposals":[
+    {"kind":"component","name":"新卡片","source":{"prototypeId":"manual-kit","pageId":"home","stateId":"default","nodeIds":["action"]},"reason":"营地操作入口，适合独立换皮。含 \u003c/script\u003e 的转义说明"},
+    {"kind":"group","name":"新归组","group":{"primaryId":"draft-variant","memberIds":["draft-variant","draft-card"]},"reason":"同结构变体归组，主体为变体"},
+    {"kind":"reference","reference":{"ownerDraftId":"draft-card","targetDraftId":"draft-shared","slotNodeId":"own"},"reason":"卡片内嵌共享数值，复用显式结构"},
+    {"kind":"reuse","reuse":{"draftId":"draft-card","source":{"prototypeId":"manual-kit","pageId":"home","stateId":"default","nodeIds":["card"]}},"reason":"复用已有卡片来源映射"}
+  ]
+}
+</script>
+<p>本文件仅供导入校验，不包含原型或项目资料。</p></body></html>
